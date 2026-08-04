@@ -1,0 +1,27 @@
+{
+  "name": "municipal_backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "xian-start": "node index.js",
+    "xian": "nodemon index.js",
+    "migrate": "node migrate.js",
+    "seed": "node seed.js",
+    "seed:demo": "node seedDemo.js",
+    "create:model": "node create.js model",
+    "create:controller": "node create.js controller"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "express-session": "^1.17.3",
+    "inquirer": "^9.2.15",
+    "multer": "^2.2.0",
+    "mysql2": "^3.9.2",
+    "nodemailer": "^9.0.3",
+    "sequelize": "^6.37.3"
+  }
+}

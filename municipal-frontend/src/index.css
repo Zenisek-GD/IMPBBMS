@@ -1,0 +1,269 @@
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+/* Dark mode is driven by a class on <html>, not by the OS query alone — the
+   theme belongs to the signed-in account, so the app has to be able to force it
+   either way regardless of what the operating system prefers. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── PALETTE ──────────────────────────────────────────────────────────────────
+   Every colour is a variable so the whole interface flips by swapping one set
+   of definitions. Token *names* are unchanged from the original theme, which is
+   what lets several hundred existing utility classes adapt without being
+   rewritten — `text-navy` still means "the strong foreground colour", it simply
+   resolves to near-white once the surface behind it is dark.
+
+   Three families do the heavy lifting:
+     navy    strong foreground — headings, emphasised text, active nav
+     accent  filled interactive surfaces — primary buttons, active tabs, bars
+     brand   the chrome that stays dark in both themes — top bar, auth panel
+
+   Splitting accent out of navy matters: a filled button cannot simply invert
+   with its own label, or it disappears. */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  --color-canvas: #0f1113;
+  --color-surface: #17191d;
+  --color-surface-raised: #1d2024;
+  --color-sidebar: #131519;
+
+  --color-border-muted: #292d33;
+  --color-border-strong: #383d45;
+
+  --color-navy: #f2f4f7;
+  --color-navy-tint: rgba(232, 236, 243, 0.09);
+  --color-text-primary: #f2f4f7;
+  --color-text-secondary: #b3b9c4;
+  --color-text-faint: #7d848f;
+
+  /* A filled control in dark mode reads as light-on-dark, so accent and its
+     foreground swap rather than darkening further. */
+  --color-accent: #e8ecf3;
+  --color-accent-fg: #14171c;
+
+  --color-brand: #1a1d21;
+  --color-brand-fg: #f2f4f7;
+  --color-topnav-link: #8c939f;
+  --color-topnav-link-alt: #f2f4f7;
+
+  --color-chip: #23282f;
+  --color-track: #2b3037;
+
+  /* Lifted, not darkened: the status colours have to carry on a dark surface,
+     and the light-mode versions fail contrast against it. */
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+
+  /* A black drop shadow is invisible on a dark canvas, so elevation is carried
+     by a deeper, wider shadow rather than a tighter one. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -6px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 16px -6px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.45), 0 18px 40px -12px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 2px 4px rgba(0, 0, 0, 0.45), 0 18px 40px -12px rgba(0, 0, 0, 0.6);
+
+  color-scheme: dark;
+}
+
+/* ── ONE LEVEL OF INDIRECTION, NOT TWO ───────────────────────────────────────
+   The utilities point straight at `--color-*`, and the light/dark blocks above
+   redefine those same names. There is no second `--t-*` layer in between.
+
+   That indirection is why dark mode silently half-worked. The theme block used
+   to read `--color-surface: var(--t-surface)` under `@theme inline`, so every
+   utility emitted `background-color: var(--t-surface)` — a second hop that
+   Chrome resolved against the light values on every element below <html>. The
+   token read back correctly from getComputedStyle while the painted colour
+   stayed white, so card headings came out near-white on white at 1.1:1. Rules
+   written directly on <html> did work, which made it look like an inheritance
+   problem rather than a substitution one.
+
+   Redefining `--color-*` under `.dark` is the pattern Tailwind v4 documents,
+   and it is one substitution deep, so there is nothing to resolve incorrectly.
+   Token *names* are unchanged, so the several hundred existing utility classes
+   are untouched — `text-navy` still means "the strong foreground colour". */
+@theme {
+  --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --color-canvas: #eef0f2;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-sidebar: #f6f7f8;
+
+  --color-border-muted: #e3e5e9;
+  --color-border-strong: #d3d6dc;
+
+  --color-navy: #14171c;
+  --color-navy-tint: rgba(0, 30, 64, 0.06);
+  --color-text-primary: #14171c;
+  --color-text-secondary: #4b5058;
+  --color-text-faint: #868c96;
+
+  --color-accent: #001e40;
+  --color-accent-fg: #ffffff;
+
+  --color-brand: #24262b;
+  --color-brand-fg: #f4f5f7;
+  --color-topnav-link: #9aa0ab;
+  --color-topnav-link-alt: #f4f5f7;
+
+  --color-chip: #e6ecf6;
+  --color-track: #e5e7eb;
+  --color-success: #1f7a35;
+  --color-warning: #b45309;
+  --color-danger: #b42318;
+
+  /* Softer, more generous corners than the original — the single biggest
+     contributor to the reference's feel. */
+  --radius-sm: 0.375rem;
+  --radius-DEFAULT: 0.625rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.125rem;
+
+  --shadow-sm: 0 1px 2px rgba(16, 20, 28, 0.04);
+  --shadow-DEFAULT: 0 1px 2px rgba(16, 20, 28, 0.04), 0 6px 16px -6px rgba(16, 20, 28, 0.1);
+  --shadow-md: 0 1px 2px rgba(16, 20, 28, 0.04), 0 6px 16px -6px rgba(16, 20, 28, 0.1);
+  --shadow-lg: 0 2px 4px rgba(16, 20, 28, 0.05), 0 18px 40px -12px rgba(16, 20, 28, 0.18);
+  --shadow-xl: 0 2px 4px rgba(16, 20, 28, 0.05), 0 18px 40px -12px rgba(16, 20, 28, 0.18);
+}
+
+/* The page background is painted on <html>, not <body>.
+   When <html> has no background of its own, CSS propagates <body>'s background
+   up to the viewport canvas. Chrome resolves that propagated value specially,
+   and it does not re-resolve when the custom property behind it changes — so a
+   body background of `var(--color-canvas)` stayed on the light colour after the
+   theme flipped, and showed as a pale band when the page was overscrolled.
+   <html> carries the `.dark` class itself, so painting there sidesteps the
+   propagation rule entirely. */
+html {
+  background: var(--color-canvas);
+  /* Set here and inherited rather than declared on <body>, for the same reason
+     as the background above: declarations on <body> that resolve a custom
+     property were not re-resolving on a theme flip, leaving default body text
+     on the light foreground colour. */
+  color: var(--color-text-secondary);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  /* 13px base. The interface is dense by design — a procurement officer scans
+     tables all day, and the previous 14–16px scale pushed half of every table
+     off-screen. */
+  font-size: 13px;
+  line-height: 1.5;
+  color: inherit;
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+/* Colour transitions only. Animating `all` would drag layout properties into
+   the transition and make every re-render feel laggy. */
+body,
+aside,
+header,
+main,
+section,
+table,
+input,
+select,
+textarea,
+button {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Scrollbars that belong to the theme rather than to the operating system. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* One visible focus treatment everywhere, so keyboard users get a consistent
+   signal instead of each control inventing its own. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Native selects render their popup with the OS palette; this at least keeps
+   the closed control and its options aligned with the theme. */
+select option {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+/* ── SURFACE TEXTURE ──────────────────────────────────────────────────────────
+   Three utilities, used only on the two pages a visitor sees before they are
+   signed in. Everything past the login stays deliberately flat — texture is for
+   orientation, and an officer working a table all day does not need it.
+
+   All of it sits on the brand colour, which stays dark in both themes, so none
+   of it needs a light and dark variant. */
+
+/* A fine engineering grid. Barely visible on its own; what it does is stop a
+   large dark panel reading as an empty rectangle. */
+.pattern-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* An off-centre wash that gives the panel a light source. Sits above the grid
+   and below the content. */
+.hero-wash {
+  position: relative;
+  isolation: isolate;
+}
+.hero-wash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60rem 30rem at 15% -10%, rgba(120, 160, 255, 0.16), transparent 60%),
+    radial-gradient(40rem 24rem at 95% 110%, rgba(120, 160, 255, 0.1), transparent 65%);
+}
+
+/* Figures line up column-to-column when they are tabular. On a page whose whole
+   point is comparing peso amounts, proportional digits make the numbers jitter
+   against each other. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}

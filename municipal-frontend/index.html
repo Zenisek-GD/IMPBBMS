@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CivicBid</title>
+
+    <!-- Applies the theme before the first paint.
+         React can only set the class from an effect, which runs *after* the
+         browser has already painted the page in the default theme. That costs a
+         visible flash of light on every load for a dark-mode user, and it also
+         means the whole tree has to be re-styled a frame later — which the
+         browser does not always do reliably for elements that already existed,
+         leaving dark text stranded on light cards.
+         Reading the cached preference here and setting the class up front means
+         the very first paint is already correct and nothing has to be redone.
+         The account's stored setting still wins once /auth/me resolves; this is
+         only the cache that avoids the flash in between. -->
+    <script>
+      ;(function () {
+        try {
+          var keys = Object.keys(localStorage).filter(function (k) {
+            return k.indexOf('civicbid.theme.') === 0
+          })
+          // A signed-in user's own key is preferred over the anonymous one.
+          var owned = keys.filter(function (k) {
+            return k !== 'civicbid.theme.public'
+          })
+          var pref = localStorage.getItem(owned[0] || 'civicbid.theme.public')
+          var dark =
+            pref === 'dark' ||
+            ((!pref || pref === 'system') &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* Blocked storage only costs the flash — never worth failing over. */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
