@@ -2,8 +2,20 @@
 // Section 5.2 and the Section 13 requirement for centralised state handling.
 //
 //   draft → pendingDepartmentHeadEndorsement → pendingBudgetCertification
-//         → pendingSecretariatReview → pendingHopeApproval → approved
+//         → pendingTreasuryCertification → pendingSecretariatReview
+//         → pendingHopeApproval → approved
 // Any review stage may return the requisition to the requester.
+//
+// The treasury stage implements the second half of LGC Sec. 344. The Budget
+// Officer certifies that an appropriation exists and obligates it; the Treasurer
+// then certifies that the cash to honour it is actually in the treasury. An
+// appropriation can be fully intact while collections have not come in, so the
+// two certifications are not interchangeable and cannot be merged.
+//
+// It sits *after* budget certification because there is nothing to certify cash
+// against until the amount has been obligated — and *before* Secretariat review,
+// so the BAC never begins procuring against a requisition the treasury cannot
+// fund.
 
 export const PR_TRANSITIONS = {
   submit: {
@@ -20,9 +32,15 @@ export const PR_TRANSITIONS = {
   },
   certify: {
     from: ["pendingBudgetCertification"],
-    to: "pendingSecretariatReview",
+    to: "pendingTreasuryCertification",
     permission: "pr.certify",
-    label: "Certify funding",
+    label: "Certify appropriation",
+  },
+  certifyCash: {
+    from: ["pendingTreasuryCertification"],
+    to: "pendingSecretariatReview",
+    permission: "pr.certifyCash",
+    label: "Certify cash availability",
   },
   review: {
     from: ["pendingSecretariatReview"],
@@ -40,6 +58,7 @@ export const PR_TRANSITIONS = {
     from: [
       "pendingDepartmentHeadEndorsement",
       "pendingBudgetCertification",
+      "pendingTreasuryCertification",
       "pendingSecretariatReview",
       "pendingHopeApproval",
     ],
@@ -53,6 +72,7 @@ export const PR_TRANSITIONS = {
 const RETURN_PERMISSION_BY_STATE = {
   pendingDepartmentHeadEndorsement: "pr.endorse",
   pendingBudgetCertification: "pr.certify",
+  pendingTreasuryCertification: "pr.certifyCash",
   pendingSecretariatReview: "pr.review",
   pendingHopeApproval: "pr.approve",
 };

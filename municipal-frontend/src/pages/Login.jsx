@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from 'react-router-dom'
-import { Globe, ArrowRight, AlertCircle, MailWarning, FileCheck2 } from 'lucide-react'
+import { Globe, ArrowRight, AlertCircle, MailWarning } from 'lucide-react'
 import { useAuth } from '../context/useAuth'
 import { landingRouteForRole } from '../config/roleLanding'
 import { loginSchema } from '../config/validation'
@@ -96,45 +96,23 @@ export default function Login() {
         </button>
       </form>
 
-      {/* The way back out, and the way in for a bidder who does not have an
-          account. Sign-in is a detour from the portal, not the entrance to it, so
-          anyone who arrives here by mistake needs an obvious route onward. */}
-      <div className="mt-7 flex flex-col gap-2.5 border-t border-border-muted pt-5">
-        <Link
-          to="/bidder-registration"
-          className="group flex items-start gap-2.5 rounded-md border border-border-muted bg-surface p-3 transition-colors hover:border-border-strong"
-        >
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-chip text-navy">
-            <FileCheck2 size={14} />
-          </span>
-          <span className="min-w-0">
-            <span className="flex items-center gap-1 text-[12.5px] font-medium text-navy">
-              Bidder without an account?
-              <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
-            </span>
-            <span className="mt-0.5 block text-[11.5px] leading-snug text-text-faint">
-              Submit your accreditation requirements. Accounts are issued by the BAC after review.
-            </span>
-          </span>
-        </Link>
-
+      {/* The way back out — and nothing else.
+          There is deliberately no route to bidder accreditation from this page.
+          Sign-in is for people who already hold an account, and an accreditation
+          link sitting under the password field reads as "register here", which
+          is precisely what this system does not do: a bidder submits their
+          requirements on the public portal, the BAC Secretariat verifies them,
+          and Admin/IT issues the account. Offering it as a sign-in alternative
+          misrepresents all three of those steps. */}
+      <div className="mt-8 border-t border-border-muted pt-5 text-center">
         <Link
           to="/"
-          className="group flex items-start gap-2.5 rounded-md border border-border-muted bg-surface p-3 transition-colors hover:border-border-strong"
+          className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-text-secondary transition-colors hover:text-navy"
         >
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-chip text-navy">
-            <Globe size={14} />
-          </span>
-          <span className="min-w-0">
-            <span className="flex items-center gap-1 text-[12.5px] font-medium text-navy">
-              Browse public procurement records
-              <ArrowRight size={13} className="transition-transform group-hover:translate-x-0.5" />
-            </span>
-            <span className="mt-0.5 block text-[11.5px] leading-snug text-text-faint">
-              Open to everyone — no account needed.
-            </span>
-          </span>
+          <Globe size={14} />
+          Browse public procurement records
         </Link>
+        <p className="mt-1 text-[11.5px] text-text-faint">Open to everyone — no account needed.</p>
       </div>
     </AuthLayout>
   )

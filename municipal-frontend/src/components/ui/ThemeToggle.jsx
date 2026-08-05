@@ -5,8 +5,9 @@ import { useTheme } from '../../context/useTheme'
 // than this needs, and "system" is still reachable — it is simply the default
 // nobody has overridden yet.
 //
-// `tone="brand"` is for placement on the dark top bar, which stays dark in both
-// themes and therefore needs its own foreground colours.
+// `tone="brand"` is for placement on the dark internal top bar and `tone="header"`
+// for the green public header. Both stay dark/coloured in either theme, so they
+// need their own foreground colours rather than the themed defaults.
 export default function ThemeToggle({ tone = 'default', className = '' }) {
   const { resolved, toggle } = useTheme()
   const isDark = resolved === 'dark'
@@ -15,6 +16,7 @@ export default function ThemeToggle({ tone = 'default', className = '' }) {
     default:
       'border border-border-muted bg-surface text-text-secondary hover:text-navy hover:border-border-strong',
     brand: 'text-topnav-link hover:bg-white/10 hover:text-topnav-link-alt',
+    header: 'text-header-muted hover:bg-white/15 hover:text-header-fg',
   }
 
   return (

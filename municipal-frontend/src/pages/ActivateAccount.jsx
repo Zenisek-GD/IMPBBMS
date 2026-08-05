@@ -171,8 +171,11 @@ export default function ActivateAccount() {
               'This activation link is invalid, already used, or has expired. Activation links can be used once and expire within 48 hours of being issued.'}
           </p>
           <p className="text-[12.5px] leading-relaxed text-text-faint">
-            Ask the BAC Secretariat to send a new invitation to your registered email address. For
-            your protection, an invitation can only be sent to the address your accreditation was
+            {/* Admin/IT, not the Secretariat: resending an invitation needs
+                `bidders.createAccount`, which only Admin/IT holds. Sending the
+                bidder to the office that cannot help them wastes a round trip. */}
+            Ask Admin/IT to send a new invitation to your registered email address. For your
+            protection, an invitation can only be sent to the address your accreditation was
             approved for.
           </p>
           <Link
@@ -314,7 +317,7 @@ export default function ActivateAccount() {
           type="text"
           autoComplete="name"
           placeholder={account?.displayName}
-          hint="How your name appears in the system. Leave blank to keep what the BAC Secretariat entered."
+          hint="How your name appears in the system. Leave blank to keep what Admin/IT entered when your account was created."
           error={errors.displayName?.message}
           registration={register('displayName')}
         />

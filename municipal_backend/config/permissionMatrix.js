@@ -8,17 +8,35 @@ export const PERMISSIONS = [
 
   // Held separately from users.manage on purpose. Creating a bidder's account is
   // not general user administration — it is the act that converts an approved
-  // accreditation into system access, and it belongs to the officials who
-  // reviewed that accreditation. Granting it through users.manage would mean the
-  // only way to let the BAC Secretariat invite an approved bidder was to also let
-  // them create Mayor and Treasurer accounts.
+  // accreditation into system access.
+  //
+  // It is deliberately NOT held by the office that performs the accreditation.
+  // The BAC Secretariat decides whether a bidder's requirements are complete and
+  // valid; Admin/IT decides whether that approval becomes a working credential.
+  // One office judging the papers and then issuing the access on its own say-so
+  // is a single point at which a bidder could be let into the system without
+  // anyone else having seen the file — the same separation-of-duties argument
+  // that keeps payment.certify apart from payment.release.
   {
     key: "bidders.createAccount",
     module: "administration",
-    description: "Create and invite bidder accounts for approved registrations",
+    description: "Create and invite bidder accounts for registrations the BAC has approved",
   },
   { key: "departments.manage", module: "administration", description: "Create and edit departments" },
   { key: "settings.manage", module: "administration", description: "Change system configuration" },
+
+  // Publishing to the public portal is its own act. An announcement is the one
+  // thing in this system that is written by an official and read by the whole
+  // municipality without any record behind it to check it against — every other
+  // public page is a projection of an approved record. That makes it worth a
+  // permission of its own rather than folding it into settings.manage, so the
+  // office that advertises procurement can post without also being able to
+  // reconfigure the system.
+  {
+    key: "announcements.manage",
+    module: "administration",
+    description: "Write, publish, and withdraw public announcements",
+  },
 
   // Annual Procurement Plan
   { key: "app.view", module: "app", description: "View APP entries" },
@@ -33,7 +51,27 @@ export const PERMISSIONS = [
   { key: "pr.view", module: "pr", description: "View purchase requisitions" },
   { key: "pr.create", module: "pr", description: "Create and submit purchase requisitions" },
   { key: "pr.endorse", module: "pr", description: "Endorse requisitions as department head" },
-  { key: "pr.certify", module: "pr", description: "Certify funding on requisitions" },
+  // ── The two halves of LGC Sec. 344 ────────────────────────────────────────
+  // "No money shall be disbursed unless the local budget officer certifies to
+  // the existence of appropriation that has been legally made for the purpose,
+  // the local accountant has obligated said appropriation, and the local
+  // treasurer certifies to the availability of funds for the purpose."
+  //
+  // Those are two different officers answering two different questions, and the
+  // system previously asked only the first. `pr.certify` is the Budget Officer:
+  // is there an appropriation, and is there room left under it? That
+  // certification also writes the Obligation. `pr.certifyCash` is the Treasurer:
+  // is the money actually in the treasury to pay it?
+  //
+  // An appropriation can exist in full while the cash to honour it has not been
+  // collected — which is precisely the situation the Treasurer's signature
+  // exists to catch, and why one permission cannot stand for both.
+  { key: "pr.certify", module: "pr", description: "Certify existence of appropriation on requisitions" },
+  {
+    key: "pr.certifyCash",
+    module: "pr",
+    description: "Certify availability of funds in the treasury (LGC Sec. 344)",
+  },
   { key: "pr.review", module: "pr", description: "Review requisitions as Secretariat" },
   { key: "pr.approve", module: "pr", description: "Give final approval on requisitions" },
 
@@ -90,11 +128,14 @@ export const PERMISSIONS = [
 export const ROLE_PERMISSIONS = {
   systemAdministrator: [
     "users.manage",
-    // The administrator can also invite a bidder, so onboarding is not blocked
-    // when no Secretariat member is available.
+    // Admin/IT is the ONLY holder of this. A bidder's account comes into
+    // existence here and nowhere else, after the BAC Secretariat has approved
+    // the accreditation — see the note on the permission itself.
     "bidders.createAccount",
     "departments.manage",
     "settings.manage",
+    // System updates and maintenance notices are the administrator's to post.
+    "announcements.manage",
     "audit.viewLogs",
   ],
 
@@ -127,14 +168,19 @@ export const ROLE_PERMISSIONS = {
     "budget.view",
   ],
 
-  // The Secretariat reviews bidder registrations, so it is also the office that
-  // turns an approved one into an account — the decision and the act that follows
-  // from it stay with the same officials, and both are audited against them.
+  // The Secretariat reviews bidder registrations and decides whether the
+  // requirements are complete and valid. It does NOT hold
+  // "bidders.createAccount": approving an accreditation and issuing the
+  // credential that follows from it are two acts by two offices, so a verified
+  // registration is handed to Admin/IT rather than turned into access here.
+  // `bidding.publish` is what admits them to this queue.
   bacSecretariat: [
     "app.view", "app.consolidate",
     "pr.view", "pr.review",
     "bidding.view", "bidding.publish",
-    "bidders.createAccount",
+    // The office that advertises a procurement is the office that announces it,
+    // and it is the same office that will review whoever answers the call.
+    "announcements.manage",
     "contract.view", "contract.draft",
     "budget.view",
   ],
@@ -172,7 +218,19 @@ export const ROLE_PERMISSIONS = {
   // The Treasurer holds the funds and releases them against a certified
   // voucher. Deliberately NOT granted "payment.certify", for the same reason
   // in the opposite direction.
-  municipalTreasurer: ["payment.view", "payment.release", "budget.view", "audit.viewAll"],
+  // The Treasurer holds the cash. They certify it is there before a requisition
+  // proceeds (LGC Sec. 344), and they release it at the end. Deliberately NOT
+  // granted "pr.certify": certifying that an appropriation exists is the Budget
+  // Officer's act, and one officer answering both questions collapses the
+  // control into a single signature.
+  municipalTreasurer: [
+    "pr.view",
+    "pr.certifyCash",
+    "payment.view",
+    "payment.release",
+    "budget.view",
+    "audit.viewAll",
+  ],
 
   vendor: ["bidding.submitBid", "contract.sign", "delivery.submitInvoice"],
 

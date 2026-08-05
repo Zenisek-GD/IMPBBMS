@@ -242,8 +242,8 @@ export default function ForgotPassword() {
 
           <p className="border-t border-border-muted pt-4 text-[11.5px] leading-relaxed text-text-faint">
             No code arriving? Check your spam folder, and check the address above for typos. Accounts
-            that have never been activated cannot be recovered this way — ask the BAC Secretariat for
-            a new invitation instead.
+            that have never been activated cannot be recovered this way — ask Admin/IT for a new
+            invitation instead.
           </p>
         </div>
       </AuthLayout>

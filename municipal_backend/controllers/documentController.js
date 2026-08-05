@@ -24,10 +24,15 @@ const accessFor = async (req, entityRef, entityId) => {
     case "vendor": {
       const isOwner = ownVendor?.id === Number(entityId);
       return {
+        // The bidder can still see what the office holds on file for them.
         read: isOwner || has("bidding.publish") || has("bidding.view") || has("audit.viewAll"),
-        // A supplier uploads their own; the Secretariat does not upload on
-        // their behalf, so write is owner-only.
-        write: isOwner,
+        // Write is the REVIEWER's, not the bidder's — the reverse of what it used
+        // to be. Accreditation documents are submitted on paper at the BAC
+        // office, so the only files that should ever land on a vendor record are
+        // the ones an officer scanned in from that counter submission. A bidder
+        // who could still upload here would have a route back to submitting
+        // requirements through the website, which is exactly what was removed.
+        write: has("bidding.publish"),
       };
     }
 

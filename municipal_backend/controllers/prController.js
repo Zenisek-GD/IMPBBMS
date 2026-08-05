@@ -25,6 +25,7 @@ const withIncludes = {
     { model: AppEntry, as: "appEntry" },
     { model: Department, as: "department" },
     { model: User, as: "requester", attributes: ["id", "name"] },
+    { model: User, as: "cashCertifiedBy", attributes: ["id", "name"] },
   ],
 };
 
@@ -38,7 +39,11 @@ const serialize = (pr) => ({
   totalAmount: Number(pr.totalAmount),
   status: pr.status,
   returnRemarks: pr.returnRemarks,
+  // The two limbs of LGC Sec. 344, side by side: appropriation certified and
+  // obligated by the Budget Officer, cash certified by the Treasurer.
   fundsReservedAt: pr.fundsReservedAt,
+  cashCertifiedAt: pr.cashCertifiedAt,
+  cashCertifiedByName: pr.cashCertifiedBy?.name ?? null,
   submittedAt: pr.submittedAt,
   appEntryId: pr.appEntryId,
   appEntryTitle: pr.appEntry?.projectTitle ?? null,
@@ -163,9 +168,17 @@ export const listPrs = async (req, res) => {
   if (search) where.prNumber = { [Op.like]: `%${search}%` };
 
   // A requester without a review permission sees only their department's.
-  const canSeeAll = ["pr.endorse", "pr.certify", "pr.review", "pr.approve", "audit.viewAll"].some(
-    (permission) => req.permissions.has(permission)
-  );
+  const canSeeAll = [
+    "pr.endorse",
+    "pr.certify",
+    // Without this the Treasurer could not see the queue they are now required
+    // to act on — they hold no department, so the fallback filter below would
+    // return nothing.
+    "pr.certifyCash",
+    "pr.review",
+    "pr.approve",
+    "audit.viewAll",
+  ].some((permission) => req.permissions.has(permission));
   if (!canSeeAll && req.currentUser.departmentId) {
     where.departmentId = req.currentUser.departmentId;
   }
@@ -372,6 +385,14 @@ export const transitionPr = async (req, res) => {
     }
     if (action === "certify") changes.fundsReservedAt = new Date();
 
+    // LGC Sec. 344's second certification. Recorded against the Treasurer
+    // personally — the statute makes the officer, not the office, accountable
+    // for the statement that the money is there.
+    if (action === "certifyCash") {
+      changes.cashCertifiedAt = new Date();
+      changes.cashCertifiedById = req.currentUser.id;
+    }
+
     await pr.update(changes, { transaction });
 
     if (action === "certify") {
@@ -409,15 +430,21 @@ export const transitionPr = async (req, res) => {
     actionType: AUDIT_ACTIONS.PR_TRANSITION,
     entityRef: "pr",
     entityId: pr.id,
-    summary:
-      obligationNumber
-        ? `${pr.prNumber}: certify — ${obligationNumber} obligated ₱${Number(pr.totalAmount).toLocaleString()}`
+    summary: obligationNumber
+      ? `${pr.prNumber}: certify — ${obligationNumber} obligated ₱${Number(pr.totalAmount).toLocaleString()}`
+      : action === "certifyCash"
+        ? `${pr.prNumber}: treasury certified cash available for ₱${Number(pr.totalAmount).toLocaleString()}`
         : `${pr.prNumber}: ${action}`,
     beforeState: { status: previousStatus },
     afterState: {
       status: result.to,
       remarks: remarks?.trim() ?? null,
       ...(obligationNumber ? { obligationNo: obligationNumber } : {}),
+      // The certification itself, on the record. Both limbs of Sec. 344 are
+      // then reconstructable from the log alone.
+      ...(action === "certifyCash"
+        ? { cashCertified: true, amountCertified: Number(pr.totalAmount) }
+        : {}),
     },
   });
 
@@ -432,6 +459,21 @@ export const transitionPr = async (req, res) => {
       severity: "danger",
     });
   }
+  // Hand the requisition to the next office. Without this the Treasurer would
+  // have to go looking for work that arrived in their queue — the same gap that
+  // made the bidder-account handoff necessary.
+  if (result.to === "pendingTreasuryCertification") {
+    await notifyByPermission("pr.certifyCash", {
+      type: NOTIFICATION_EVENTS.PR_APPROVED,
+      title: `${pr.prNumber} awaiting treasury certification`,
+      body: `₱${Number(pr.totalAmount).toLocaleString()} obligated. Certify cash availability (LGC Sec. 344).`,
+      link: "/purchase-requisitions",
+      refEntity: "pr",
+      refId: pr.id,
+      severity: "info",
+    });
+  }
+
   if (result.to === "approved") {
     await notifyUsers([pr.requesterId], {
       type: NOTIFICATION_EVENTS.PR_APPROVED,

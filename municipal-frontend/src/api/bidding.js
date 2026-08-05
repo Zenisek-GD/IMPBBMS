@@ -46,11 +46,24 @@ export const fetchAwards = () => apiClient.get('/bidding/awards').then((res) => 
 
 // Vendor registration
 export const fetchMyVendorProfile = () => apiClient.get('/vendors/me').then((res) => res.data)
-export const saveMyVendorProfile = (payload) => apiClient.put('/vendors/me', payload).then((res) => res.data)
-export const submitMyVendorProfile = () => apiClient.post('/vendors/me/submit').then((res) => res.data)
+// No saveMyVendorProfile / submitMyVendorProfile. A bidder cannot file or amend
+// accreditation requirements online — the papers go to the BAC office and an
+// officer records them with recordCounterSubmission below.
+
+// Records an accreditation submission the BAC Secretariat received in person.
+export const recordCounterSubmission = (payload) =>
+  apiClient.post('/vendors', payload).then((res) => res.data)
 export const fetchVendors = (params = {}) => apiClient.get('/vendors', { params }).then((res) => res.data)
 export const reviewVendor = (id, decision, remarks) =>
   apiClient.post(`/vendors/${id}/review`, { decision, remarks }).then((res) => res.data)
+
+// Records the finding on one submitted requirement. Returns the whole vendor,
+// so the review console can re-render its progress from the server's own count
+// rather than tracking it locally and risking drift.
+export const reviewVendorDocument = (vendorId, documentId, status, remarks) =>
+  apiClient
+    .patch(`/vendors/${vendorId}/documents/${documentId}/review`, { status, remarks })
+    .then((res) => res.data)
 
 // Creates the bidder's account against the email address on their approved
 // registration and emails the activation invitation. There is deliberately no

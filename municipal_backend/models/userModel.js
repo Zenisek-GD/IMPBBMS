@@ -44,10 +44,13 @@ export const User = sequelize.define("User", {
   // reveal anything about the password itself.
   passwordChangedAt: { type: DataTypes.DATE, allowNull: true },
 
+  // Light by default. "system" is still a valid choice a user can make, but it is
+  // not what a new account starts on — following the OS meant anyone on a
+  // dark-mode machine got dark without ever asking for it.
   themePreference: {
     type: DataTypes.ENUM(...THEME_PREFERENCES),
     allowNull: false,
-    defaultValue: "system",
+    defaultValue: "light",
   },
   sidebarCollapsed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 });

@@ -267,6 +267,17 @@ export const AUDIT_ACTIONS = {
   // from one that appeared some other way.
   BIDDER_REQUIREMENTS_SUBMITTED: "bidder.requirements.submitted",
   BIDDER_REQUIREMENTS_REVIEWED: "bidder.requirements.reviewed",
+
+  // A submission refused because the call it answered had already closed. Worth
+  // its own action rather than a generic denial: a cluster of these against one
+  // announcement is the evidence that a deadline was too tight, and an applicant
+  // who later claims they submitted on time can be checked against it.
+  BIDDER_REQUIREMENTS_LATE: "bidder.requirements.late",
+
+  // Per-document accreditation decisions. The registration-level decision above
+  // records that a bidder was accepted; these record which papers were actually
+  // examined to reach it, which is the part an auditor asks about.
+  BIDDER_DOCUMENT_REVIEWED: "bidder.document.reviewed",
   BIDDER_ACCOUNT_CREATED: "bidder.account.created",
   BIDDER_INVITATION_SENT: "bidder.invitation.sent",
   BIDDER_INVITATION_FAILED: "bidder.invitation.failed",
@@ -294,6 +305,15 @@ export const AUDIT_ACTIONS = {
   USER_UPDATED: "user.updated",
   USER_PASSWORD_RESET: "user.password.reset",
   SETTINGS_CHANGED: "settings.changed",
+
+  // ── Public announcements ──────────────────────────────────────────────────
+  // Publishing is the accountable act, not writing: a draft affects nobody, and
+  // a notice that went out to the municipality and was then quietly edited or
+  // withdrawn is exactly the kind of change a transparency system has to be able
+  // to evidence after the fact.
+  ANNOUNCEMENT_PUBLISHED: "announcement.published",
+  ANNOUNCEMENT_UPDATED: "announcement.updated",
+  ANNOUNCEMENT_WITHDRAWN: "announcement.withdrawn",
   APP_TRANSITION: "app.transition",
   PR_TRANSITION: "pr.transition",
   RFQ_PUBLISHED: "rfq.published",

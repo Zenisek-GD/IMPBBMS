@@ -34,6 +34,13 @@ export {
   requiredPerformanceSecurity,
 } from "./securityModel.js";
 export { ProcurementMode } from "./procurementModeModel.js";
+export {
+  Announcement,
+  ANNOUNCEMENT_CATEGORIES,
+  ANNOUNCEMENT_CATEGORY_LABELS,
+  acceptsRegistrations,
+  isPubliclyVisible,
+} from "./announcementModel.js";
 export { Notification } from "./notificationModel.js";
 export { Contract, Delivery } from "./contractModel.js";
 export { Invoice, Payment } from "./paymentModel.js";

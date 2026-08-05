@@ -10,6 +10,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
+  Inbox,
 } from 'lucide-react'
 import { fetchDocuments, downloadDocument, formatBytes } from '../../api/documents'
 import * as biddingApi from '../../api/bidding'
@@ -23,6 +24,7 @@ import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
 import FormField from '../../components/ui/FormField'
 import { usePagination } from '../../components/ui/usePagination'
+import CounterSubmissionModal from './CounterSubmissionModal'
 
 const STATUS_TONES = {
   draft: 'neutral',
@@ -169,11 +171,99 @@ function CreateAccountModal({ vendor, onClose, onCreated }) {
   )
 }
 
+// One submitted requirement, with the reviewing officer's finding on it.
+//
+// Rejecting demands a reason before the button will fire: these remarks are what
+// the applicant is shown, and "invalid" with no explanation gives them nothing to
+// correct. The server enforces the same rule — this only saves a round trip.
+function RequirementRow({ document, busy, onDecide }) {
+  const [rejecting, setRejecting] = useState(false)
+  const [remarks, setRemarks] = useState(document.remarks ?? '')
+
+  const tone =
+    document.status === 'verified' ? 'success' : document.status === 'rejected' ? 'danger' : 'neutral'
+  const label =
+    document.status === 'verified' ? 'valid' : document.status === 'rejected' ? 'invalid' : 'unchecked'
+
+  return (
+    <li className="rounded border border-border-muted p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[13px] text-navy">{document.label}</p>
+          {document.citation && (
+            <p className="text-[11px] text-text-faint">{document.citation}</p>
+          )}
+          {document.status === 'rejected' && document.remarks && (
+            <p className="mt-1 text-[11.5px] leading-snug text-danger">{document.remarks}</p>
+          )}
+        </div>
+        <Badge tone={tone}>{label}</Badge>
+      </div>
+
+      {rejecting ? (
+        <div className="mt-2.5">
+          <textarea
+            rows={2}
+            value={remarks}
+            autoFocus
+            onChange={(event) => setRemarks(event.target.value)}
+            placeholder="What is wrong with it? e.g. Certificate expired 12 Mar 2026."
+            className="w-full resize-y rounded border border-border-muted px-3 py-1.5 text-[12.5px] text-navy focus:border-navy focus:outline-none"
+          />
+          <div className="mt-1.5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setRejecting(false)}
+              className="text-[11px] font-medium tracking-[0.03em] text-text-secondary hover:underline"
+            >
+              CANCEL
+            </button>
+            <button
+              type="button"
+              disabled={busy || !remarks.trim()}
+              onClick={() => onDecide('rejected', remarks).then(() => setRejecting(false))}
+              className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline disabled:opacity-40"
+            >
+              CONFIRM INVALID
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 flex gap-3">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onDecide('verified', '')}
+            className="text-[11px] font-medium tracking-[0.03em] text-success hover:underline disabled:opacity-40"
+          >
+            MARK VALID
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setRejecting(true)}
+            className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline disabled:opacity-40"
+          >
+            MARK INVALID
+          </button>
+        </div>
+      )}
+    </li>
+  )
+}
+
 function ReviewModal({ vendor, onClose, onDecided }) {
   const [remarks, setRemarks] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [files, setFiles] = useState([])
+
+  // The vendor as the server currently sees it. Each per-document decision
+  // returns the whole record, so the progress counter below is the server's own
+  // count rather than one maintained here — the button that enables approval and
+  // the rule that permits it read the same number.
+  const [current, setCurrent] = useState(vendor)
+  const review = current.documentReview ?? { total: 0, verified: 0, unreviewed: 0, rejected: 0 }
 
   // The real submitted files, not the vendor's own checklist claim.
   useEffect(() => {
@@ -187,6 +277,26 @@ function ReviewModal({ vendor, onClose, onDecided }) {
       cancelled = true
     }
   }, [vendor.id])
+
+  const decideDocument = async (documentId, status, documentRemarks) => {
+    setError('')
+    setBusy(true)
+    try {
+      const updated = await biddingApi.reviewVendorDocument(
+        vendor.id,
+        documentId,
+        status,
+        documentRemarks
+      )
+      setCurrent(updated)
+      // The row in the table behind the modal carries the same counts.
+      onDecided()
+    } catch (err) {
+      setError(err.response?.data?.message ?? 'Could not record that finding.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const decide = async (decision) => {
     setError('')
@@ -203,7 +313,72 @@ function ReviewModal({ vendor, onClose, onDecided }) {
   }
 
   return (
-    <Modal title={`Review — ${vendor.businessName}`} onClose={onClose}>
+    <Modal title={`Review — ${current.businessName}`} onClose={onClose}>
+      {/* Which call this application answered, when it answered one. An
+          unsolicited application is legitimate, so this simply says so rather
+          than flagging it. */}
+      <div className="mb-4 rounded-md border border-border-muted bg-chip px-3 py-2.5">
+        <p className="text-[11px] tracking-[0.04em] text-text-faint uppercase">Applied to</p>
+        <p className="mt-0.5 text-[12.5px] text-navy">
+          {current.callTitle ?? 'General accreditation — not tied to one procurement'}
+        </p>
+        {current.callRegistrationDeadline && (
+          <p className="text-[11.5px] text-text-secondary">
+            {/* Tense matters here. An officer reviewing a live call needs to know
+                more may still arrive; one reviewing a closed call is looking at
+                the final set. */}
+            {new Date(current.callRegistrationDeadline) > new Date()
+              ? 'Registration closes'
+              : 'Registration closed'}{' '}
+            {formatDate(current.callRegistrationDeadline)}
+          </p>
+        )}
+
+        {/* Provenance of the paper file: when it came over the counter and who
+            says so. This is what a protest about timeliness turns on. */}
+        <p className="mt-1 text-[11.5px] text-text-secondary">
+          Received {formatDate(current.receivedAt ?? current.submittedAt)}
+          {current.recordedByName && ` · recorded by ${current.recordedByName}`}
+          {current.callRegistrationDeadline &&
+            current.receivedAt &&
+            new Date(current.receivedAt) > new Date(current.callRegistrationDeadline) && (
+              <span className="ml-1.5 font-medium text-danger">after the deadline</span>
+            )}
+        </p>
+      </div>
+
+      {/* ── Requirement-by-requirement findings ───────────────────────────
+          The accreditation decision is a statement that the requirements are
+          complete and valid, so it is assembled from findings on each one
+          rather than taken as a single verdict on the pile. */}
+      <div className="mb-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">
+            Requirements ({review.verified}/{review.total} checked)
+          </p>
+          {review.unreviewed > 0 && (
+            <Badge tone="warning">{review.unreviewed} left to check</Badge>
+          )}
+        </div>
+
+        {(current.documents ?? []).length === 0 ? (
+          <p className="text-[13px] text-text-faint">No requirements declared.</p>
+        ) : (
+          <ol className="flex max-h-64 flex-col gap-2 overflow-y-auto">
+            {current.documents.map((document) => (
+              <RequirementRow
+                key={document.id}
+                document={document}
+                busy={busy}
+                onDecide={(status, documentRemarks) =>
+                  decideDocument(document.id, status, documentRemarks)
+                }
+              />
+            ))}
+          </ol>
+        )}
+      </div>
+
       <div className="mb-4">
         <p className="mb-2 text-[11px] tracking-[0.03em] text-text-faint uppercase">
           Submitted files ({files.length})
@@ -255,6 +430,18 @@ function ReviewModal({ vendor, onClose, onDecided }) {
         </p>
       )}
 
+      {/* Says why the button is unavailable. A disabled control with no
+          explanation reads as a broken screen. */}
+      {!review.complete && (
+        <p className="mt-3 text-[11.5px] leading-relaxed text-text-faint">
+          {review.total === 0
+            ? 'This registration declares no requirements, so there is nothing to verify.'
+            : review.rejected > 0
+              ? `${review.rejected} requirement${review.rejected === 1 ? ' was' : 's were'} marked invalid. Return the registration with remarks so the applicant can supply a replacement.`
+              : `Check the remaining ${review.unreviewed} requirement${review.unreviewed === 1 ? '' : 's'} before approving this bidder.`}
+        </p>
+      )}
+
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>
           CANCEL
@@ -269,7 +456,10 @@ function ReviewModal({ vendor, onClose, onDecided }) {
         </button>
         <button
           type="button"
-          disabled={busy}
+          // Approval requires every requirement to have been examined and none
+          // to have failed. The server refuses either way; this stops the
+          // officer discovering that only after clicking.
+          disabled={busy || !review.complete}
           onClick={() => decide('verify')}
           className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
         >
@@ -280,13 +470,23 @@ function ReviewModal({ vendor, onClose, onDecided }) {
   )
 }
 
+// One screen, two offices, two jobs.
+//
+// Bidder onboarding is split on purpose: the BAC Secretariat decides whether a
+// registration's requirements are complete and valid, and Admin/IT decides
+// whether that approval becomes a working credential. Neither can perform the
+// other's step — the server enforces it by permission, and this page renders
+// only the controls the caller can actually use, so nobody is shown a button
+// that would come back 403.
 export default function VendorVerification() {
   const { has } = usePermissions()
-  const canCreateAccounts = has('bidders.createAccount')
+  const canCreateAccounts = has('bidders.createAccount') // Admin/IT
+  const canReview = has('bidding.publish') // BAC Secretariat
 
   const [vendors, setVendors] = useState([])
   const [statusFilter, setStatusFilter] = useState('')
   const [reviewing, setReviewing] = useState(null)
+  const [recording, setRecording] = useState(false)
   const [creatingFor, setCreatingFor] = useState(null)
   const [resendingId, setResendingId] = useState(null)
   const [banner, setBanner] = useState(null)
@@ -337,15 +537,49 @@ export default function VendorVerification() {
   return (
     <DashboardPage>
       <PageHeader
-        title="Bidder Verification"
-        subtitle="Bidders are onboarded through this controlled flow — there is no public sign-up. Review the requirements, then issue the account."
+        title={canReview ? 'Bidder Verification' : 'Bidder Accounts'}
+        subtitle={
+          canReview
+            ? 'Check each submitted requirement, then approve the registration. Approved bidders are forwarded to Admin/IT, who issue the account.'
+            : 'Accounts for bidders the BAC Secretariat has already verified. Issuing the account is the last step before a bidder can sign in.'
+        }
         actions={
-          <div className="flex flex-wrap gap-2">
-            {pending > 0 && <Badge tone="warning">{pending} awaiting review</Badge>}
+          <div className="flex flex-wrap items-center gap-2">
+            {canReview && pending > 0 && <Badge tone="warning">{pending} awaiting review</Badge>}
             {awaitingAccount > 0 && <Badge tone="info">{awaitingAccount} approved, no account</Badge>}
+            {/* The only way an accreditation enters the system now that there is
+                no online submission. */}
+            {canReview && (
+              <Button icon={Inbox} onClick={() => setRecording(true)}>
+                RECORD COUNTER SUBMISSION
+              </Button>
+            )}
           </div>
         }
       />
+
+      {/* The step this office does not perform, said once. Without it the page
+          reads as though half the controls are missing or broken. */}
+      <div className="flex items-start gap-2.5 rounded-lg border border-border-muted bg-chip px-4 py-3">
+        <ShieldCheck size={15} className="mt-0.5 shrink-0 text-navy" />
+        <p className="text-[12.5px] leading-relaxed text-text-secondary">
+          {canReview ? (
+            <>
+              Bidders submit their requirements <strong className="text-navy">in person</strong> at
+              this office — there is no online submission and no sign-up. Record what you receive at
+              the counter, check each document, then approve or return it.{' '}
+              <strong className="text-navy">Admin/IT</strong> creates the account afterwards, so
+              approving a registration here does not by itself let anyone in.
+            </>
+          ) : (
+            <>
+              Registrations are reviewed by the{' '}
+              <strong className="text-navy">BAC Secretariat</strong>. You cannot approve one here,
+              and an account can only be issued for a registration they have already verified.
+            </>
+          )}
+        </p>
+      </div>
 
       {banner && (
         <div
@@ -478,7 +712,7 @@ export default function VendorVerification() {
 
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1.5">
-                        {vendor.registrationStatus === 'submitted' && (
+                        {canReview && vendor.registrationStatus === 'submitted' && (
                           <button
                             type="button"
                             onClick={() => setReviewing(vendor)}
@@ -528,6 +762,21 @@ export default function VendorVerification() {
         )}
         <Pagination {...paginationProps} label="bidders" />
       </Card>
+
+      {recording && (
+        <CounterSubmissionModal
+          onClose={() => setRecording(false)}
+          onRecorded={(result) => {
+            setBanner({
+              tone: result.receivedAfterDeadline ? 'danger' : 'success',
+              message: result.receivedAfterDeadline
+                ? `Recorded ${result.businessName} (${result.referenceCode}) — flagged as received after the call's deadline. Check each document, then decide.`
+                : `Recorded ${result.businessName} (${result.referenceCode}). Check each document, then approve or return it.`,
+            })
+            refresh()
+          }}
+        />
+      )}
 
       {reviewing && (
         <ReviewModal vendor={reviewing} onClose={() => setReviewing(null)} onDecided={refresh} />

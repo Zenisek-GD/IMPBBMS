@@ -22,7 +22,7 @@ const serializeUser = (user) => ({
   permissions: (user.Role.Permissions ?? []).map((permission) => permission.key),
   // Appearance travels with the account, so the UI can restore this officer's
   // own theme rather than whatever the last person on this browser chose.
-  themePreference: user.themePreference ?? "system",
+  themePreference: user.themePreference ?? "light",
   sidebarCollapsed: Boolean(user.sidebarCollapsed),
 });
 

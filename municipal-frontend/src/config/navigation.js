@@ -2,6 +2,7 @@ import {
   FileText,
   Gavel,
   Users,
+  UserPlus,
   Landmark,
   Award,
   Truck,
@@ -62,9 +63,15 @@ export const ROLE_NAV = {
         heading: 'Administration',
         items: [
           { label: 'Users & Roles', href: '/admin/users', icon: Users },
+          // Admin/IT is the only office that can turn a BAC-approved
+          // accreditation into a working account, so this queue is theirs.
+          { label: 'Bidder Accounts', href: '/admin/bidder-accounts', icon: UserPlus },
           { label: 'Departments', href: '/admin/departments', icon: Building2 },
           { label: 'System Settings', href: '/admin/settings', icon: Settings },
           { label: 'Thresholds', href: '/admin/thresholds', icon: ShieldCheck },
+          // The administrator's route to the public portal, for maintenance and
+          // system notices.
+          { label: 'Announcements', href: '/announcements/manage', icon: Megaphone },
         ],
       },
       {
@@ -171,6 +178,10 @@ export const ROLE_NAV = {
         heading: 'Solicitation',
         items: [
           { label: 'RFQ / ITB', href: '/secretariat/rfq', icon: Megaphone },
+          // Sits above vendor verification deliberately: a call for bidders is
+          // posted first, and the applications it attracts are what the next
+          // screen reviews.
+          { label: 'Announcements', href: '/announcements/manage', icon: Megaphone },
           { label: 'Vendor Verification', href: '/secretariat/vendors', icon: Users },
           { label: 'Live Conference', href: '/conferences', icon: CalendarClock },
         ],
@@ -299,6 +310,15 @@ export const ROLE_NAV = {
     sections: [
       { items: [{ label: 'Payment Hub', href: '/finance', icon: Banknote }] },
       {
+        // LGC Sec. 344's cash certification happens here, before procurement
+        // starts — not at disbursement. It is listed first because it is the
+        // earliest point in the lifecycle the Treasurer is accountable for.
+        heading: 'Certification',
+        items: [
+          { label: 'Requisitions to Certify', href: '/purchase-requisitions', icon: FileText },
+        ],
+      },
+      {
         heading: 'Disbursement',
         items: [{ label: 'Vouchers for Release', href: '/invoices', icon: Receipt }],
       },
@@ -336,10 +356,10 @@ export const ROLE_NAV = {
           { label: 'Invoices', href: '/invoices', icon: Receipt },
         ],
       },
-      {
-        heading: 'Company',
-        items: [{ label: 'Eligibility & Registration', href: '/supplier/eligibility', icon: ClipboardCheck }],
-      },
+      // A "Company" group used to sit here holding one link, "Eligibility &
+      // Registration". Accreditation is submitted on paper at the BAC office, so
+      // that page no longer exists and the group has nothing else in it — an
+      // empty heading is worse than no heading.
     ],
   },
 

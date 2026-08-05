@@ -11,6 +11,9 @@ export const PR_STATES = [
   "draft",
   "pendingDepartmentHeadEndorsement",
   "pendingBudgetCertification",
+  // LGC Sec. 344's second certification — the Treasurer on cash availability.
+  // See the note in services/prWorkflow.js for why it is a separate stage.
+  "pendingTreasuryCertification",
   "pendingSecretariatReview",
   "pendingHopeApproval",
   "returned",
@@ -39,6 +42,13 @@ export const PrHeader = sequelize.define(
     // Section 5.2: the Budget Officer's certification creates a soft
     // reservation against the APP entry's balance.
     fundsReservedAt: { type: DataTypes.DATE, allowNull: true },
+
+    // The Treasurer's certification that the cash exists. Held separately from
+    // `fundsReservedAt` because they answer different questions and are made by
+    // different officers — an auditor asking "who said the money was there?"
+    // is asking about this column, not that one.
+    cashCertifiedAt: { type: DataTypes.DATE, allowNull: true },
+
     submittedAt: { type: DataTypes.DATE, allowNull: true },
   },
   { indexes: [{ fields: ["status"] }] }
@@ -58,6 +68,11 @@ AppEntry.hasMany(PrHeader, { foreignKey: "appEntryId" });
 
 PrHeader.belongsTo(User, { as: "requester", foreignKey: "requesterId" });
 PrHeader.belongsTo(Department, { as: "department", foreignKey: "departmentId" });
+
+// The Treasurer who certified cash availability. Named on the record because
+// under LGC Sec. 344 that certification is a personal accountability, not an
+// office-level one.
+PrHeader.belongsTo(User, { as: "cashCertifiedBy", foreignKey: "cashCertifiedById" });
 
 PrHeader.hasMany(PrLineItem, { as: "lineItems", foreignKey: "prHeaderId", onDelete: "CASCADE" });
 PrLineItem.belongsTo(PrHeader, { foreignKey: "prHeaderId" });

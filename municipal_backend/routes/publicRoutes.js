@@ -15,7 +15,6 @@ import {
   downloadProjectDocument,
   listAnnouncements,
 } from "../controllers/publicProjectController.js";
-import { submitBidderRequirements } from "../controllers/bidderIntakeController.js";
 import { rateLimit } from "../middleware/rateLimitMiddleware.js";
 
 // ── PUBLIC API ──────────────────────────────────────────────────────────────
@@ -36,9 +35,10 @@ import { rateLimit } from "../middleware/rateLimitMiddleware.js";
 //
 // Do NOT mount an authenticated endpoint here to save writing a route.
 //
-// One exception to "read only", added deliberately: bidder requirements intake.
-// See the note above that route below — it is a write, but it cannot create,
-// grant or escalate access, which is the property that matters here.
+// This surface is now READ ONLY, with no exceptions. It briefly carried a
+// bidder-requirements intake endpoint; accreditation documents are submitted in
+// person at the BAC office, so there is nothing for the public to write here and
+// the endpoint was removed rather than left in place unused.
 const router = express.Router();
 
 // Anonymous traffic still gets a ceiling so the portal cannot be used to hammer
@@ -68,25 +68,5 @@ router.get("/projects/:id", getProject);
 router.get("/projects/:id/timeline", getProjectTimeline);
 router.get("/projects/:id/documents", listProjectDocuments);
 router.get("/projects/:id/documents/:documentId/download", downloadProjectDocument);
-
-// ── Bidder requirements intake ──────────────────────────────────────────────
-// The one write on the public surface, and the first step of bidder onboarding:
-// a prospective bidder submits their eligibility and accreditation requirements
-// together with the email address that will serve as their official channel.
-//
-// This is NOT registration. It creates no account, no session, no role and no
-// credential — only an application in `submitted` status for the BAC Secretariat
-// to review. Access to the system still begins with an authorized official
-// deciding to create an account, which is what "no public bidder registration"
-// means in practice.
-//
-// Its own bucket, and a tight one: a public form that sends email needs a much
-// lower ceiling than a public form that only reads, because each accepted call
-// costs an outbound message.
-router.post(
-  "/bidder-registrations",
-  rateLimit({ bucket: "bidderIntake", max: 5 }),
-  submitBidderRequirements
-);
 
 export default router;

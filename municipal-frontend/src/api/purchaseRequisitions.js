@@ -24,6 +24,7 @@ export const PR_STATUS_LABELS = {
   draft: 'Draft',
   pendingDepartmentHeadEndorsement: 'Pending Dept. Head Endorsement',
   pendingBudgetCertification: 'Pending Budget Certification',
+  pendingTreasuryCertification: 'Pending Treasury Certification',
   pendingSecretariatReview: 'Pending Secretariat Review',
   pendingHopeApproval: 'Pending Mayor Approval',
   returned: 'Returned',
@@ -34,6 +35,7 @@ export const PR_STATUS_TONES = {
   draft: 'neutral',
   pendingDepartmentHeadEndorsement: 'info',
   pendingBudgetCertification: 'warning',
+  pendingTreasuryCertification: 'warning',
   pendingSecretariatReview: 'warning',
   pendingHopeApproval: 'warning',
   returned: 'danger',
@@ -47,7 +49,18 @@ export const PR_TRANSITION_FOR_STATUS = {
   draft: { action: 'submit', label: 'SUBMIT', permission: 'pr.create' },
   returned: { action: 'submit', label: 'RESUBMIT', permission: 'pr.create' },
   pendingDepartmentHeadEndorsement: { action: 'endorse', label: 'ENDORSE', permission: null },
-  pendingBudgetCertification: { action: 'certify', label: 'CERTIFY FUNDING', permission: 'pr.certify' },
+  // The two certifications LGC Sec. 344 requires, by two different officers:
+  // the Budget Officer on the appropriation, the Treasurer on the cash.
+  pendingBudgetCertification: {
+    action: 'certify',
+    label: 'CERTIFY APPROPRIATION',
+    permission: 'pr.certify',
+  },
+  pendingTreasuryCertification: {
+    action: 'certifyCash',
+    label: 'CERTIFY CASH AVAILABLE',
+    permission: 'pr.certifyCash',
+  },
   pendingSecretariatReview: { action: 'review', label: 'REVIEW', permission: 'pr.review' },
   pendingHopeApproval: { action: 'approve', label: 'APPROVE', permission: 'pr.approve' },
 }
@@ -55,6 +68,7 @@ export const PR_TRANSITION_FOR_STATUS = {
 export const PR_RETURN_PERMISSION_FOR_STATUS = {
   pendingDepartmentHeadEndorsement: 'pr.create',
   pendingBudgetCertification: 'pr.certify',
+  pendingTreasuryCertification: 'pr.certifyCash',
   pendingSecretariatReview: 'pr.review',
   pendingHopeApproval: 'pr.approve',
 }

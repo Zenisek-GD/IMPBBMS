@@ -1,6 +1,7 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "./db.js";
 import { User } from "./userModel.js";
+import { Announcement } from "./announcementModel.js";
 
 // Design doc Section 2.2: vendors are onboarded through the controlled
 // procurement flow (registration + document submission), not open sign-up.
@@ -68,6 +69,15 @@ export const Vendor = sequelize.define("Vendor", {
   submittedAt: { type: DataTypes.DATE, allowNull: true },
   reviewedAt: { type: DataTypes.DATE, allowNull: true },
 
+  // When the bidder physically handed the papers in at the BAC office.
+  //
+  // Distinct from `submittedAt`/`createdAt` on purpose: accreditation documents
+  // arrive over a counter and may be keyed into the system hours or days later,
+  // so the timestamp the row was written is not the date the submission was made.
+  // This is the officer's statement of when they received the file, and it is what
+  // an announcement's registration deadline is judged against.
+  receivedAt: { type: DataTypes.DATE, allowNull: true },
+
   // Set when an authorized official creates the bidder's account. Its presence is
   // what the console keys off to stop a second account being created for the same
   // approved registration.
@@ -86,6 +96,27 @@ Vendor.belongsTo(User, { as: "account", foreignKey: "userId" });
 
 // Who approved (or returned, or blacklisted) the registration.
 Vendor.belongsTo(User, { as: "reviewedBy", foreignKey: "reviewedByUserId" });
+
+// The officer who received the papers at the counter and keyed them in.
+//
+// Held separately from `reviewedBy` even though it is usually the same person:
+// receiving a submission and deciding on it are two acts, and an auditor asking
+// "who says this arrived on the 12th?" is asking about this column.
+Vendor.belongsTo(User, { as: "recordedBy", foreignKey: "recordedByUserId" });
+
+// The published call this application answered, when it answered one.
+//
+// Nullable, and legitimately so. Accreditation is a standing status, not a
+// per-opportunity one: a verified bidder does not reapply for every procurement,
+// which is both how the BAC works and what IRR Sec. 52's registry-based
+// eligibility assumes. A business may therefore come forward on its own, with no
+// call open, and that is a valid application.
+//
+// What the link buys is the deadline. When an application does answer a specific
+// call, it is accepted only while that call's registrationDeadline is in the
+// future — so "submit by this date or you cannot take part in this procurement"
+// becomes a rule the system enforces rather than a sentence on a notice.
+Vendor.belongsTo(Announcement, { as: "call", foreignKey: "announcementId" });
 
 export const VendorDocument = sequelize.define("VendorDocument", {
   // Matches the item ids in eligibilityRequirements.js so the wizard and the

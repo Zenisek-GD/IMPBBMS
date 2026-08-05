@@ -25,32 +25,43 @@
 }
 
 .dark {
-  --color-canvas: #0f1113;
-  --color-surface: #17191d;
-  --color-surface-raised: #1d2024;
-  --color-sidebar: #131519;
+  --color-canvas: #0c0f0d;
+  --color-surface: #141815;
+  --color-surface-raised: #1a1f1c;
+  --color-sidebar: #101413;
 
-  --color-border-muted: #292d33;
-  --color-border-strong: #383d45;
+  --color-border-muted: #262c28;
+  --color-border-strong: #363e39;
 
-  --color-navy: #f2f4f7;
-  --color-navy-tint: rgba(232, 236, 243, 0.09);
-  --color-text-primary: #f2f4f7;
-  --color-text-secondary: #b3b9c4;
-  --color-text-faint: #7d848f;
+  --color-navy: #f1f5f2;
+  --color-navy-tint: rgba(34, 197, 94, 0.14);
+  --color-text-primary: #f1f5f2;
+  --color-text-secondary: #b2bcb6;
+  --color-text-faint: #7c877f;
 
-  /* A filled control in dark mode reads as light-on-dark, so accent and its
-     foreground swap rather than darkening further. */
-  --color-accent: #e8ecf3;
-  --color-accent-fg: #14171c;
+  /* A filled control on a dark surface reads as light-on-dark, so accent and its
+     foreground swap rather than darkening further. The bright green stays bright
+     here: it is the one colour that has to survive both themes unchanged, since
+     it marks data rather than text. */
+  --color-accent: #e9efeb;
+  --color-accent-fg: #101512;
+  --color-eco: #22c55e;
+  --color-eco-soft: #14311f;
 
-  --color-brand: #1a1d21;
-  --color-brand-fg: #f2f4f7;
-  --color-topnav-link: #8c939f;
-  --color-topnav-link-alt: #f2f4f7;
+  --color-brand: #141815;
+  --color-brand-fg: #f1f5f2;
+  --color-topnav-link: #8b958f;
+  --color-topnav-link-alt: #f1f5f2;
 
-  --color-chip: #23282f;
-  --color-track: #2b3037;
+  /* Still green, but deepened. The light-mode green is too luminous to sit at
+     the top of a near-black page — it glares. #14532d keeps the hue and lifts
+     white text to 9.1:1. */
+  --color-header: #14532d;
+  --color-header-fg: #ffffff;
+  --color-header-muted: #c9e2d2;
+
+  --color-chip: #1d2620;
+  --color-track: #29312c;
 
   /* Lifted, not darkened: the status colours have to carry on a dark surface,
      and the light-mode versions fail contrast against it. */
@@ -90,31 +101,66 @@
   --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
 
-  --color-canvas: #eef0f2;
+  /* WHITE, not grey. The page and the cards sit on the same white and are
+     separated by hairline borders instead of a tonal step — which is why
+     `border-border-muted` is not optional on a card any more. The two places
+     that still need a fill (table headers, hover rows) use `sidebar`, which is
+     barely off-white rather than grey. */
+  --color-canvas: #ffffff;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
-  --color-sidebar: #f6f7f8;
+  --color-sidebar: #f6f8f7;
 
-  --color-border-muted: #e3e5e9;
-  --color-border-strong: #d3d6dc;
+  /* Firmer than they would be on a tinted page. With canvas and surface sharing
+     one white, the hairline IS the edge of a card — at the old #e4e8e6 it fell to
+     1.24:1 against white and cards dissolved into the page. These sit near
+     1.45:1, which reads as a clean edge without looking drawn-on. Cards also
+     carry shadow-sm so separation does not rest on the border alone. */
+  --color-border-muted: #d9e0dc;
+  --color-border-strong: #c2cbc6;
 
-  --color-navy: #14171c;
-  --color-navy-tint: rgba(0, 30, 64, 0.06);
-  --color-text-primary: #14171c;
-  --color-text-secondary: #4b5058;
-  --color-text-faint: #868c96;
+  --color-navy: #101512;
+  --color-navy-tint: rgba(21, 128, 61, 0.08);
+  --color-text-primary: #101512;
+  --color-text-secondary: #4c5450;
+  --color-text-faint: #838d88;
 
-  --color-accent: #001e40;
+  /* Green replaces navy as the filled-control colour. #15803d rather than the
+     brighter green it is derived from: a primary button carries white label
+     text, and the brighter tone fails contrast against it. The bright green is
+     kept separately as `eco` for data marks, where it sits on a dark card and
+     carries no text. */
+  --color-accent: #15803d;
   --color-accent-fg: #ffffff;
+  --color-eco: #22c55e;
+  --color-eco-soft: #dcfce7;
 
-  --color-brand: #24262b;
-  --color-brand-fg: #f4f5f7;
-  --color-topnav-link: #9aa0ab;
-  --color-topnav-link-alt: #f4f5f7;
+  --color-brand: #0f1411;
+  --color-brand-fg: #f2f5f3;
+  --color-topnav-link: #9aa5a0;
+  --color-topnav-link-alt: #f2f5f3;
 
-  --color-chip: #e6ecf6;
-  --color-track: #e5e7eb;
-  --color-success: #1f7a35;
+  /* ── The public header ──────────────────────────────────────────────────
+     Its own token rather than a reuse of `brand`, which also paints the
+     internal top bar and the dark feature tile on the landing page — those
+     should stay near-black.
+
+     `header` is the same green as `accent`, so the header and the page's
+     primary buttons are literally one colour. It stays green in BOTH themes,
+     which is why it cannot be `accent`: that flips to near-white in dark mode
+     and the header would turn white.
+
+     `header-muted` is #eaf7ef and not a softer mint on purpose. Anything
+     darker fails AA against this green — #15803d only leaves 4.5:1 for text
+     at roughly this lightness, and the strapline is 11.5px, so it needs the
+     full ratio rather than the 3:1 large-text allowance. */
+  --color-header: #15803d;
+  --color-header-fg: #ffffff;
+  --color-header-muted: #eaf7ef;
+
+  --color-chip: #dcfce7;
+  --color-track: #e8ecea;
+  --color-success: #15803d;
   --color-warning: #b45309;
   --color-danger: #b42318;
 

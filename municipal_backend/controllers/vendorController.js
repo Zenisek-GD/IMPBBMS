@@ -2,10 +2,11 @@ import crypto from "crypto";
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
 import { Vendor, VendorDocument } from "../models/vendorModel.js";
+import { Announcement } from "../models/announcementModel.js";
 import { User } from "../models/userModel.js";
 import { Role } from "../models/roleModel.js";
 import { ActivationToken } from "../models/activationTokenModel.js";
-import { notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
+import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { recordAudit, auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { issueActivationToken } from "../services/activation.js";
 import { sendActivationInvitation } from "../services/mailer.js";
@@ -20,7 +21,35 @@ const withIncludes = {
       attributes: ["id", "name", "email", "status", "activatedAt"],
     },
     { model: User, as: "reviewedBy", attributes: ["id", "name"] },
+    { model: User, as: "recordedBy", attributes: ["id", "name"] },
+    {
+      model: Announcement,
+      as: "call",
+      attributes: ["id", "title", "referenceNo", "registrationDeadline"],
+    },
   ],
+};
+
+// ── Document review ─────────────────────────────────────────────────────────
+// A registration cannot be verified until every declared document has actually
+// been looked at. `attached` means submitted-but-unexamined, so a registration
+// carrying one is a registration nobody has finished reviewing — approving it
+// would put the Secretariat's name against papers they never opened.
+const DOCUMENT_DECISIONS = ["verified", "rejected"];
+
+const summariseDocumentReview = (documents = []) => {
+  const unreviewed = documents.filter((doc) => doc.status === "attached");
+  const rejected = documents.filter((doc) => doc.status === "rejected");
+  return {
+    total: documents.length,
+    verified: documents.filter((doc) => doc.status === "verified").length,
+    unreviewed: unreviewed.length,
+    rejected: rejected.length,
+    // The single question the console's approve button keys off.
+    complete: documents.length > 0 && unreviewed.length === 0 && rejected.length === 0,
+    unreviewedLabels: unreviewed.map((doc) => doc.label),
+    rejectedLabels: rejected.map((doc) => doc.label),
+  };
 };
 
 // Summary of the outstanding invitation, so the officials' console can show
@@ -77,6 +106,11 @@ const serialize = (vendor, invitation) => ({
   reviewedAt: vendor.reviewedAt,
   reviewedByName: vendor.reviewedBy?.name ?? null,
 
+  // Provenance of the paper submission: when it came in, and which officer says
+  // so. Null on the older records that predate counter intake.
+  receivedAt: vendor.receivedAt,
+  recordedByName: vendor.recordedBy?.name ?? null,
+
   // ── Account state ─────────────────────────────────────────────────────────
   hasAccount: Boolean(vendor.userId),
   accountCreatedAt: vendor.accountCreatedAt,
@@ -86,10 +120,24 @@ const serialize = (vendor, invitation) => ({
   accountActivatedAt: vendor.account?.activatedAt ?? null,
   invitation: invitation !== undefined ? invitation : null,
 
+  // ── The call this application answered ────────────────────────────────────
+  // Null for an unsolicited application, which is legitimate — accreditation is
+  // a standing status, not a per-opportunity one.
+  callId: vendor.call?.id ?? null,
+  callTitle: vendor.call?.title ?? null,
+  callReferenceNo: vendor.call?.referenceNo ?? null,
+  callRegistrationDeadline: vendor.call?.registrationDeadline ?? null,
+
   // An account may only be created for an approved registration that does not
   // have one yet, and only if an accredited address was captured.
   canCreateAccount:
     vendor.registrationStatus === "verified" && !vendor.userId && Boolean(vendor.contactEmail),
+
+  // Where the document-by-document review has got to. Drives the console's
+  // approve button, and is the same computation the server enforces with in
+  // reviewVendor — so the button being enabled and the request being accepted
+  // cannot disagree.
+  documentReview: summariseDocumentReview(vendor.documents ?? []),
 
   documents: (vendor.documents ?? []).map((doc) => ({
     id: doc.id,
@@ -105,111 +153,263 @@ const serialize = (vendor, invitation) => ({
   canBid: vendor.registrationStatus === "verified",
 });
 
-// A vendor user always works on their own profile; Secretariat sees all.
+// A vendor user reads their own accreditation; the Secretariat sees all.
 const ownProfileFor = async (userId) =>
   Vendor.findOne({ where: { userId }, ...withIncludes });
 
+/**
+ * READ ONLY. The bidder can see what the BAC office holds on file for them —
+ * which documents were accepted, which were rejected and why — but cannot change
+ * any of it.
+ *
+ * The write counterparts to this (`upsertMyVendorProfile`, `submitMyVendorProfile`)
+ * were removed: accreditation requirements are submitted on paper at the BAC
+ * office, so there is no online path by which a bidder files or amends them. An
+ * amendment is a fresh counter submission, recorded by an officer.
+ */
 export const getMyVendorProfile = async (req, res) => {
   const vendor = await ownProfileFor(req.currentUser.id);
   if (!vendor) return res.json(null);
   res.json(serialize(vendor));
 };
 
-export const upsertMyVendorProfile = async (req, res) => {
-  const { businessName, documents, ...rest } = req.body;
+// ── BAC Secretariat counter intake ──────────────────────────────────────────
+// Step 1 of onboarding, from the office's side of the counter.
+//
+// A prospective bidder walks in with their eligibility and accreditation papers.
+// There is no online submission — this endpoint is how those papers enter the
+// system, keyed in by the officer who physically received them. That is the whole
+// difference from the intake endpoint it replaces: the actor is an accountable
+// officer at a desk, not an anonymous form on the internet, so the record can say
+// who received the documents and when.
 
-  let vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
+const ORGANIZATION_TYPES = ["corporation", "partnership", "soleProprietorship", "cooperative"];
+const TAX_CLASSIFICATIONS = ["goods", "services"];
 
-  // A profile already under review or verified must not be silently edited —
-  // it would invalidate the review the BAC already performed.
-  if (vendor && ["submitted", "verified"].includes(vendor.registrationStatus)) {
-    return res.status(409).json({
-      message:
-        vendor.registrationStatus === "verified"
-          ? "Your registration is verified. Contact the BAC Secretariat to amend it."
-          : "Your registration is under review and cannot be edited right now.",
-    });
-  }
-
-  if (!businessName?.trim()) {
-    return res.status(400).json({ message: "Business name is required." });
-  }
-
-  await sequelize.transaction(async (transaction) => {
-    if (vendor) {
-      await vendor.update({ businessName: businessName.trim(), ...rest }, { transaction });
-    } else {
-      vendor = await Vendor.create(
-        {
-          businessName: businessName.trim(),
-          ...rest,
-          userId: req.currentUser.id,
-          registrationStatus: "draft",
-        },
-        { transaction }
-      );
-    }
-
-    // Documents are replaced wholesale so removing one actually removes it.
-    if (Array.isArray(documents)) {
-      await VendorDocument.destroy({ where: { vendorId: vendor.id }, transaction });
-      await VendorDocument.bulkCreate(
-        documents.map((doc) => ({
-          vendorId: vendor.id,
-          docType: doc.docType,
-          label: doc.label,
-          citation: doc.citation ?? null,
-          fileRef: doc.fileRef ?? null,
-          expiryDate: doc.expiryDate ?? null,
-          status: "attached",
-        })),
-        { transaction }
-      );
-    }
-  });
-
-  res.json(serialize(await Vendor.findByPk(vendor.id, withIncludes)));
+// Not sequential. A running number would publish how many bidders have applied
+// and would let one applicant guess another's reference.
+const generateReferenceCode = () => {
+  // No I, O, 1 or 0 — this code gets read off a screen onto a paper receipt and
+  // back again, and those four are what get transcribed wrongly.
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const body = Array.from(
+    crypto.randomBytes(8),
+    (byte) => alphabet[byte % alphabet.length]
+  ).join("");
+  return `BR-${new Date().getFullYear()}-${body}`;
 };
 
-export const submitMyVendorProfile = async (req, res) => {
-  const vendor = await ownProfileFor(req.currentUser.id);
-  if (!vendor) return res.status(404).json({ message: "Create your registration first." });
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@,]+\.[a-z]{2,}$/i;
 
-  if (!["draft", "returned"].includes(vendor.registrationStatus)) {
-    return res.status(409).json({ message: "This registration has already been submitted." });
+/**
+ * Records an accreditation submission received in person.
+ *
+ * Lands in `submitted` — the same queue the officer then works through
+ * document by document — because handing papers over the counter IS the
+ * submission. There is no draft state to pick up later: if the file is
+ * incomplete the officer returns it, which is a decision on the record.
+ */
+export const recordCounterSubmission = async (req, res) => {
+  const {
+    businessName,
+    tin,
+    organizationType,
+    isJointVenture,
+    isForeignBidder,
+    philgepsRegistrationNo,
+    philgepsExpiry,
+    isVatRegistered,
+    taxClassification,
+    contactEmail,
+    contactPerson,
+    contactPhone,
+    address,
+    documents,
+    announcementId,
+    receivedAt,
+  } = req.body ?? {};
+
+  const errors = {};
+
+  const cleanBusinessName = String(businessName ?? "").trim();
+  if (!cleanBusinessName) errors.businessName = "Registered business name is required.";
+  else if (cleanBusinessName.length > 200) errors.businessName = "That name is too long.";
+
+  const cleanContactPerson = String(contactPerson ?? "").trim();
+  if (!cleanContactPerson) errors.contactPerson = "An authorized contact person is required.";
+
+  // The address every later step is bound to: the account Admin/IT creates
+  // carries it, the activation link goes to it, and the one-time code that proves
+  // ownership goes to it. Wrong here means an approved bidder who can never be
+  // given access, so it is required even though the submission is on paper.
+  const email = String(contactEmail ?? "").trim().toLowerCase();
+  if (!email) errors.contactEmail = "An active email address is required.";
+  else if (!EMAIL_PATTERN.test(email)) errors.contactEmail = "Enter a valid email address.";
+  else if (email.length > 190) errors.contactEmail = "That email address is too long.";
+
+  if (organizationType && !ORGANIZATION_TYPES.includes(organizationType)) {
+    errors.organizationType = "Choose a valid organization type.";
+  }
+  if (taxClassification && !TAX_CLASSIFICATIONS.includes(taxClassification)) {
+    errors.taxClassification = "Choose a valid tax classification.";
   }
 
-  // IRR Sec. 52.1 — the PhilGEPS Platinum certificate is the one document the
-  // BAC always collects, so refuse a submission without it.
-  const hasPhilgeps = (vendor.documents ?? []).some((doc) => doc.docType === "philgeps-platinum");
-  if (!hasPhilgeps) {
-    return res.status(400).json({
-      message: "A PhilGEPS Certificate of Registration (Platinum Membership) is required (IRR Sec. 52.1).",
+  const declared = Array.isArray(documents) ? documents : [];
+  if (declared.length === 0) {
+    errors.documents = "Record at least one document as received.";
+  }
+
+  // When the papers were actually handed in, which is not necessarily when they
+  // are keyed in. It is what the deadline is judged against, so it is the
+  // officer's statement of fact rather than a timestamp the server invents.
+  const received = receivedAt ? new Date(receivedAt) : new Date();
+  if (Number.isNaN(received.getTime())) {
+    errors.receivedAt = "That is not a valid date.";
+  } else if (received > new Date(Date.now() + 86400000)) {
+    errors.receivedAt = "Documents cannot be recorded as received in the future.";
+  }
+
+  if (Object.keys(errors).length) {
+    return res.status(400).json({ message: "Please correct the highlighted fields.", errors });
+  }
+
+  // ── One live application per business ─────────────────────────────────────
+  // Unlike the old public form, this refusal is reported plainly: the caller is
+  // an officer who is entitled to know the bidder is already on file, and who
+  // needs to be sent to the existing record rather than creating a duplicate.
+  const [existing, existingAccount] = await Promise.all([
+    Vendor.findOne({
+      where: { contactEmail: email, registrationStatus: { [Op.in]: ["submitted", "verified"] } },
+    }),
+    User.findOne({ where: { email } }),
+  ]);
+
+  if (existing) {
+    return res.status(409).json({
+      message:
+        `${existing.businessName} already has a ${existing.registrationStatus} registration ` +
+        `on file (${existing.referenceCode ?? "no reference"}). Open that record instead of ` +
+        `recording a second one.`,
+      existingVendorId: existing.id,
+    });
+  }
+  if (existingAccount) {
+    return res.status(409).json({
+      message: `${email} already belongs to a system account. Use a different address, or open the existing bidder record.`,
     });
   }
 
-  await vendor.update({
-    registrationStatus: "submitted",
-    reviewRemarks: null,
-    submittedAt: new Date(),
+  // A previously returned application is amended in place, so the review history
+  // of that business stays on one record.
+  const returned = await Vendor.findOne({
+    where: { contactEmail: email, registrationStatus: "returned" },
   });
 
-  // Workflow requirement 11: bidder requirements submitted. The unauthenticated
-  // intake path records the same action — this is the equivalent step for a
-  // bidder who already holds an account and is amending their accreditation.
+  let call = null;
+  if (announcementId) {
+    call = await Announcement.findByPk(announcementId);
+    if (!call) {
+      return res.status(400).json({
+        message: "That call for bidders could not be found.",
+        errors: { announcementId: "Choose a call from the list." },
+      });
+    }
+  }
+
+  const referenceCode = returned?.referenceCode ?? generateReferenceCode();
+
+  const profile = {
+    businessName: cleanBusinessName,
+    tin: String(tin ?? "").trim() || null,
+    organizationType: organizationType ?? "corporation",
+    isJointVenture: Boolean(isJointVenture),
+    isForeignBidder: Boolean(isForeignBidder),
+    philgepsRegistrationNo: String(philgepsRegistrationNo ?? "").trim() || null,
+    philgepsExpiry: philgepsExpiry || null,
+    isVatRegistered: isVatRegistered === undefined ? true : Boolean(isVatRegistered),
+    taxClassification: taxClassification ?? "goods",
+    contactEmail: email,
+    contactPerson: cleanContactPerson,
+    contactPhone: String(contactPhone ?? "").trim() || null,
+    address: String(address ?? "").trim() || null,
+    referenceCode,
+    announcementId: call?.id ?? null,
+    registrationStatus: "submitted",
+    receivedAt: received,
+    recordedByUserId: req.currentUser.id,
+    submittedAt: received,
+    reviewRemarks: null,
+    reviewedAt: null,
+    reviewedByUserId: null,
+  };
+
+  const vendor = await sequelize.transaction(async (transaction) => {
+    let record;
+    if (returned) {
+      await returned.update(profile, { transaction });
+      record = returned;
+    } else {
+      record = await Vendor.create(profile, { transaction });
+    }
+
+    // Replaced wholesale, so a document dropped from a resubmission is actually
+    // dropped rather than lingering from the previous attempt.
+    await VendorDocument.destroy({ where: { vendorId: record.id }, transaction });
+    await VendorDocument.bulkCreate(
+      declared
+        .filter((doc) => doc?.docType && doc?.label)
+        .map((doc) => ({
+          vendorId: record.id,
+          docType: String(doc.docType).slice(0, 120),
+          label: String(doc.label).slice(0, 255),
+          citation: doc.citation ? String(doc.citation).slice(0, 255) : null,
+          expiryDate: doc.expiryDate || null,
+          fileRef: null,
+          // Received, not yet examined. The officer logging the submission and
+          // the officer checking each paper against the IRR are the same person
+          // here, but they are separate acts and the second one is the audited
+          // one — so nothing arrives pre-approved.
+          status: "attached",
+        })),
+      { transaction }
+    );
+
+    return record;
+  });
+
+  const late = call?.registrationDeadline
+    ? received > new Date(call.registrationDeadline)
+    : false;
+
   await auditFromRequest(req, {
     actionType: AUDIT_ACTIONS.BIDDER_REQUIREMENTS_SUBMITTED,
     entityRef: "vendor",
     entityId: vendor.id,
-    summary: `Bidder requirements submitted for ${vendor.businessName}`,
+    summary: `Counter submission recorded for ${cleanBusinessName} (${referenceCode})`,
     afterState: {
-      businessName: vendor.businessName,
-      contactEmail: vendor.contactEmail,
-      documentsDeclared: (vendor.documents ?? []).length,
+      referenceCode,
+      businessName: cleanBusinessName,
+      contactEmail: email,
+      organizationType: profile.organizationType,
+      philgepsRegistrationNo: profile.philgepsRegistrationNo,
+      documentsReceived: declared.length,
+      receivedAt: received,
+      resubmission: Boolean(returned),
+      announcementId: call?.id ?? null,
+      announcementTitle: call?.title ?? null,
+      registrationDeadline: call?.registrationDeadline ?? null,
+      // On the record because it is the fact a protest would turn on.
+      receivedAfterDeadline: late,
     },
   });
 
-  res.json(serialize(await Vendor.findByPk(vendor.id, withIncludes)));
+  res.status(201).json({
+    ...serialize(await Vendor.findByPk(vendor.id, withIncludes)),
+    // Surfaced so the officer sees it immediately rather than discovering it at
+    // approval time. Recording a late submission is allowed — refusing it at the
+    // keyboard would not un-receive the papers — but it is flagged, not silent.
+    receivedAfterDeadline: late,
+  });
 };
 
 // ── BAC Secretariat review ──────────────────────────────────────────────────
@@ -296,6 +496,46 @@ export const reviewVendor = async (req, res) => {
     });
   }
 
+  // ── Every document must have been examined ────────────────────────────────
+  // The accreditation decision is a statement that the requirements are complete
+  // and valid. That statement cannot be made over papers nobody opened, so a
+  // registration with an unreviewed document cannot be verified — and one with a
+  // rejected document must be returned to the applicant rather than approved
+  // around the rejection.
+  //
+  // Returning and blacklisting are unaffected: those are exactly the decisions an
+  // officer reaches when the documents are wrong, and requiring a full review
+  // first would trap an obviously deficient application in the queue.
+  if (decision === "verify") {
+    const review = summariseDocumentReview(vendor.documents ?? []);
+
+    if (review.total === 0) {
+      return res.status(409).json({
+        message:
+          "This registration has no documents on file, so there is nothing to verify. Return it " +
+          "and ask the applicant to submit their requirements.",
+      });
+    }
+    if (review.unreviewed > 0) {
+      return res.status(409).json({
+        message:
+          `${review.unreviewed} document${review.unreviewed === 1 ? "" : "s"} on this registration ` +
+          `${review.unreviewed === 1 ? "has" : "have"} not been reviewed yet: ` +
+          `${review.unreviewedLabels.join(", ")}. Check each one before approving the bidder.`,
+        documentReview: review,
+      });
+    }
+    if (review.rejected > 0) {
+      return res.status(409).json({
+        message:
+          `${review.rejectedLabels.join(", ")} ${review.rejected === 1 ? "was" : "were"} marked ` +
+          "invalid, so this registration cannot be verified. Return it to the applicant with " +
+          "remarks so they can supply a replacement.",
+        documentReview: review,
+      });
+    }
+  }
+
   const statusByDecision = { verify: "verified", return: "returned", blacklist: "blacklisted" };
   const previousStatus = vendor.registrationStatus;
 
@@ -322,6 +562,9 @@ export const reviewVendor = async (req, res) => {
       // later activation check depends, so it is on the record here.
       accreditedEmail: vendor.contactEmail,
       remarks: remarks?.trim() ?? null,
+      // How many papers stood behind the decision. An approval recorded with a
+      // document count of zero would be visible as such in the log.
+      documentsExamined: (vendor.documents ?? []).length,
     },
   });
 
@@ -345,16 +588,122 @@ export const reviewVendor = async (req, res) => {
     severity: decision === "verify" ? "success" : "danger",
   });
 
+  // ── Hand off to Admin/IT ──────────────────────────────────────────────────
+  // The Secretariat's approval is not the end of onboarding, it is the trigger
+  // for the next office. Since the Secretariat can no longer create the account
+  // itself, an approved registration would otherwise sit in a queue that nobody
+  // is prompted to look at — the bidder would be told they were approved and
+  // then wait indefinitely for an account that no one knew to issue.
+  //
+  // Addressed by permission rather than by role, so the matrix stays the single
+  // source of truth for who Admin/IT actually is.
+  if (decision === "verify") {
+    await notifyByPermission("bidders.createAccount", {
+      type: NOTIFICATION_EVENTS.BIDDER_AWAITING_ACCOUNT,
+      title: "Approved bidder awaiting an account",
+      body:
+        `${vendor.businessName} was verified by the BAC Secretariat and needs an account ` +
+        `issued to ${vendor.contactEmail}.`,
+      link: "/admin/bidder-accounts",
+      refEntity: "vendor",
+      refId: vendor.id,
+      severity: "info",
+    });
+  }
+
+  res.json(serialize(await Vendor.findByPk(vendor.id, withIncludes)));
+};
+
+/**
+ * Records the reviewing officer's decision on a single submitted document.
+ *
+ * This is the act the accreditation decision is built out of. Previously the
+ * Secretariat could only accept or return a registration as a whole, which meant
+ * "one certificate has expired" and "none of this is right" were the same
+ * message to the applicant, and the reviewer's actual findings were never
+ * written down anywhere.
+ *
+ * Deliberately reversible: a document may be re-marked while the registration is
+ * still under review, because an officer who mis-clicks on item three of eleven
+ * should not have to send the whole application back to fix it. It becomes
+ * immutable when the registration itself is decided.
+ */
+export const reviewVendorDocument = async (req, res) => {
+  const { status, remarks } = req.body ?? {};
+  const vendor = await Vendor.findByPk(req.params.id, withIncludes);
+  if (!vendor) return res.status(404).json({ message: "Vendor not found." });
+
+  // Only while the application is actually in front of the reviewer. Marking
+  // documents on an already-decided registration would let the evidence be
+  // rewritten after the decision it supposedly supported.
+  if (vendor.registrationStatus !== "submitted") {
+    return res.status(409).json({
+      message:
+        "Documents can only be reviewed while the registration is submitted and under review. " +
+        `This one is ${vendor.registrationStatus}.`,
+    });
+  }
+
+  const document = (vendor.documents ?? []).find(
+    (doc) => String(doc.id) === String(req.params.documentId)
+  );
+  if (!document) {
+    return res.status(404).json({ message: "That document is not part of this registration." });
+  }
+
+  if (!DOCUMENT_DECISIONS.includes(status)) {
+    return res.status(400).json({ message: "Decision must be verified or rejected." });
+  }
+
+  // A rejection is what the applicant has to act on, so it has to say what is
+  // wrong. An approval needs no explanation.
+  const cleanRemarks = String(remarks ?? "").trim();
+  if (status === "rejected" && !cleanRemarks) {
+    return res.status(400).json({
+      message:
+        "Say what is wrong with this document. The applicant is shown these remarks and cannot " +
+        "correct a rejection that does not explain itself.",
+    });
+  }
+
+  const previousStatus = document.status;
+  await document.update({ status, remarks: cleanRemarks || null });
+
+  await auditFromRequest(req, {
+    actionType: AUDIT_ACTIONS.BIDDER_DOCUMENT_REVIEWED,
+    entityRef: "vendor",
+    entityId: vendor.id,
+    outcome: status === "verified" ? "success" : "denied",
+    summary: `${document.label} for ${vendor.businessName} marked ${status}`,
+    beforeState: { docType: document.docType, status: previousStatus },
+    afterState: {
+      docType: document.docType,
+      label: document.label,
+      status,
+      remarks: cleanRemarks || null,
+      // The citation the requirement came from, so the log shows which rule the
+      // officer was checking against.
+      citation: document.citation,
+    },
+  });
+
   res.json(serialize(await Vendor.findByPk(vendor.id, withIncludes)));
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 2 of bidder onboarding: an authorized official creates the account.
+// Step 3 of bidder onboarding: Admin/IT creates the account.
 //
 // This is the gate the whole design turns on. There is no path by which a bidder
 // can bring an account into existence — this endpoint is the only one that
 // creates a vendor user, it requires the `bidders.createAccount` permission, and
-// it will only act on a registration an officer has already marked verified.
+// it will only act on a registration the BAC has already marked verified.
+//
+// Two offices must act before a bidder can sign in, and neither can do the
+// other's half: the BAC Secretariat approves the requirements (`bidding.publish`)
+// but cannot issue a credential, and Admin/IT issues the credential
+// (`bidders.createAccount`) but cannot approve a registration. The check below
+// on `registrationStatus !== "verified"` is what makes that ordering binding
+// rather than merely conventional — Admin/IT cannot skip ahead of the review.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The account is created with a password nobody knows, including the officer who

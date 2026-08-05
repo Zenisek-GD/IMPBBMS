@@ -61,11 +61,18 @@ export function ThemeProvider({ children }) {
   // correct it, which is exactly the flash the local cache exists to avoid.
   //
   // Precedence: this session's choice → the account's saved setting → whatever
-  // this browser last cached for them → follow the OS.
+  // this browser last cached for them → light.
+  //
+  // The fallback is LIGHT, not 'system'. Following the OS meant anyone whose
+  // machine is set to dark — which is most phones by default — opened a municipal
+  // records portal in dark mode without ever asking for it. This is a government
+  // publication first: light is its default appearance, and dark is available to
+  // whoever explicitly picks it. Choosing 'system' is still supported and still
+  // honoured; it is simply no longer assumed.
   const preference =
     override?.key === storageKey
       ? override.value
-      : (user?.themePreference ?? readStored(storageKey) ?? 'system')
+      : (user?.themePreference ?? readStored(storageKey) ?? 'light')
 
   // Track the OS setting so "system" stays live rather than being sampled once.
   useEffect(() => {

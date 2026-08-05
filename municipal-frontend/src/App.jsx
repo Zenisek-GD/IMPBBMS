@@ -11,7 +11,6 @@ import RoleWorkspace from './pages/dashboards/RoleWorkspace'
 import AdminUsers from './pages/dashboards/AdminUsers'
 import AdminDepartments from './pages/dashboards/AdminDepartments'
 import AdminSettings from './pages/dashboards/AdminSettings'
-import VendorRegistration from './pages/supplier/VendorRegistration'
 import BidOpportunities from './pages/supplier/BidOpportunities'
 import AppEntries from './pages/app/AppEntries'
 import PurchaseRequisitions from './pages/pr/PurchaseRequisitions'
@@ -30,7 +29,7 @@ import DssDashboard from './pages/insights/DssDashboard'
 import TransparencyPortal from './pages/insights/TransparencyPortal'
 import PublicTransparency from './pages/public/PublicTransparency'
 import PublicProjectDetail from './pages/public/PublicProjectDetail'
-import BidderRegistration from './pages/public/BidderRegistration'
+import AnnouncementsAdmin from './pages/announcements/AnnouncementsAdmin'
 
 // Each route declares which roles may reach it, mirroring the permission
 // matrix in design doc Section 2.3. The backend enforces the same rules.
@@ -62,11 +61,11 @@ function App() {
       <Route path="/" element={<PublicTransparency />} />
       <Route path="/projects/:id" element={<PublicProjectDetail />} />
 
-      {/* Bidder accreditation intake. Public because a prospective bidder has no
-          account yet — and, crucially, does not get one here. This submits an
-          application for the BAC Secretariat to review; the account is created
-          later by an authorized official. */}
-      <Route path="/bidder-registration" element={<BidderRegistration />} />
+      {/* There is deliberately no bidder-accreditation route here.
+          Accreditation requirements are submitted on paper at the BAC office and
+          keyed in by the officer who receives them, so the public surface has no
+          write path at all — see municipal_backend/routes/publicRoutes.js. */}
+
       {/* Kept so existing links and printed QR codes still resolve. */}
       <Route path="/public/transparency" element={<PublicTransparency />} />
       <Route path="/public/projects/:id" element={<PublicProjectDetail />} />
@@ -85,6 +84,10 @@ function App() {
                   'departmentRequester',
                   'bacSecretariat',
                   'budgetOfficer',
+                  // The Treasurer certifies cash availability on requisitions
+                  // (LGC Sec. 344), so they need to reach this page — without
+                  // this they held the permission but had no route to use it.
+                  'municipalTreasurer',
                   'hope',
                   'bacChairperson',
                   'bacMember',
@@ -109,6 +112,14 @@ function App() {
             <Route path="/admin/departments" element={<AdminDepartments />} />
             <Route path="/admin/settings" element={<AdminSettings />} />
             <Route path="/admin/thresholds" element={<AdminSettings />} />
+
+            {/* The Admin/IT end of bidder onboarding. Same screen the
+                Secretariat uses, because it is the same queue — but the two
+                roles can do different things to it, and the page decides which
+                controls to render from the caller's permissions rather than
+                from which URL they arrived at. Admin/IT issues accounts here;
+                it cannot review a registration. */}
+            <Route path="/admin/bidder-accounts" element={<VendorVerification />} />
           </Route>
 
           <Route element={<RoleRoute allow={['hope']} />}>
@@ -127,6 +138,14 @@ function App() {
             <Route path="/secretariat" element={<RoleWorkspace />} />
             <Route path="/secretariat/rfq" element={<RfqManagement />} />
             <Route path="/secretariat/vendors" element={<VendorVerification />} />
+          </Route>
+
+          {/* Public announcements. Shared by the two roles that hold
+              `announcements.manage`: the Secretariat advertises procurement,
+              the Administrator posts system notices. The backend enforces the
+              permission — this list only decides what the nav can reach. */}
+          <Route element={<RoleRoute allow={['bacSecretariat', 'systemAdministrator']} />}>
+            <Route path="/announcements/manage" element={<AnnouncementsAdmin />} />
           </Route>
 
           {/* Audit log: Internal Auditor sees everything; the System
@@ -227,7 +246,9 @@ function App() {
 
           <Route element={<RoleRoute allow={['vendor']} />}>
             <Route path="/supplier" element={<RoleWorkspace />} />
-            <Route path="/supplier/eligibility" element={<VendorRegistration />} />
+            {/* No /supplier/eligibility route. A bidder cannot file or amend
+                accreditation requirements online; an amendment is a fresh
+                counter submission recorded by an officer. */}
             <Route path="/supplier/opportunities" element={<BidOpportunities />} />
           </Route>
 

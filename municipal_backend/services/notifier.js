@@ -14,7 +14,13 @@ export const NOTIFICATION_EVENTS = {
   VENDOR_VERIFIED: "vendor.verified",
   VENDOR_RETURNED: "vendor.returned",
   BIDDER_REQUIREMENTS_SUBMITTED: "bidder.requirements.submitted",
+  // The handoff between the two offices in bidder onboarding: the BAC has
+  // approved the accreditation, and it now needs Admin/IT to issue the account.
+  // Without this the approved registration would sit in a queue nobody is
+  // prompted to look at.
+  BIDDER_AWAITING_ACCOUNT: "bidder.awaiting.account",
   BIDDER_ACCOUNT_ACTIVATED: "bidder.account.activated",
+  ANNOUNCEMENT_PUBLISHED: "announcement.published",
   APP_APPROVED: "app.approved",
   PR_RETURNED: "pr.returned",
   PR_APPROVED: "pr.approved",

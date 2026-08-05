@@ -23,8 +23,14 @@ export const fetchProjectTimeline = (id) =>
 export const fetchProjectDocuments = (id) =>
   apiClient.get(`${PUBLIC}/projects/${id}/documents`).then((res) => res.data)
 
+// Written notices and currently-open solicitations, merged. Each entry carries
+// a `source` of 'announcement' or 'solicitation'.
 export const fetchAnnouncements = () =>
   apiClient.get(`${PUBLIC}/announcements`).then((res) => res.data)
+
+// No open-calls helper here any more. The list of calls an application can be
+// recorded against is now an authenticated, permission-gated call used by the
+// officer at the counter — see fetchOpenCalls in api/announcements.js.
 
 // Built rather than fetched: the browser follows this as a normal download, so
 // the file never passes through axios.

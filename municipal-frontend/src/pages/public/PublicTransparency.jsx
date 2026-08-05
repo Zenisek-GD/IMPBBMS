@@ -1,85 +1,158 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Search,
+  ArrowRight,
+  ArrowDownRight,
+  FileWarning,
   Building2,
-  Wallet,
   CheckCircle2,
   Loader2,
   CalendarClock,
-  ArrowRight,
-  FileWarning,
-  Landmark,
 } from 'lucide-react'
 import * as publicApi from '../../api/publicProjects'
 import PublicHeader from '../../components/public/PublicHeader'
 import PublicFooter from '../../components/public/PublicFooter'
+import AnnouncementFeed from '../../components/public/AnnouncementFeed'
 import Pagination from '../../components/ui/Pagination'
 import { usePagination } from '../../components/ui/usePagination'
 
-// The default landing page of the whole system. A visitor arrives here with no
-// account and no prompt to create one: the procurement record is the front
-// door, and signing in is the exception reserved for the officials who have to
-// act on it.
+// ─────────────────────────────────────────────────────────────────────────────
+// The front door of the whole system: a visitor arrives with no account and no
+// prompt to create one.
+//
+// Styled after the supplied dashboard reference — its design language, not its
+// content. What was taken: generous corner radii, pill-shaped controls, one dark
+// "feature" tile anchoring a row of light ones, small-caps muted labels above
+// large figures, soft green chips, and a delta line under each figure. What was
+// not: its colour-saturated charts everywhere, and any figure the data does not
+// actually support. Every delta below is computed from real published records —
+// there is no "than last month" here, because this system has no month-over-month
+// series to honestly compare against.
+//
+// Backgrounds are white, per instruction: page and cards share one white, and
+// hairline borders do the separating. That makes `border-border-muted` load
+// bearing on every card rather than decorative.
+// ─────────────────────────────────────────────────────────────────────────────
 
 const peso = (value) =>
   value === null || value === undefined
     ? '—'
     : `₱${Number(value).toLocaleString('en-PH', { maximumFractionDigits: 0 })}`
 
-// Status is carried by the badge alone. There used to be a coloured bar down
-// the left edge of every card and a status-coloured progress bar to match,
-// which meant a grid of six projects showed six large blocks of green and
-// orange before any of the text registered — decoration competing with the
-// figures rather than supporting them. The badge is small, labelled and
-// sufficient; the progress bar is now neutral so length, not hue, carries it.
+const compactPeso = (value) => {
+  if (value === null || value === undefined) return '—'
+  const n = Number(value)
+  if (n >= 1_000_000_000) return `₱${(n / 1_000_000_000).toFixed(2)}B`
+  if (n >= 1_000_000) return `₱${(n / 1_000_000).toFixed(2)}M`
+  return peso(n)
+}
+
 const CATEGORY_STYLES = {
-  completed: {
-    label: 'Completed',
-    className: 'border-success/25 bg-success/10 text-success',
-    icon: CheckCircle2,
-  },
-  ongoing: {
-    label: 'Ongoing',
-    className: 'border-warning/25 bg-warning/10 text-warning',
-    icon: Loader2,
-  },
+  completed: { label: 'Completed', chip: 'bg-chip text-success', icon: CheckCircle2 },
+  ongoing: { label: 'Ongoing', chip: 'bg-warning/10 text-warning', icon: Loader2 },
   upcoming: {
     label: 'Upcoming',
-    className: 'border-border-muted bg-sidebar text-text-secondary',
+    chip: 'bg-sidebar text-text-secondary',
     icon: CalendarClock,
   },
 }
 
 const TABS = [
-  { key: 'all', label: 'All Projects' },
+  { key: 'all', label: 'All' },
   { key: 'completed', label: 'Completed' },
   { key: 'ongoing', label: 'Ongoing' },
   { key: 'upcoming', label: 'Upcoming' },
 ]
 
-// The figures band. These cards lift off the hero rather than sitting flat on
-// the canvas — the overlap is what makes the top of the page read as one
-// composed block instead of a heading with boxes underneath it.
-function StatTile({ label, value, hint, icon: Icon }) {
+// ── The dark feature tile ───────────────────────────────────────────────────
+// The reference anchors its figure row with one near-black card among light
+// ones. The chart inside is a real breakdown of the published portfolio by
+// lifecycle stage, not decoration — three segments that sum to the number above
+// them.
+function FeatureTile({ overview }) {
+  const total = overview?.totalProjects ?? 0
+  const segments = [
+    { key: 'ongoing', label: 'Ongoing', value: overview?.ongoing ?? 0, className: 'bg-eco' },
+    {
+      key: 'completed',
+      label: 'Completed',
+      value: overview?.completed ?? 0,
+      className: 'bg-eco/55',
+    },
+    {
+      key: 'upcoming',
+      label: 'Upcoming',
+      value: overview?.upcoming ?? 0,
+      className: 'bg-white/25',
+    },
+  ]
+
   return (
-    <div className="rounded-lg border border-border-muted bg-surface p-4 shadow-sm">
-      <div className="flex items-center gap-2.5">
-        {Icon && (
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-chip text-navy">
-            <Icon size={14} />
-          </span>
-        )}
-        <p className="text-[10.5px] font-medium tracking-[0.05em] text-text-faint uppercase">{label}</p>
-      </div>
-      <p className="tabular-nums mt-2.5 text-[22px] leading-none font-semibold tracking-[-0.02em] text-navy">
-        {value}
+    <div className="rounded-xl bg-brand p-5">
+      <p className="text-[11px] font-medium tracking-[0.08em] text-topnav-link uppercase">
+        Published projects
       </p>
-      {hint && <p className="mt-1.5 text-[11.5px] leading-snug text-text-faint">{hint}</p>}
+
+      <div className="mt-3 flex items-end gap-2">
+        <p className="tabular-nums text-[30px] leading-none font-semibold tracking-[-0.03em] text-brand-fg">
+          {overview ? total : '—'}
+        </p>
+        <span className="pb-0.5 text-[12px] text-topnav-link">on the public record</span>
+      </div>
+
+      {/* One bar, three real segments. A legend rather than axis labels: at this
+          size a labelled axis is unreadable, and the figures are named below. */}
+      <div className="mt-5 flex h-2 overflow-hidden rounded-full bg-white/10">
+        {total > 0 &&
+          segments.map((s) => (
+            <span
+              key={s.key}
+              className={s.className}
+              style={{ width: `${(s.value / total) * 100}%` }}
+            />
+          ))}
+      </div>
+
+      <ul className="mt-4 flex flex-col gap-2">
+        {segments.map((s) => (
+          <li key={s.key} className="flex items-center gap-2 text-[12px]">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${s.className}`} />
+            <span className="text-topnav-link">{s.label}</span>
+            <span className="tabular-nums ml-auto font-medium text-brand-fg">{s.value}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
 
+// A light figure tile. `delta` is optional and only ever passed a value the data
+// genuinely supports.
+function StatTile({ label, value, delta, hint }) {
+  return (
+    <div className="flex flex-col rounded-xl border border-border-muted bg-surface p-5 shadow-sm">
+      <p className="text-[11px] font-medium tracking-[0.08em] text-text-faint uppercase">{label}</p>
+
+      <p className="tabular-nums mt-3 text-[26px] leading-none font-semibold tracking-[-0.025em] text-navy">
+        {value}
+      </p>
+
+      {delta && (
+        <p className="mt-3 flex items-center gap-1.5 text-[12px] font-medium text-success">
+          <ArrowDownRight size={13} className="shrink-0" />
+          {delta}
+        </p>
+      )}
+
+      {hint && <p className="mt-auto pt-3 text-[12px] leading-snug text-text-faint">{hint}</p>}
+    </div>
+  )
+}
+
+// ── Project card ────────────────────────────────────────────────────────────
+// Card/box layout, kept as it was by request. Restyled to the reference: larger
+// radius, hairline border on white, soft green status chip, green progress bar.
 function ProjectCard({ project }) {
   const style = CATEGORY_STYLES[project.category] ?? CATEGORY_STYLES.upcoming
   const { financials } = project
@@ -87,44 +160,43 @@ function ProjectCard({ project }) {
   return (
     <Link
       to={`/projects/${project.id}`}
-      className="group flex flex-col gap-3.5 rounded-lg border border-border-muted bg-surface p-4 transition-colors duration-150 hover:border-border-strong focus:ring-2 focus:ring-accent/40 focus:outline-none"
+      className="group flex flex-col gap-4 rounded-xl border border-border-muted bg-surface p-5 shadow-sm transition-colors duration-150 hover:border-border-strong focus:border-accent focus:ring-2 focus:ring-accent/20 focus:outline-none"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span
-              className={`inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5 text-[10.5px] font-medium tracking-[0.04em] uppercase ${style.className}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${style.chip}`}
             >
-              <style.icon size={11} /> {style.label}
+              <style.icon size={12} /> {style.label}
             </span>
             {project.implementingUnitCode && (
-              <span className="rounded-sm border border-border-muted bg-sidebar px-1.5 py-0.5 font-mono text-[10.5px] text-text-secondary">
+              <span className="rounded-full border border-border-muted px-2.5 py-1 font-mono text-[11px] text-text-secondary">
                 {project.implementingUnitCode}
               </span>
             )}
-            <span className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">
+            <span className="text-[11px] tracking-[0.04em] text-text-faint uppercase">
               FY {project.fiscalYear}
             </span>
           </div>
 
-          <h3 className="mt-2 text-[14.5px] leading-snug font-semibold text-navy decoration-1 underline-offset-2 group-hover:underline">
+          <h3 className="mt-3 text-[16px] leading-snug font-semibold tracking-[-0.01em] text-navy decoration-1 underline-offset-2 group-hover:underline">
             {project.projectTitle}
           </h3>
-          <p className="mt-0.5 text-[12.5px] text-text-secondary">{project.implementingUnit}</p>
+          <p className="mt-1 text-[13px] text-text-secondary">{project.implementingUnit}</p>
         </div>
 
-        <ArrowRight
-          size={16}
-          className="mt-0.5 shrink-0 text-text-faint transition-transform group-hover:translate-x-0.5 group-hover:text-navy"
-        />
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border-muted text-text-faint transition-colors group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg">
+          <ArrowRight size={15} />
+        </span>
       </div>
 
       <div>
-        <div className="flex items-center justify-between text-[10.5px] tracking-[0.04em] uppercase">
+        <div className="flex items-center justify-between text-[11px] tracking-[0.04em] uppercase">
           <span className="font-medium text-text-secondary">{project.phaseLabel}</span>
           <span className="tabular-nums text-text-faint">{project.progressPercent}%</span>
         </div>
-        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-track">
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-track">
           <div
             className="h-full rounded-full bg-accent"
             style={{ width: `${project.progressPercent}%` }}
@@ -132,20 +204,22 @@ function ProjectCard({ project }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 border-t border-border-muted pt-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 border-t border-border-muted pt-4 sm:grid-cols-3">
         <div>
-          <p className="text-[10px] tracking-[0.04em] text-text-faint uppercase">Approved Budget</p>
-          <p className="tabular-nums mt-0.5 text-[13px] font-semibold text-navy">{peso(financials.budget)}</p>
+          <p className="text-[10.5px] tracking-[0.05em] text-text-faint uppercase">Approved budget</p>
+          <p className="tabular-nums mt-1 text-[14.5px] font-semibold text-navy">
+            {peso(financials.budget)}
+          </p>
         </div>
         <div>
-          <p className="text-[10px] tracking-[0.04em] text-text-faint uppercase">Contract Amount</p>
-          <p className="tabular-nums mt-0.5 text-[13px] font-semibold text-navy">
+          <p className="text-[10.5px] tracking-[0.05em] text-text-faint uppercase">Contract amount</p>
+          <p className="tabular-nums mt-1 text-[14.5px] font-semibold text-navy">
             {peso(financials.contractAmount)}
           </p>
         </div>
         <div className="col-span-2 sm:col-span-1">
-          <p className="text-[10px] tracking-[0.04em] text-text-faint uppercase">Awarded To</p>
-          <p className="mt-0.5 truncate text-[12.5px] text-text-secondary">{project.awardedTo ?? '—'}</p>
+          <p className="text-[10.5px] tracking-[0.05em] text-text-faint uppercase">Awarded to</p>
+          <p className="mt-1 truncate text-[13px] text-text-secondary">{project.awardedTo ?? '—'}</p>
         </div>
       </div>
     </Link>
@@ -156,11 +230,16 @@ export default function PublicTransparency() {
   const [overview, setOverview] = useState(null)
   const [filters, setFilters] = useState(null)
 
-  // The result carries the query it answers. Loading is then derived — the
-  // result is stale exactly when it does not match the current filters — rather
-  // than tracked by a flag flipped synchronously inside the effect, which
-  // triggers a cascading render on every filter change.
   const [result, setResult] = useState({ key: null, projects: [], failed: false })
+
+  // ── Which section is showing ──────────────────────────────────────────────
+  // Derived from the URL, not held in state. The section links live in the
+  // header now, and the header is rendered by pages that know nothing about this
+  // component — so `?view=` is the one place both can agree on. It also gives
+  // each section a shareable link and makes the browser Back button work
+  // between them, which a useState toggle could not.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view = searchParams.get('view') === 'announcements' ? 'announcements' : 'projects'
 
   const [tab, setTab] = useState('all')
   const [searchInput, setSearchInput] = useState('')
@@ -180,22 +259,17 @@ export default function PublicTransparency() {
         setOverview(overviewResult)
         setFilters(filtersResult)
       })
-      // If this fails the project request below fails too, and that is what
-      // surfaces the error state. Leaving the header figures blank is enough.
       .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [])
 
-  // Typing shouldn't fire a request per keystroke against a public endpoint.
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput.trim()), 300)
     return () => clearTimeout(timer)
   }, [searchInput])
 
-  // Serialised so the effect depends on one stable value, and so the result can
-  // be tagged with the query it answers.
   const queryKey = JSON.stringify({
     ...(search ? { search } : {}),
     ...(tab !== 'all' ? { category: tab } : {}),
@@ -205,7 +279,6 @@ export default function PublicTransparency() {
 
   useEffect(() => {
     let cancelled = false
-
     publicApi
       .fetchPublicProjects(JSON.parse(queryKey))
       .then((data) => {
@@ -214,7 +287,6 @@ export default function PublicTransparency() {
       .catch(() => {
         if (!cancelled) setResult({ key: queryKey, projects: [], failed: true })
       })
-
     return () => {
       cancelled = true
     }
@@ -223,14 +295,7 @@ export default function PublicTransparency() {
   const { projects, failed } = result
   const isLoading = result.key !== queryKey
 
-  // Four per page. The cards sit two-up on desktop, so four is two rows —
-  // which, under the header, stat tiles and filter bar, keeps the whole page
-  // close to a single screen instead of an endless column of cards. Readers
-  // who want more can raise it from the control itself.
-  //
-  // Changing the search or a filter replaces the array, which resets the page
-  // automatically.
-  const { pageRows: pageProjects, paginationProps } = usePagination(projects, 4)
+  const { pageRows: pageProjects, paginationProps } = usePagination(projects, 6)
 
   const tabCounts = useMemo(
     () => ({
@@ -242,200 +307,266 @@ export default function PublicTransparency() {
     [overview]
   )
 
+  // Both derived from figures the API already publishes, so neither invents a
+  // trend. Savings is budget-of-contracted minus contracted; the release rate is
+  // disbursed over contracted.
+  const savings =
+    overview?.contractedProjects && overview.budgetOfContracted > overview.totalContracted
+      ? overview.budgetOfContracted - overview.totalContracted
+      : null
+
+  const releaseRate =
+    overview?.totalContracted > 0
+      ? Math.round((overview.totalDisbursed / overview.totalContracted) * 100)
+      : null
+
+  // The hero buttons scroll as well as switch, since the reader is above the
+  // records when they press one. The header pills only switch — they are already
+  // in view and yanking the page would be disorienting.
+  const showSection = (next) => {
+    setSearchParams(next === 'announcements' ? { view: 'announcements' } : {})
+    document.getElementById('records')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const pillClass = (active) =>
+    `rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors ${
+      active
+        ? 'bg-accent text-accent-fg'
+        : 'text-text-secondary hover:bg-sidebar hover:text-navy'
+    }`
+
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
       <PublicHeader lguName={overview?.lgu?.name} />
 
       <main className="flex-1">
-        {/* ── PAGE HEADING ───────────────────────────────────────────────────
-            A records portal, not a product page. This replaced a full-bleed
-            dark hero carrying a slogan, a paragraph of prose and three
-            marketing pills — roughly 500px of screen before a visitor reached a
-            single figure. A citizen arriving here already knows why they came;
-            what they need is the office that published the records, the year
-            they cover, and then the records. */}
-        <section className="border-b border-border-muted bg-surface">
-          <div className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-8">
-            <p className="text-[10.5px] font-medium tracking-[0.1em] text-text-faint uppercase">
+        <div className="mx-auto w-full max-w-7xl px-4 sm:px-8">
+          {/* ── HERO ────────────────────────────────────────────────────────
+              One column, left-aligned, plenty of air. No decorative artwork:
+              the headline states what the site is, and the two pills are the
+              only things asking to be clicked. */}
+          <section className="pt-12 pb-10 sm:pt-16 sm:pb-12">
+            <p className="text-[11px] font-medium tracking-[0.12em] text-text-faint uppercase">
               Republic of the Philippines
               {overview?.lgu?.name ? ` · ${overview.lgu.name}` : ''}
             </p>
-            <h1 className="mt-1 text-[19px] leading-tight font-semibold tracking-[-0.015em] text-navy">
-              Procurement Transparency Portal
-            </h1>
-            <p className="mt-1 max-w-3xl text-[12.5px] text-text-secondary">
-              Published procurement records — plans, bidding, awards, contracts and payments, each with the
-              officials who approved it. Open to the public under RA 12009; no account required.
-            </p>
-          </div>
-        </section>
 
-        <div className="mx-auto mt-5 w-full max-w-7xl px-4 sm:px-8">
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <h1 className="mt-4 max-w-3xl text-[32px] leading-[1.12] font-semibold tracking-[-0.03em] text-navy sm:text-[42px]">
+              Every peso of municipal procurement, on the public record.
+            </h1>
+
+            <p className="mt-5 max-w-2xl text-[15.5px] leading-relaxed text-text-secondary sm:text-[16.5px]">
+              Procurement plans, bidding, awards, contracts and payments — each published with the
+              office that raised it and the officials who approved it. Open to everyone under RA
+              12009. No account required.
+            </p>
+
+            <div className="mt-8 flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => showSection('projects')}
+                className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-accent-fg transition-opacity hover:opacity-90 focus:ring-2 focus:ring-accent/30 focus:ring-offset-2 focus:outline-none"
+              >
+                Browse projects
+                <ArrowRight size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => showSection('announcements')}
+                className="inline-flex items-center gap-2 rounded-full border border-border-strong px-5 py-2.5 text-[13.5px] font-medium text-navy transition-colors hover:bg-sidebar focus:ring-2 focus:ring-accent/20 focus:outline-none"
+              >
+                Announcements
+              </button>
+            </div>
+          </section>
+
+          {/* ── FIGURES ─────────────────────────────────────────────────────
+              One dark tile among three light ones, as in the reference. */}
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Key figures">
+            <FeatureTile overview={overview} />
+
             <StatTile
-              label="Published Projects"
-              value={overview?.totalProjects ?? '—'}
-              hint={
-                overview
-                  ? `${overview.ongoing} ongoing · ${overview.completed} completed · ${overview.upcoming} upcoming`
-                  : undefined
-              }
-              icon={Building2}
+              label="Approved budget"
+              value={overview ? compactPeso(overview.totalBudget) : '—'}
+              hint="Authorised by appropriation ordinance"
             />
+
             <StatTile
-              label="Approved Budget"
-              value={overview ? peso(overview.totalBudget) : '—'}
-              hint="Authorised by ordinance"
-              icon={Landmark}
-            />
-            <StatTile
-              label="Total Contracted"
-              value={overview ? peso(overview.totalContracted) : '—'}
-              // Savings compare like with like: the contracted value against the
-              // budget of the projects that were actually contracted, not against
-              // every project on the plan.
+              label="Total contracted"
+              value={overview ? compactPeso(overview.totalContracted) : '—'}
+              // A real figure, not a period-over-period invention: what the
+              // awarded projects were budgeted at, less what they were let for.
+              delta={savings ? `${compactPeso(savings)} below budget` : undefined}
               hint={
                 overview?.contractedProjects
-                  ? `${peso(overview.budgetOfContracted - overview.totalContracted)} below budget across ${
-                      overview.contractedProjects
-                    } awarded ${overview.contractedProjects === 1 ? 'project' : 'projects'}`
+                  ? `Across ${overview.contractedProjects} awarded ${
+                      overview.contractedProjects === 1 ? 'project' : 'projects'
+                    }`
                   : undefined
               }
-              icon={CheckCircle2}
             />
+
             <StatTile
-              label="Total Disbursed"
-              value={overview ? peso(overview.totalDisbursed) : '—'}
-              hint="Released from the treasury"
-              icon={Wallet}
+              label="Total disbursed"
+              value={overview ? compactPeso(overview.totalDisbursed) : '—'}
+              hint={
+                releaseRate !== null
+                  ? `${releaseRate}% of contracted value released from the treasury`
+                  : 'Released from the treasury'
+              }
             />
           </section>
-        </div>
 
-        <div className="mx-auto w-full max-w-7xl px-4 pb-10 sm:px-8">
-          {/* One toolbar surface rather than four controls loose on the canvas.
-            Search, category and the two filters are a single act — narrowing
-            the list — so they belong in a single container. */}
-          <section className="mt-8 overflow-hidden rounded-lg border border-border-muted bg-surface shadow-sm">
-            <div className="relative border-b border-border-muted">
-              <Search size={16} className="absolute top-1/2 left-4 -translate-y-1/2 text-text-faint" />
-              <input
-                type="search"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="Search projects by title, description or reference code…"
-                aria-label="Search projects"
-                className="w-full bg-transparent py-3.5 pr-4 pl-11 text-[13.5px] text-navy placeholder:text-text-faint focus:outline-none"
-              />
+          {/* ── RECORDS ─────────────────────────────────────────────────── */}
+          <div id="records" className="scroll-mt-6 pt-14 pb-16">
+            {/* The section switch used to sit here as a pill group. It moved to
+                the header, so this is now just the heading for whichever section
+                the header selected — duplicating the control in both places
+                would leave two "you are here" indicators to keep in step. */}
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="text-[20px] font-semibold tracking-[-0.02em] text-navy">
+                {view === 'announcements' ? 'Announcements' : 'Procurement projects'}
+              </h2>
+              <p className="text-[13px] text-text-faint">
+                {view === 'announcements'
+                  ? 'Notices, open procurements and system updates'
+                  : `${tabCounts.all} published ${tabCounts.all === 1 ? 'project' : 'projects'}`}
+              </p>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 p-2.5">
-              {/* Segmented control: one connected group reads as "pick one of
-                these", which four separate outlined buttons did not. */}
-              <div className="flex flex-wrap items-center gap-1 rounded-md bg-sidebar p-0.5">
-                {TABS.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => setTab(item.key)}
-                    aria-pressed={tab === item.key}
-                    className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-[11.5px] font-medium transition-colors ${
-                      tab === item.key
-                        ? 'bg-surface text-navy shadow-sm'
-                        : 'text-text-secondary hover:text-navy'
-                    }`}
-                  >
-                    {item.label}
-                    <span
-                      className={`tabular-nums rounded px-1.5 py-px text-[10.5px] ${
-                        tab === item.key ? 'bg-chip text-navy' : 'text-text-faint'
-                      }`}
-                    >
-                      {tabCounts[item.key]}
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <select
-                  value={fiscalYear}
-                  onChange={(event) => setFiscalYear(event.target.value)}
-                  aria-label="Filter by fiscal year"
-                  className="rounded-md border border-border-muted bg-surface px-2.5 py-1.5 text-[12px] text-text-secondary transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
-                >
-                  <option value="">All fiscal years</option>
-                  {(filters?.fiscalYears ?? []).map((year) => (
-                    <option key={year} value={year}>
-                      FY {year}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  value={department}
-                  onChange={(event) => setDepartment(event.target.value)}
-                  aria-label="Filter by implementing office"
-                  className="max-w-[15rem] rounded-md border border-border-muted bg-surface px-2.5 py-1.5 text-[12px] text-text-secondary transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
-                >
-                  <option value="">All offices</option>
-                  {(filters?.departments ?? []).map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </section>
-
-          <section className="mt-6" aria-live="polite">
-            {failed ? (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-border-muted bg-surface px-4 py-12 text-center">
-                <FileWarning size={22} className="text-text-faint" />
-                <p className="text-sm font-medium text-navy">Records could not be loaded</p>
-                <p className="max-w-md text-[13px] text-text-secondary">
-                  The transparency service is not responding. Please try again shortly.
-                </p>
-              </div>
-            ) : isLoading && projects.length === 0 ? (
-              // Skeletons rather than a line of text: the layout holds its shape
-              // while loading, so the page does not jump when the data lands.
-              <div className="grid gap-4 lg:grid-cols-2">
-                {[0, 1, 2, 3].map((key) => (
-                  <div
-                    key={key}
-                    className="h-44 animate-pulse rounded-lg border border-border-muted bg-surface"
-                  />
-                ))}
-              </div>
-            ) : projects.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-border-muted bg-surface px-4 py-12 text-center">
-                <Search size={22} className="text-text-faint" />
-                <p className="text-sm font-medium text-navy">No projects match your search</p>
-                <p className="max-w-md text-[13px] text-text-secondary">
-                  Try a different keyword, or clear the filters to see every published project.
-                </p>
+            {view === 'announcements' ? (
+              <div className="mt-8">
+                <AnnouncementFeed />
               </div>
             ) : (
               <>
-                {search && <p className="mb-4 text-[13px] text-text-faint">Matching “{search}”</p>}
-                <div className="grid gap-4 lg:grid-cols-2">
-                  {pageProjects.map((project) => (
-                    <ProjectCard key={project.id} project={project} />
-                  ))}
+                {/* Controls on one card surface, pill filters inside it. */}
+                <div className="mt-6 flex flex-col gap-4 rounded-xl border border-border-muted bg-surface p-4">
+                  <div className="relative">
+                    <Search
+                      size={16}
+                      className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-text-faint"
+                    />
+                    <input
+                      type="search"
+                      value={searchInput}
+                      onChange={(event) => setSearchInput(event.target.value)}
+                      placeholder="Search by title, description or reference code"
+                      aria-label="Search projects"
+                      className="w-full rounded-full border border-border-muted bg-canvas py-2.5 pr-4 pl-10 text-[14px] text-navy transition-colors placeholder:text-text-faint focus:border-accent focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {TABS.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => setTab(item.key)}
+                          aria-pressed={tab === item.key}
+                          className={pillClass(tab === item.key)}
+                        >
+                          {item.label}
+                          <span
+                            className={`tabular-nums ml-1.5 text-[11.5px] ${
+                              tab === item.key ? 'opacity-70' : 'text-text-faint'
+                            }`}
+                          >
+                            {tabCounts[item.key]}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <select
+                        value={fiscalYear}
+                        onChange={(event) => setFiscalYear(event.target.value)}
+                        aria-label="Filter by fiscal year"
+                        className="rounded-full border border-border-muted bg-surface px-3.5 py-1.5 text-[12.5px] text-text-secondary transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                      >
+                        <option value="">All fiscal years</option>
+                        {(filters?.fiscalYears ?? []).map((year) => (
+                          <option key={year} value={year}>
+                            FY {year}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={department}
+                        onChange={(event) => setDepartment(event.target.value)}
+                        aria-label="Filter by implementing office"
+                        className="max-w-[14rem] rounded-full border border-border-muted bg-surface px-3.5 py-1.5 text-[12.5px] text-text-secondary transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                      >
+                        <option value="">All offices</option>
+                        {(filters?.departments ?? []).map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Paged rather than an endless column. A citizen looking for one
-                  project should not have to scroll past every other one to
-                  reach the end of the list, and the count tells them how much
-                  there is before they start. */}
-                <div className="mt-4 overflow-hidden rounded-lg border border-border-muted bg-surface">
-                  <Pagination {...paginationProps} label="projects" pageSizeOptions={[4, 8, 16, 32]} />
-                </div>
+                <section className="mt-6" aria-live="polite">
+                  {failed ? (
+                    <div className="flex flex-col items-center gap-2 rounded-xl border border-border-muted bg-surface px-4 py-16 text-center">
+                      <FileWarning size={22} className="text-text-faint" />
+                      <p className="text-[15px] font-medium text-navy">Records could not be loaded</p>
+                      <p className="max-w-md text-[13.5px] text-text-secondary">
+                        The transparency service is not responding. Please try again shortly.
+                      </p>
+                    </div>
+                  ) : isLoading && projects.length === 0 ? (
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      {[0, 1, 2, 3].map((key) => (
+                        <div
+                          key={key}
+                          className="h-56 animate-pulse rounded-xl border border-border-muted bg-sidebar"
+                        />
+                      ))}
+                    </div>
+                  ) : projects.length === 0 ? (
+                    <div className="flex flex-col items-center gap-2 rounded-xl border border-border-muted bg-surface px-4 py-16 text-center">
+                      <Building2 size={22} className="text-text-faint" />
+                      <p className="text-[15px] font-medium text-navy">
+                        No projects match your search
+                      </p>
+                      <p className="max-w-md text-[13.5px] text-text-secondary">
+                        Try a different keyword, or clear the filters to see every published project.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {search && (
+                        <p className="mb-4 text-[13px] text-text-faint">
+                          {projects.length} {projects.length === 1 ? 'result' : 'results'} for “
+                          {search}”
+                        </p>
+                      )}
+
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        {pageProjects.map((project) => (
+                          <ProjectCard key={project.id} project={project} />
+                        ))}
+                      </div>
+
+                      <div className="mt-5 overflow-hidden rounded-xl border border-border-muted bg-surface">
+                        <Pagination
+                          {...paginationProps}
+                          label="projects"
+                          pageSizeOptions={[6, 12, 24]}
+                        />
+                      </div>
+                    </>
+                  )}
+                </section>
               </>
             )}
-          </section>
+          </div>
         </div>
       </main>
 

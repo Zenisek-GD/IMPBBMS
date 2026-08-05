@@ -28,10 +28,13 @@
             return k !== 'civicbid.theme.public'
           })
           var pref = localStorage.getItem(owned[0] || 'civicbid.theme.public')
+          // No stored preference means LIGHT, not "ask the OS". A first-time
+          // visitor on a dark-mode phone should still see a government records
+          // portal in its default appearance; dark is opt-in. Someone who has
+          // explicitly chosen 'system' still gets the OS setting.
           var dark =
             pref === 'dark' ||
-            ((!pref || pref === 'system') &&
-              window.matchMedia('(prefers-color-scheme: dark)').matches)
+            (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
           document.documentElement.classList.toggle('dark', dark)
           document.documentElement.dataset.theme = dark ? 'dark' : 'light'
         } catch (e) {

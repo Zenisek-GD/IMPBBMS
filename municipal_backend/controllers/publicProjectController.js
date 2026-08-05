@@ -4,6 +4,7 @@ import { Role } from "../models/roleModel.js";
 import { Department } from "../models/departmentModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
+import { Announcement, acceptsRegistrations } from "../models/announcementModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import {
   listPublicProjects,
@@ -331,21 +332,84 @@ export const downloadProjectDocument = async (req, res) => {
   res.send(document.content);
 };
 
-// Announcements: currently advertised solicitations, which is what a supplier
-// or citizen checking "what is open right now" is looking for.
+// ── ANNOUNCEMENTS ────────────────────────────────────────────────────────────
+// Two things arrive on this page and they answer different questions.
+//
+// A *solicitation* is derived: an RFQ that has been published is, by definition,
+// an open procurement, and it should appear here without anyone remembering to
+// write a post about it. But a derived list can only ever describe procurement
+// that has already formally started, and the notice that matters most to a
+// prospective bidder is the one that goes up before it does — "we intend to
+// procure this, get accredited now". Nothing derived from an RFQ can say that,
+// because there is no RFQ yet.
+//
+// So authored announcements are merged in alongside. Each entry carries its
+// `source` so the portal can tell a written notice from an automatic listing,
+// and pinned notices are held at the top regardless of date.
+
+const DAY_MS = 86400000;
+const daysUntil = (date, now) =>
+  date ? Math.ceil((new Date(date) - now) / DAY_MS) : null;
+
+// The public view of an authored notice. Explicitly serialised, per rule 3
+// above: `status`, the author, the publisher and the withdrawal reason all exist
+// on the row and none of them belongs on a public page.
+const publicAnnouncement = (announcement, now) => ({
+  source: "announcement",
+  id: announcement.id,
+  title: announcement.title,
+  body: announcement.body,
+  category: announcement.category,
+  referenceNo: announcement.referenceNo,
+  pinned: announcement.pinned,
+  publishedAt: announcement.publishedAt,
+
+  // Present only while the call is genuinely open. A closed deadline is dropped
+  // rather than shown greyed out, because the sort below treats a null deadline
+  // as "not a call for bidders" and the portal renders the badge off this field.
+  registrationDeadline: acceptsRegistrations(announcement, now)
+    ? announcement.registrationDeadline
+    : null,
+  registrationClosesInDays: acceptsRegistrations(announcement, now)
+    ? daysUntil(announcement.registrationDeadline, now)
+    : null,
+
+  projectId: announcement.appEntryId ?? null,
+  projectTitle: announcement.project?.projectTitle ?? null,
+});
+
 export const listAnnouncements = async (req, res) => {
+  const now = new Date();
+
   // Assembled in one pass rather than re-fetching each project: this endpoint
   // is unauthenticated, so a per-row query would be a cheap way to load the
   // database from outside.
-  const projects = await listPublicProjects({ detailed: true });
-  const now = Date.now();
+  const [projects, authored] = await Promise.all([
+    listPublicProjects({ detailed: true }),
+    Announcement.findAll({
+      // The publication filter is at the query, not in the serialiser. A draft
+      // must never be loaded here in the first place.
+      where: {
+        status: "published",
+        [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: now } }],
+      },
+      include: [{ model: AppEntry, as: "project", attributes: ["id", "projectTitle"] }],
+      order: [["publishedAt", "DESC"]],
+    }),
+  ]);
 
-  const open = [];
+  const entries = authored.map((announcement) => publicAnnouncement(announcement, now));
+
   for (const project of projects) {
     if (project.category !== "ongoing") continue;
     for (const solicitation of project.records.solicitations) {
       if (solicitation.status !== "published") continue;
-      open.push({
+      entries.push({
+        source: "solicitation",
+        // Namespaced: solicitation ids and announcement ids come from different
+        // tables and would otherwise collide as React keys on the same list.
+        id: `rfq-${project.id}-${solicitation.referenceNo}`,
+        category: "procurementOpportunity",
         projectId: project.id,
         projectTitle: project.projectTitle,
         referenceNo: solicitation.referenceNo,
@@ -353,13 +417,22 @@ export const listAnnouncements = async (req, res) => {
         mode: solicitation.mode,
         abc: num(solicitation.abc),
         publishDate: solicitation.publishDate,
+        publishedAt: solicitation.publishDate,
         closingDate: solicitation.closingDate,
-        closingInDays: Math.ceil((new Date(solicitation.closingDate) - now) / 86400000),
+        closingInDays: daysUntil(solicitation.closingDate, now),
         implementingUnit: project.implementingUnit,
+        pinned: false,
       });
     }
   }
 
-  open.sort((a, b) => new Date(a.closingDate) - new Date(b.closingDate));
-  res.json(open);
+  // Pinned first, then newest. A bidding calendar the office wants read stays at
+  // the top; everything else falls back to recency, which is what a reader
+  // checking "what is new" expects.
+  entries.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return new Date(b.publishedAt ?? 0) - new Date(a.publishedAt ?? 0);
+  });
+
+  res.json(entries);
 };

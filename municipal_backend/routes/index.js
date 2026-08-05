@@ -40,6 +40,7 @@ import conferenceRoutes from "./conferenceRoutes.js";
 import financeRoutes from "./financeRoutes.js";
 import insightRoutes from "./insightRoutes.js";
 import documentRoutes from "./documentRoutes.js";
+import announcementRoutes from "./announcementRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 const router = express.Router();
 
@@ -74,6 +75,7 @@ router.use("/api/contracts", contractRoutes);
 router.use("/api/conferences", conferenceRoutes);
 router.use("/api/finance", financeRoutes);
 router.use("/api/documents", documentRoutes);
+router.use("/api/announcements", announcementRoutes);
 router.use("/api", insightRoutes);
 
 // No session required beyond this point — see publicRoutes.js.
