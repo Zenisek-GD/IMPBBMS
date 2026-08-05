@@ -3,6 +3,7 @@ import { sequelize } from "./db.js";
 import { User } from "./userModel.js";
 import { Department } from "./departmentModel.js";
 import { Appropriation } from "./appropriationModel.js";
+import { AipEntry } from "./investmentProgramModel.js";
 
 // Annual Procurement Plan entry. Fields follow design doc Section 4.4 and the
 // suggested schema in Section 9; states follow Section 4.1.
@@ -14,6 +15,11 @@ export const APP_STATES = [
   "approved",
   "returned",
   "locked",
+  // A project dropped after the plan was approved. Kept as a state rather than
+  // deleting the row, because the municipality's process is that a cancelled
+  // project's PPMP is *revised* — which is only meaningful if the original
+  // line, and the reason it went, survive.
+  "cancelled",
 ];
 
 export const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
@@ -76,6 +82,13 @@ export const AppEntry = sequelize.define(
     // Set when the entry is approved; Section 4.3 forbids edits afterwards.
     lockedAt: { type: DataTypes.DATE, allowNull: true },
     returnRemarks: { type: DataTypes.TEXT, allowNull: true },
+
+    // Why an approved line was reopened or dropped, and when. A PPMP revision
+    // is a documented act — an unexplained change to an approved plan is
+    // exactly what a plan being approved is supposed to prevent.
+    revisionRemarks: { type: DataTypes.TEXT, allowNull: true },
+    revisedAt: { type: DataTypes.DATE, allowNull: true },
+    cancelledAt: { type: DataTypes.DATE, allowNull: true },
   },
   {
     indexes: [{ fields: ["fiscalYear", "status"] }],
@@ -95,6 +108,17 @@ Department.hasMany(AppEntry, { foreignKey: "implementingUnitId" });
 // register are still readable; required by the controller on creation.
 AppEntry.belongsTo(Appropriation, { as: "appropriation", foreignKey: "appropriationId" });
 Appropriation.hasMany(AppEntry, { as: "appEntries", foreignKey: "appropriationId" });
+
+// The investment-program project this PPMP line procures for. Together with the
+// appropriation link above it closes the loop: the appropriation says the money
+// exists, and this says the money was programmed for this purpose. Without it,
+// an office could plan to procure anything at all against a budget line, which
+// is how "the appropriation was for a health centre" ends up buying vehicles.
+//
+// Nullable in the schema for lines predating the planning module; the
+// controller requires it on creation.
+AppEntry.belongsTo(AipEntry, { as: "aipEntry", foreignKey: "aipEntryId" });
+AipEntry.hasMany(AppEntry, { as: "appEntries", foreignKey: "aipEntryId" });
 
 AppEntry.belongsTo(User, { as: "createdBy", foreignKey: "createdById" });
 

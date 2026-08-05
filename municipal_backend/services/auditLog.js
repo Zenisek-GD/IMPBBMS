@@ -314,8 +314,26 @@ export const AUDIT_ACTIONS = {
   ANNOUNCEMENT_PUBLISHED: "announcement.published",
   ANNOUNCEMENT_UPDATED: "announcement.updated",
   ANNOUNCEMENT_WITHDRAWN: "announcement.withdrawn",
+  // ── Planning and budget authorisation ─────────────────────────────────────
+  // The chain above procurement. These matter to an auditor for the opposite
+  // reason the procurement entries do: procurement logs answer "was this bought
+  // properly?", these answer "was the LGU ever authorised to buy it?".
+  CDP_RECORDED: "planning.cdp.recorded",
+  CDP_ADOPTED: "planning.cdp.adopted",
+  PRIORITIES_SET: "planning.priorities.set",
+  AIP_TRANSITION: "planning.aip.transition",
+  BUDGET_PROPOSAL_SUBMITTED: "budget.proposal.submitted",
+  BUDGET_PROPOSAL_REVIEWED: "budget.proposal.reviewed",
+  BUDGET_TRANSITION: "budget.executive.transition",
+  BUDGET_PROCEEDING_RECORDED: "budget.proceeding.recorded",
+  // The moment budget stops being a proposal and becomes spendable authority.
+  APPROPRIATIONS_RELEASED: "budget.appropriations.released",
+
   APP_TRANSITION: "app.transition",
   PR_TRANSITION: "pr.transition",
+  // Step 19: the committee's determination of how a requisition will be
+  // procured, recorded as its own act rather than inferred from an RFQ form.
+  PR_MODE_DETERMINED: "pr.mode.determined",
   RFQ_PUBLISHED: "rfq.published",
   BIDS_OPENED: "bids.opened",
   EVALUATION_SUBMITTED: "evaluation.submitted",

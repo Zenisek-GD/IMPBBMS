@@ -12,6 +12,34 @@ const serialize = (department) => ({
   userCount: Number(department.get("userCount") ?? 0),
 });
 
+// ── The office directory ─────────────────────────────────────────────────────
+// A read-only list of the active offices, for forms that have to name one: the
+// Planning Office assigning a project to an implementing unit, the Budget
+// Office preparing a proposal on an office's behalf, a hearing minuted against
+// a department.
+//
+// Deliberately not the admin listing above. It returns identity only — no head
+// assignment, no user counts, no inactive offices — so exposing it to every
+// signed-in user gives away nothing about staffing or structure beyond the
+// names already printed on the doors.
+export const listOfficeDirectory = async (req, res) => {
+  const departments = await Department.findAll({
+    where: { status: "active" },
+    attributes: ["id", "code", "name", "type"],
+    order: [["name", "ASC"]],
+  });
+
+  res.json(
+    departments.map((department) => ({
+      id: department.id,
+      code: department.code,
+      name: department.name,
+      type: department.type,
+      status: "active",
+    }))
+  );
+};
+
 export const listDepartments = async (req, res) => {
   const { search, type, status } = req.query;
 

@@ -89,11 +89,26 @@ export const Appropriation = sequelize.define(
     },
 
     remarks: { type: DataTypes.TEXT, allowNull: true },
+
+    // ── Where the line came from ─────────────────────────────────────────────
+    // Set when the line was released by an enacted executive budget rather than
+    // keyed in by hand. A line carrying these can be traced all the way back:
+    //   appropriation → budget proposal line → AIP entry → development goal.
+    // A line without them was recorded directly, which the register shows —
+    // "on whose authority?" should be answerable from the row itself.
+    //
+    // Declared as plain columns rather than associations because
+    // budgetPreparationModel.js imports this file; a belongsTo pointing the
+    // other way would close the import cycle. The join is done explicitly where
+    // it is needed, which is only the appropriation register's detail view.
+    executiveBudgetId: { type: DataTypes.INTEGER, allowNull: true },
+    budgetProposalLineId: { type: DataTypes.INTEGER, allowNull: true },
   },
   {
     indexes: [
       { fields: ["fiscalYear", "status"] },
       { fields: ["fund", "expenseClass"] },
+      { fields: ["executiveBudgetId"] },
     ],
   }
 );

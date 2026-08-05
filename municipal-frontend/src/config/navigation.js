@@ -25,6 +25,9 @@ import {
   Globe,
   ScrollText,
   TrendingUp,
+  Target,
+  ListTree,
+  Scale,
 } from 'lucide-react'
 
 // One nav config per role from the system design doc, Section 2.1 / Section 11.
@@ -94,6 +97,16 @@ export const ROLE_NAV = {
     searchPlaceholder: 'Search PR # or Dept...',
     sections: [
       { items: [{ label: 'Executive Insights', href: '/executive', icon: TrendingUp }] },
+      {
+        // The Mayor's own acts sit at the top of the chain, before anything is
+        // procured: naming the year's priorities against the development plan,
+        // endorsing the investment program, and approving the executive budget.
+        heading: 'Planning & Budget',
+        items: [
+          { label: "Priorities & Investment Program", href: '/planning', icon: Target },
+          { label: 'Executive Budget', href: '/budget/preparation', icon: Landmark },
+        ],
+      },
       {
         heading: 'Approvals',
         items: [
@@ -213,6 +226,69 @@ export const ROLE_NAV = {
     ],
   },
 
+  // ── Municipal Planning and Development Office ──────────────────────────────
+  // Writes the development plan and the investment program, consolidates the
+  // offices' budget requests against them, and sits on the Local Finance
+  // Committee. Deliberately carries no procurement link: planning what the
+  // municipality will do is a different job from buying it.
+  planningOfficer: {
+    brandTitle: 'Planning Office',
+    brandSubtitle: 'Development & Investment Programming',
+    topLinks: [
+      { label: 'Development Plan', href: '/planning' },
+      { label: 'Budget', href: '/budget/preparation' },
+    ],
+    searchPlaceholder: 'Search projects or goals...',
+    sections: [
+      { items: [{ label: 'Workspace', href: '/planning-office', icon: LayoutDashboard }] },
+      {
+        heading: 'Planning',
+        items: [
+          { label: 'Development Plan & AIP', href: '/planning', icon: Target },
+          { label: 'APP Alignment', href: '/app-entries', icon: ClipboardList },
+        ],
+      },
+      {
+        heading: 'Budget',
+        items: [
+          { label: 'Budget Preparation', href: '/budget/preparation', icon: Landmark },
+          { label: 'Appropriation Register', href: '/budget/appropriations', icon: ScrollText },
+        ],
+      },
+    ],
+  },
+
+  // ── Office of the Sangguniang Bayan ────────────────────────────────────────
+  // The legislature's clerk of record. Records what the Sanggunian adopted and
+  // enacted, and what the province did with the ordinance afterwards. It
+  // decides nothing — which is why its sidebar is short.
+  sanggunianSecretary: {
+    brandTitle: 'Sangguniang Bayan',
+    brandSubtitle: 'Ordinances & Resolutions',
+    topLinks: [
+      { label: 'Budget', href: '/budget/preparation' },
+      { label: 'Plans', href: '/planning' },
+    ],
+    searchPlaceholder: 'Search ordinance or resolution...',
+    sections: [
+      { items: [{ label: 'Workspace', href: '/sanggunian', icon: LayoutDashboard }] },
+      {
+        heading: 'Legislation',
+        items: [
+          { label: 'Appropriation Ordinance', href: '/budget/preparation', icon: Scale },
+          { label: 'Plan & AIP Adoption', href: '/planning', icon: Target },
+        ],
+      },
+      {
+        heading: 'Records',
+        items: [
+          { label: 'Appropriation Register', href: '/budget/appropriations', icon: ScrollText },
+          { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe },
+        ],
+      },
+    ],
+  },
+
   departmentRequester: {
     brandTitle: 'Procurement Flow',
     brandSubtitle: 'Workflow Management',
@@ -227,6 +303,10 @@ export const ROLE_NAV = {
       {
         heading: 'Planning',
         items: [
+          // An office's year starts here, not at the APP: it asks for money
+          // first, and only plans procurement against what it was granted.
+          { label: 'Budget Proposal', href: '/budget/preparation', icon: Landmark },
+          { label: 'Investment Program', href: '/planning', icon: ListTree },
           { label: 'APP Entries', href: '/app-entries', icon: ClipboardList },
           { label: 'Purchase Requisitions', href: '/purchase-requisitions', icon: FileText },
         ],
@@ -252,9 +332,19 @@ export const ROLE_NAV = {
     sections: [
       { items: [{ label: 'Budget Monitor', href: '/budget', icon: PiggyBank }] },
       {
+        // Listed before the register because it comes before it in the year:
+        // the register holds what the ordinance granted, and this is where the
+        // ordinance is built.
+        heading: 'Preparation',
+        items: [
+          { label: 'Budget Preparation', href: '/budget/preparation', icon: Landmark },
+          { label: 'Investment Program', href: '/planning', icon: ListTree },
+        ],
+      },
+      {
         heading: 'Appropriation',
         items: [
-          { label: 'Appropriation Register', href: '/budget/appropriations', icon: Landmark },
+          { label: 'Appropriation Register', href: '/budget/appropriations', icon: ScrollText },
           { label: 'Utilisation Monitor', href: '/budget/unexpended', icon: TrendingUp },
         ],
       },
@@ -317,6 +407,13 @@ export const ROLE_NAV = {
         items: [
           { label: 'Requisitions to Certify', href: '/purchase-requisitions', icon: FileText },
         ],
+      },
+      {
+        // The Treasurer is one of the three statutory Local Finance Committee
+        // members, so the budget forum and hearings are their work too — not
+        // something the Budget Office does to them.
+        heading: 'Finance Committee',
+        items: [{ label: 'Budget Preparation', href: '/budget/preparation', icon: Landmark }],
       },
       {
         heading: 'Disbursement',
@@ -402,6 +499,10 @@ export const ROLE_NAV = {
         heading: 'Records',
         items: [
           { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe },
+          // The auditor's questions start above procurement: was the LGU ever
+          // authorised to buy this, and by whom.
+          { label: 'Development Plan & AIP', href: '/planning', icon: Target },
+          { label: 'Budget Preparation', href: '/budget/preparation', icon: Landmark },
           { label: 'Contracts', href: '/contracts', icon: FileSignature },
           { label: 'Invoices', href: '/invoices', icon: Receipt },
           { label: 'Pending Items', href: '/pending-items', icon: Package },

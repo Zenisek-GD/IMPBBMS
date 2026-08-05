@@ -363,7 +363,7 @@ const runAppStage = async (users, spec, department, timing, appropriation) => {
   return entry;
 };
 
-const runPrStage = async (users, spec, entry, department, timing, index, appropriation) => {
+const runPrStage = async (users, spec, entry, department, timing, index, appropriation, mode) => {
   const prNumber = `PR-${YEAR}-${String(index + 1).padStart(4, "0")}`;
   const obligationNo = `ORS-${YEAR}-${String(index + 1).padStart(4, "0")}`;
 
@@ -377,7 +377,22 @@ const runPrStage = async (users, spec, entry, department, timing, index, appropr
     requesterId: users.get("departmentRequester").id,
     departmentId: department.id,
     submittedAt: timing.prSubmitted,
+
+    // Each signature, on the record. A seeded requisition that reached
+    // "approved" must carry the same columns a real one would, or the printed
+    // form and the audit timeline would disagree about who signed what.
+    cashCertifiedAt: timing.prCashCertified,
+    cashCertifiedById: users.get("municipalTreasurer").id,
+    mayorApprovedAt: timing.prMayorApproved,
+    mayorApprovedById: users.get("hope").id,
     fundsReservedAt: timing.prCertified,
+    fundSource: appropriation.fund,
+
+    procurementModeId: mode.id,
+    modeDeterminedAt: timing.prModeDetermined,
+    modeDeterminedById: users.get("bacSecretariat").id,
+    suggestedModeKey: mode.key,
+    modeJustification: `Determined per ${mode.citation}: the ABC exceeds this LGU's Small Value Procurement ceiling, so competitive bidding applies.`,
   });
 
   await PrLineItem.create({
@@ -408,8 +423,39 @@ const runPrStage = async (users, spec, entry, department, timing, index, appropr
     timing.prSubmitted,
     "Requisition raised against the approved APP entry."
   );
-  // Certification is the obligation. The ORS is what actually commits the money
-  // against the ordinance line — the requisition status alone commits nothing.
+  await transition(
+    "bacChairperson",
+    "endorse",
+    "pendingDepartmentHeadEndorsement",
+    "pendingCashCertification",
+    timing.prEndorsed,
+    "Endorsed by the Head of Office."
+  );
+  // Step 16 — the Treasurer, on the cash. A separate question from the Budget
+  // Officer's below: an appropriation can be intact while collections have not
+  // come in, which is what this signature exists to catch.
+  await transition(
+    "municipalTreasurer",
+    "certifyCash",
+    "pendingCashCertification",
+    "pendingMayorApproval",
+    timing.prCashCertified,
+    `Funds available in the ${appropriation.fund === "generalFund" ? "General Fund" : appropriation.fund}. ${peso(spec.abc)} certified.`
+  );
+  // Step 17 — the Local Chief Executive approves the request itself. Nothing is
+  // obligated until after this, so a refused request never holds budget.
+  await transition(
+    "hope",
+    "approve",
+    "pendingMayorApproval",
+    "pendingBudgetCertification",
+    timing.prMayorApproved,
+    "Approved. Forwarded to the Budget Office for certification of appropriation."
+  );
+
+  // Step 18 — the Budget Office. Certification *is* the obligation: the ORS is
+  // what actually commits the money against the ordinance line, and the
+  // requisition status alone commits nothing.
   await Obligation.create({
     obligationNo,
     amount: spec.abc,
@@ -425,26 +471,28 @@ const runPrStage = async (users, spec, entry, department, timing, index, appropr
     "budgetOfficer",
     "certify",
     "pendingBudgetCertification",
-    "pendingSecretariatReview",
+    "pendingModeDetermination",
     timing.prCertified,
     `${obligationNo} issued against ${appropriation.ordinanceNo}. ${peso(spec.abc)} obligated.`
   );
-  await transition(
-    "bacSecretariat",
-    "review",
-    "pendingSecretariatReview",
-    "pendingHopeApproval",
-    timing.prReviewed,
-    "Technical specifications reviewed and found complete."
-  );
-  await transition(
-    "hope",
-    "approve",
-    "pendingHopeApproval",
-    "approved",
-    timing.prApproved,
-    "Approved for procurement through competitive bidding."
-  );
+
+  // Step 19 — the committee's determination, logged under its own action type
+  // so an auditor can filter for every mode decision in the year.
+  await log(users, "bacSecretariat", {
+    actionType: AUDIT_ACTIONS.PR_MODE_DETERMINED,
+    entityRef: "pr",
+    entityId: pr.id,
+    summary: `${prNumber}: mode determined — ${mode.name} (${mode.citation})`,
+    beforeState: { status: "pendingModeDetermination" },
+    afterState: {
+      status: "approved",
+      mode: mode.key,
+      suggestedMode: mode.key,
+      departedFromSuggestion: false,
+      citation: mode.citation,
+    },
+    recordedAt: timing.prModeDetermined,
+  });
 
   return pr;
 };
@@ -843,10 +891,16 @@ const timingFor = (offset) => ({
   appCertified: at(1, 22 + offset, 14, 5),
   appApproved: at(1, 29 + offset, 11, 20),
 
+  // The requisition's five signatures, in the order the form collects them:
+  // the office submits, the head endorses, the Treasurer certifies the funds
+  // are available, the Mayor approves, the Budget Office certifies the
+  // appropriation and obligates it, and the BAC determines the mode.
   prSubmitted: at(2, 5 + offset, 8, 50),
-  prCertified: at(2, 11 + offset, 13, 30),
-  prReviewed: at(2, 17 + offset, 15, 10),
-  prApproved: at(2, 21 + offset, 10, 5),
+  prEndorsed: at(2, 8 + offset, 9, 40),
+  prCashCertified: at(2, 11 + offset, 13, 30),
+  prMayorApproved: at(2, 15 + offset, 10, 5),
+  prCertified: at(2, 17 + offset, 15, 10),
+  prModeDetermined: at(2, 21 + offset, 11, 25),
   prRequired: at(5, 1 + offset),
 
   rfqPublished: at(3, 3 + offset, 8, 0),
@@ -1003,7 +1057,10 @@ try {
       continue;
     }
 
-    const pr = await runPrStage(users, spec, entry, department, timing, index, appropriation);
+    // The mode is determined on the requisition (step 19) and the solicitation
+    // inherits it, so it has to be resolved before the PR stage rather than at
+    // RFQ time as it used to be.
+    const pr = await runPrStage(users, spec, entry, department, timing, index, appropriation, mode);
 
     if (spec.reach === "bidding") {
       // Still accepting bids, so its dates straddle today rather than sitting

@@ -1,12 +1,25 @@
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
-import { PrHeader, PrLineItem } from "../models/prModel.js";
+import {
+  PrHeader,
+  PrLineItem,
+  ASSET_CLASS_LABELS,
+  classifyLineItem,
+} from "../models/prModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
-import { Obligation } from "../models/appropriationModel.js";
+import { Appropriation, Obligation, FUND_LABELS } from "../models/appropriationModel.js";
+import { ProcurementMode } from "../models/procurementModeModel.js";
+import { getLguProfile } from "../models/systemSettingModel.js";
 import { availableFor, nextObligationNo } from "../services/budgetLedger.js";
-import { evaluateTransition, permissionForTransition, isEditable } from "../services/prWorkflow.js";
+import { suggestProcurementMode } from "../services/procurementThresholds.js";
+import {
+  evaluateTransition,
+  permissionForTransition,
+  isEditable,
+  LIVE_PR_STATUSES,
+} from "../services/prWorkflow.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 
@@ -26,6 +39,9 @@ const withIncludes = {
     { model: Department, as: "department" },
     { model: User, as: "requester", attributes: ["id", "name"] },
     { model: User, as: "cashCertifiedBy", attributes: ["id", "name"] },
+    { model: User, as: "mayorApprovedBy", attributes: ["id", "name"] },
+    { model: User, as: "modeDeterminedBy", attributes: ["id", "name"] },
+    { model: ProcurementMode, as: "procurementMode" },
   ],
 };
 
@@ -39,11 +55,33 @@ const serialize = (pr) => ({
   totalAmount: Number(pr.totalAmount),
   status: pr.status,
   returnRemarks: pr.returnRemarks,
-  // The two limbs of LGC Sec. 344, side by side: appropriation certified and
-  // obligated by the Budget Officer, cash certified by the Treasurer.
-  fundsReservedAt: pr.fundsReservedAt,
+
+  // ── The signatures on the form, in the order they are collected ────────────
+  // Treasurer certifies cash, the Mayor approves, the Budget Office certifies
+  // the appropriation and obligates it, the BAC determines the mode.
   cashCertifiedAt: pr.cashCertifiedAt,
   cashCertifiedByName: pr.cashCertifiedBy?.name ?? null,
+  mayorApprovedAt: pr.mayorApprovedAt,
+  mayorApprovedByName: pr.mayorApprovedBy?.name ?? null,
+  fundsReservedAt: pr.fundsReservedAt,
+  fundSource: pr.fundSource,
+  fundSourceLabel: pr.fundSource ? FUND_LABELS[pr.fundSource] : null,
+
+  procurementModeId: pr.procurementModeId,
+  procurementModeKey: pr.procurementMode?.key ?? null,
+  procurementModeName: pr.procurementMode?.name ?? null,
+  procurementModeCitation: pr.procurementMode?.citation ?? null,
+  modeDeterminedAt: pr.modeDeterminedAt,
+  modeDeterminedByName: pr.modeDeterminedBy?.name ?? null,
+  modeJustification: pr.modeJustification,
+  suggestedModeKey: pr.suggestedModeKey,
+  // True where the committee chose something other than what the thresholds
+  // indicated. Surfaced rather than left to be worked out by comparing two
+  // fields, because it is the flag an auditor scans for.
+  modeDepartedFromSuggestion: Boolean(
+    pr.suggestedModeKey && pr.procurementMode?.key && pr.suggestedModeKey !== pr.procurementMode.key
+  ),
+
   submittedAt: pr.submittedAt,
   appEntryId: pr.appEntryId,
   appEntryTitle: pr.appEntry?.projectTitle ?? null,
@@ -57,26 +95,36 @@ const serialize = (pr) => ({
     quantity: Number(item.quantity),
     unitCost: Number(item.unitCost),
     lineTotal: Number(item.lineTotal),
+    hasUsefulLifeOverOneYear: item.hasUsefulLifeOverOneYear,
+    assetClass: item.assetClass,
+    assetClassLabel: ASSET_CLASS_LABELS[item.assetClass],
   })),
+  // Rolled up so a reviewer can see at a glance whether the requisition is
+  // buying supplies or assets — which decides whether it may be charged to MOOE
+  // or must come out of Capital Outlay.
+  assetSummary: (pr.lineItems ?? []).reduce(
+    (summary, item) => {
+      summary[item.assetClass] = (summary[item.assetClass] ?? 0) + Number(item.lineTotal);
+      return summary;
+    },
+    { expense: 0, semiExpendable: 0, capitalOutlay: 0 }
+  ),
   editable: isEditable(pr.status),
 });
 
 // Section 5.3: "PR total cannot exceed the remaining ABC balance from the
 // linked APP entry." Everything already committed against the entry counts,
 // except requisitions that were returned or are still drafts.
-const COMMITTED_STATUSES = [
-  "pendingDepartmentHeadEndorsement",
-  "pendingBudgetCertification",
-  "pendingSecretariatReview",
-  "pendingHopeApproval",
-  "approved",
-];
-
+//
+// The list comes from the state machine rather than being retyped here. It was
+// retyped once, and when a new stage was added to the chain it was not updated
+// — a requisition sitting at that stage stopped counting against the balance,
+// so two requisitions could each pass this check for the same money.
 export const remainingBalanceFor = async (appEntryId, { excludePrId } = {}) => {
   const appEntry = await AppEntry.findByPk(appEntryId);
   if (!appEntry) return null;
 
-  const where = { appEntryId, status: { [Op.in]: COMMITTED_STATUSES } };
+  const where = { appEntryId, status: { [Op.in]: LIVE_PR_STATUSES } };
   if (excludePrId) where.id = { [Op.ne]: excludePrId };
 
   const committed = (await PrHeader.sum("totalAmount", { where })) ?? 0;
@@ -88,6 +136,34 @@ export const remainingBalanceFor = async (appEntryId, { excludePrId } = {}) => {
   };
 };
 
+// What the IRR thresholds indicate for this requisition, and what else the
+// committee may lawfully choose. Returned as data rather than enforced, because
+// the determination is the BAC's — the system's job is to make sure the
+// committee cannot say it did not know the rule.
+export const getModeSuggestion = async (req, res) => {
+  const pr = await PrHeader.findByPk(req.params.id);
+  if (!pr) return res.status(404).json({ message: "Requisition not found." });
+
+  const lgu = await getLguProfile();
+  const suggestion = suggestProcurementMode(Number(pr.totalAmount), lgu);
+
+  const modes = await ProcurementMode.findAll({ order: [["sortOrder", "ASC"]] });
+
+  res.json({
+    abc: Number(pr.totalAmount),
+    lgu: { type: lgu.lguType, incomeClass: lgu.incomeClass },
+    ...suggestion,
+    modes: modes.map((mode) => ({
+      key: mode.key,
+      name: mode.name,
+      citation: mode.citation,
+      requiresJustification: mode.requiresJustification,
+      requiresHopeApproval: mode.requiresHopeApproval,
+      isSuggested: mode.key === suggestion.suggested,
+    })),
+  });
+};
+
 export const getAppBalance = async (req, res) => {
   const balance = await remainingBalanceFor(Number(req.params.appEntryId), {
     excludePrId: req.query.excludePrId ? Number(req.query.excludePrId) : undefined,
@@ -96,7 +172,7 @@ export const getAppBalance = async (req, res) => {
   res.json(balance);
 };
 
-const computeLineItems = (rawItems) => {
+const computeLineItems = (rawItems, { capitalizationThreshold }) => {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     return { error: "At least one line item is required." };
   }
@@ -114,19 +190,49 @@ const computeLineItems = (rawItems) => {
       return { error: `Unit cost for "${raw.description}" must be greater than 0.` };
     }
 
+    const hasUsefulLifeOverOneYear = Boolean(raw.hasUsefulLifeOverOneYear);
+
     // Section 5.3: estimated costs are validated and summed automatically —
-    // the client never supplies the line total.
+    // the client never supplies the line total. The asset class is derived the
+    // same way and for the same reason: it decides which expense class the
+    // purchase may be charged to, so it must not be assertable from the form.
     items.push({
       description: raw.description.trim(),
       unit: raw.unit ?? null,
       quantity,
       unitCost,
       lineTotal: Number((quantity * unitCost).toFixed(2)),
+      hasUsefulLifeOverOneYear,
+      assetClass: classifyLineItem({ hasUsefulLifeOverOneYear, unitCost }, capitalizationThreshold),
     });
   }
 
   const total = Number(items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2));
   return { items, total };
+};
+
+// The expense class an APP entry's appropriation carries has to be able to bear
+// what the requisition actually buys. Capital assets cannot be charged to MOOE,
+// and this is the first point in the chain where the individual items — rather
+// than a single project cost — are known.
+const expenseClassMismatch = (items, expenseClass) => {
+  if (!expenseClass) return null;
+
+  const capital = items.filter((item) => item.assetClass === "capitalOutlay");
+  if (capital.length > 0 && expenseClass !== "capitalOutlay") {
+    return (
+      `${capital.length} item(s) are Capital Outlay (unit cost at or above the capitalisation threshold, ` +
+      `useful life over a year) but the appropriation behind this requisition is ` +
+      `${EXPENSE_CLASS_HINT[expenseClass] ?? expenseClass}. Charge them to a Capital Outlay line instead.`
+    );
+  }
+  return null;
+};
+
+const EXPENSE_CLASS_HINT = {
+  personalServices: "Personal Services",
+  mooe: "MOOE",
+  capitalOutlay: "Capital Outlay",
 };
 
 const validateHeader = ({ dateRequired, isEmergency, justification }, { submitting }) => {
@@ -168,14 +274,15 @@ export const listPrs = async (req, res) => {
   if (search) where.prNumber = { [Op.like]: `%${search}%` };
 
   // A requester without a review permission sees only their department's.
+  // Every office that has to act on the chain needs the whole queue: they sit
+  // outside the requesting department, so the fallback filter below would
+  // otherwise hand them nothing.
   const canSeeAll = [
     "pr.endorse",
     "pr.certify",
-    // Without this the Treasurer could not see the queue they are now required
-    // to act on — they hold no department, so the fallback filter below would
-    // return nothing.
     "pr.certifyCash",
     "pr.review",
+    "pr.determineMode",
     "pr.approve",
     "audit.viewAll",
   ].some((permission) => req.permissions.has(permission));
@@ -202,8 +309,17 @@ export const createPr = async (req, res) => {
   const headerError = validateHeader(header, { submitting: false });
   if (headerError) return res.status(400).json({ message: headerError });
 
-  const computed = computeLineItems(lineItems);
+  const { capitalizationThreshold } = await getLguProfile();
+  const computed = computeLineItems(lineItems, { capitalizationThreshold });
   if (computed.error) return res.status(400).json({ message: computed.error });
+
+  // Checked at creation rather than at certification so the requester finds out
+  // while they can still change the requisition, not three signatures later.
+  const appropriation = appEntry.appropriationId
+    ? await Appropriation.findByPk(appEntry.appropriationId)
+    : null;
+  const classError = expenseClassMismatch(computed.items, appropriation?.expenseClass);
+  if (classError) return res.status(400).json({ message: classError });
 
   const balance = await remainingBalanceFor(appEntryId);
   if (computed.total > balance.remaining) {
@@ -254,8 +370,15 @@ export const updatePr = async (req, res) => {
 
   let computed = null;
   if (lineItems) {
-    computed = computeLineItems(lineItems);
+    const { capitalizationThreshold } = await getLguProfile();
+    computed = computeLineItems(lineItems, { capitalizationThreshold });
     if (computed.error) return res.status(400).json({ message: computed.error });
+
+    const appropriation = pr.appEntry?.appropriationId
+      ? await Appropriation.findByPk(pr.appEntry.appropriationId)
+      : null;
+    const classError = expenseClassMismatch(computed.items, appropriation?.expenseClass);
+    if (classError) return res.status(400).json({ message: classError });
 
     const balance = await remainingBalanceFor(pr.appEntryId, { excludePrId: pr.id });
     if (computed.total > balance.remaining) {
@@ -337,15 +460,20 @@ export const transitionPr = async (req, res) => {
     }
   }
 
-  // ── Obligation ─────────────────────────────────────────────────────────────
-  // Certifying availability of funds *is* the obligation. From that moment the
+  // ── Obligation (step 18) ───────────────────────────────────────────────────
+  // The Budget Office's certification *is* the obligation. From that moment the
   // amount is committed and unavailable to anything else, whether or not a peso
-  // has moved — which is why it now writes an Obligation Request rather than
-  // only stamping `fundsReservedAt` on the requisition.
+  // has moved, which is why it writes an Obligation Request rather than only
+  // stamping a date on the requisition.
+  //
+  // This now happens after the Mayor has approved the request, so an
+  // appropriation is only ever encumbered for requests the executive has agreed
+  // to — see the note at the top of services/prWorkflow.js.
   //
   // Checked before the transaction opens so a failure here returns a clean 409
   // rather than rolling back a partially applied transition.
   let obligationNumber = null;
+  let fundSource = null;
   if (action === "certify") {
     const appropriationId = pr.appEntry?.appropriationId ?? null;
     if (!appropriationId) {
@@ -372,7 +500,54 @@ export const transitionPr = async (req, res) => {
       });
     }
 
+    // "Identifies the funding source" — the second half of step 18. Read from
+    // the appropriation rather than asked for, so the requisition can never
+    // name a fund different from the one it is charged against.
+    const appropriation = await Appropriation.findByPk(appropriationId);
+    fundSource = appropriation?.fund ?? null;
+
     obligationNumber = await nextObligationNo(new Date().getFullYear());
+  }
+
+  // ── Mode determination (step 19) ───────────────────────────────────────────
+  // The committee's decision on how this requisition will be procured, checked
+  // against the IRR ceilings for this LGU. Resolved before the transaction for
+  // the same reason as the obligation.
+  let modeRecord = null;
+  let suggestion = null;
+  if (action === "determineMode") {
+    const lgu = await getLguProfile();
+    suggestion = suggestProcurementMode(Number(pr.totalAmount), lgu);
+
+    const chosenKey = req.body.procurementModeKey ?? suggestion.suggested;
+    modeRecord = await ProcurementMode.findOne({ where: { key: chosenKey } });
+    if (!modeRecord) {
+      return res.status(400).json({ message: `Unknown procurement mode: ${chosenKey}.` });
+    }
+
+    // Departing from what the thresholds indicate is allowed — the committee
+    // may always fall back to Competitive Bidding, and an alternative mode may
+    // be justified on grounds the ABC alone cannot express. What is not allowed
+    // is departing silently.
+    if (chosenKey !== suggestion.suggested && !req.body.justification?.trim()) {
+      return res.status(400).json({
+        message:
+          `The thresholds indicate ${suggestion.suggested} for ₱${Number(pr.totalAmount).toLocaleString()} ` +
+          `(${suggestion.rationale}). Record why the committee determined ${modeRecord.name} instead.`,
+        suggestion,
+      });
+    }
+
+    // An alternative mode that the IRR conditions on prior approval by the Head
+    // of the Procuring Entity cannot be settled by the committee alone. The
+    // approval is recorded against the requisition rather than assumed.
+    if (modeRecord.requiresHopeApproval && !req.body.hopeApprovalReference?.trim()) {
+      return res.status(409).json({
+        message:
+          `${modeRecord.name} (${modeRecord.citation}) requires the prior approval of the Head of the ` +
+          `Procuring Entity. Record the approval reference before determining this mode.`,
+      });
+    }
   }
 
   await sequelize.transaction(async (transaction) => {
@@ -383,14 +558,36 @@ export const transitionPr = async (req, res) => {
       changes.returnRemarks = null;
       changes.submittedAt = new Date();
     }
-    if (action === "certify") changes.fundsReservedAt = new Date();
 
-    // LGC Sec. 344's second certification. Recorded against the Treasurer
-    // personally — the statute makes the officer, not the office, accountable
-    // for the statement that the money is there.
+    // Step 16 — the Treasurer. Recorded against the officer personally: the
+    // statement that the money is there is a personal accountability, not an
+    // office-level one.
     if (action === "certifyCash") {
       changes.cashCertifiedAt = new Date();
       changes.cashCertifiedById = req.currentUser.id;
+    }
+
+    // Step 17 — the Mayor approves the request itself.
+    if (action === "approve") {
+      changes.mayorApprovedAt = new Date();
+      changes.mayorApprovedById = req.currentUser.id;
+    }
+
+    // Step 18 — the Budget Office.
+    if (action === "certify") {
+      changes.fundsReservedAt = new Date();
+      changes.fundSource = fundSource;
+    }
+
+    // Step 19 — the BAC.
+    if (action === "determineMode") {
+      changes.procurementModeId = modeRecord.id;
+      changes.modeDeterminedAt = new Date();
+      changes.modeDeterminedById = req.currentUser.id;
+      changes.suggestedModeKey = suggestion.suggested;
+      changes.modeJustification =
+        req.body.justification?.trim() ||
+        `Determined per ${suggestion.citation}: ${suggestion.rationale}`;
     }
 
     await pr.update(changes, { transaction });
@@ -426,24 +623,38 @@ export const transitionPr = async (req, res) => {
     }
   });
 
+  const amount = Number(pr.totalAmount).toLocaleString();
+
   await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.PR_TRANSITION,
+    actionType:
+      action === "determineMode" ? AUDIT_ACTIONS.PR_MODE_DETERMINED : AUDIT_ACTIONS.PR_TRANSITION,
     entityRef: "pr",
     entityId: pr.id,
     summary: obligationNumber
-      ? `${pr.prNumber}: certify — ${obligationNumber} obligated ₱${Number(pr.totalAmount).toLocaleString()}`
+      ? `${pr.prNumber}: appropriation certified — ${obligationNumber} obligated ₱${amount} against the ${FUND_LABELS[fundSource] ?? "fund"}`
       : action === "certifyCash"
-        ? `${pr.prNumber}: treasury certified cash available for ₱${Number(pr.totalAmount).toLocaleString()}`
-        : `${pr.prNumber}: ${action}`,
+        ? `${pr.prNumber}: treasury certified funds available for ₱${amount}`
+        : action === "approve"
+          ? `${pr.prNumber}: approved by the Local Chief Executive`
+          : action === "determineMode"
+            ? `${pr.prNumber}: mode determined — ${modeRecord.name} (${modeRecord.citation})`
+            : `${pr.prNumber}: ${action}`,
     beforeState: { status: previousStatus },
     afterState: {
       status: result.to,
       remarks: remarks?.trim() ?? null,
-      ...(obligationNumber ? { obligationNo: obligationNumber } : {}),
-      // The certification itself, on the record. Both limbs of Sec. 344 are
-      // then reconstructable from the log alone.
-      ...(action === "certifyCash"
-        ? { cashCertified: true, amountCertified: Number(pr.totalAmount) }
+      ...(obligationNumber ? { obligationNo: obligationNumber, fundSource } : {}),
+      // Each certification on the record, so the whole signature chain is
+      // reconstructable from the log alone.
+      ...(action === "certifyCash" ? { cashCertified: true, amountCertified: Number(pr.totalAmount) } : {}),
+      ...(action === "approve" ? { mayorApproved: true } : {}),
+      ...(action === "determineMode"
+        ? {
+            mode: modeRecord.key,
+            suggestedMode: suggestion.suggested,
+            departedFromSuggestion: modeRecord.key !== suggestion.suggested,
+            citation: modeRecord.citation,
+          }
         : {}),
     },
   });
@@ -459,14 +670,40 @@ export const transitionPr = async (req, res) => {
       severity: "danger",
     });
   }
-  // Hand the requisition to the next office. Without this the Treasurer would
-  // have to go looking for work that arrived in their queue — the same gap that
-  // made the bidder-account handoff necessary.
-  if (result.to === "pendingTreasuryCertification") {
-    await notifyByPermission("pr.certifyCash", {
+
+  // ── Handoffs ───────────────────────────────────────────────────────────────
+  // Each office is told when the requisition reaches its desk. Without this an
+  // officer has to go looking for work that arrived in their queue, which is
+  // how requisitions stall between signatures.
+  const HANDOFF = {
+    pendingCashCertification: {
+      permission: "pr.certifyCash",
+      title: `${pr.prNumber} awaiting certification of funds`,
+      body: `₱${amount} requested. Certify that the funds are available.`,
+    },
+    pendingMayorApproval: {
+      permission: "pr.approve",
+      title: `${pr.prNumber} awaiting approval`,
+      body: `₱${amount}, funds certified available by the Treasurer.`,
+    },
+    pendingBudgetCertification: {
+      permission: "pr.certify",
+      title: `${pr.prNumber} awaiting appropriation certification`,
+      body: `₱${amount}, approved by the Mayor. Certify the appropriation and identify the funding source.`,
+    },
+    pendingModeDetermination: {
+      permission: "pr.determineMode",
+      title: `${pr.prNumber} awaiting mode determination`,
+      body: `₱${amount} obligated. Determine the mode of procurement.`,
+    },
+  };
+
+  const handoff = HANDOFF[result.to];
+  if (handoff) {
+    await notifyByPermission(handoff.permission, {
       type: NOTIFICATION_EVENTS.PR_APPROVED,
-      title: `${pr.prNumber} awaiting treasury certification`,
-      body: `₱${Number(pr.totalAmount).toLocaleString()} obligated. Certify cash availability (LGC Sec. 344).`,
+      title: handoff.title,
+      body: handoff.body,
       link: "/purchase-requisitions",
       refEntity: "pr",
       refId: pr.id,
@@ -478,17 +715,19 @@ export const transitionPr = async (req, res) => {
     await notifyUsers([pr.requesterId], {
       type: NOTIFICATION_EVENTS.PR_APPROVED,
       title: `${pr.prNumber} approved`,
-      body: "Your requisition is approved and ready for procurement.",
+      body: `Cleared for procurement by ${modeRecord?.name ?? "the determined mode"}.`,
       link: "/purchase-requisitions",
       refEntity: "pr",
       refId: pr.id,
       severity: "success",
     });
-    // Whoever publishes RFQs needs to know there is something to advertise.
+    // Whoever publishes RFQs needs to know there is something to advertise —
+    // and now also which mode the committee determined, since the solicitation
+    // no longer chooses one.
     await notifyByPermission("bidding.publish", {
       type: NOTIFICATION_EVENTS.PR_APPROVED,
       title: `${pr.prNumber} ready for procurement`,
-      body: `₱${Number(pr.totalAmount).toLocaleString()} — ready to advertise.`,
+      body: `₱${amount} — ${modeRecord?.name ?? "mode determined"} (${modeRecord?.citation ?? ""}).`,
       link: "/secretariat/rfq",
       refEntity: "pr",
       refId: pr.id,

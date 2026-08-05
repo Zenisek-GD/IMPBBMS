@@ -27,6 +27,14 @@ export const NOTIFICATION_EVENTS = {
   PAYMENT_STATUS: "payment.status",
   DELIVERY_ACCEPTED: "delivery.accepted",
   CONTRACT_READY: "contract.ready",
+
+  // The planning and budget calendar. These are the handoffs between offices
+  // that previously happened by walking a folder down the corridor — an office
+  // has no way to know the budget has reached its stage unless it is told.
+  AIP_STATUS: "aip.status",
+  BUDGET_CALL: "budget.call",
+  BUDGET_STATUS: "budget.status",
+  BUDGET_ENACTED: "budget.enacted",
 };
 
 // Notifications are best-effort: a delivery failure must never roll back or

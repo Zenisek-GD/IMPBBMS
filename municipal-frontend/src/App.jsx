@@ -12,6 +12,8 @@ import AdminUsers from './pages/dashboards/AdminUsers'
 import AdminDepartments from './pages/dashboards/AdminDepartments'
 import AdminSettings from './pages/dashboards/AdminSettings'
 import BidOpportunities from './pages/supplier/BidOpportunities'
+import DevelopmentPlanning from './pages/planning/DevelopmentPlanning'
+import BudgetPreparation from './pages/budget/BudgetPreparation'
 import AppEntries from './pages/app/AppEntries'
 import PurchaseRequisitions from './pages/pr/PurchaseRequisitions'
 import RfqManagement from './pages/bidding/RfqManagement'
@@ -75,6 +77,54 @@ function App() {
         <Route path="/coming-soon" element={<ComingSoon />} />
 
         <Route element={<AppShell />}>
+          {/* ── Development planning ────────────────────────────────────────
+              The layer above procurement. Read by everyone who has to cite a
+              plan; written only by the offices that hold the permissions, which
+              the page decides from the caller's permission list rather than
+              from the URL. */}
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'planningOfficer',
+                  'sanggunianSecretary',
+                  'hope',
+                  'budgetOfficer',
+                  'municipalTreasurer',
+                  'departmentRequester',
+                  'bacSecretariat',
+                  'internalAuditor',
+                ]}
+              />
+            }
+          >
+            <Route path="/planning" element={<DevelopmentPlanning />} />
+          </Route>
+
+          {/* ── Budget preparation and legislation ──────────────────────────
+              Every body in the budget calendar reaches the same screen; which
+              stage they can act on comes from their permissions. Department
+              requesters are here because preparing their office's proposal is
+              step 6 and it is their work. */}
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'budgetOfficer',
+                  'planningOfficer',
+                  'municipalTreasurer',
+                  'sanggunianSecretary',
+                  'hope',
+                  'departmentRequester',
+                  'municipalAccountant',
+                  'internalAuditor',
+                ]}
+              />
+            }
+          >
+            <Route path="/budget/preparation" element={<BudgetPreparation />} />
+          </Route>
+
           {/* The APP is shared across the roles that act on it (Section 4.2),
               so access is by permission rather than by a single role. */}
           <Route
@@ -238,6 +288,17 @@ function App() {
 
           <Route element={<RoleRoute allow={['budgetOfficer']} />}>
             <Route path="/budget" element={<RoleWorkspace />} />
+          </Route>
+
+          {/* The two offices added with the planning and budget-legislation
+              chain. Neither has a bespoke dashboard yet, so both land on the
+              shared workspace and work from their sidebar. */}
+          <Route element={<RoleRoute allow={['planningOfficer']} />}>
+            <Route path="/planning-office" element={<RoleWorkspace />} />
+          </Route>
+
+          <Route element={<RoleRoute allow={['sanggunianSecretary']} />}>
+            <Route path="/sanggunian" element={<RoleWorkspace />} />
           </Route>
 
           <Route element={<RoleRoute allow={['municipalAccountant', 'municipalTreasurer']} />}>

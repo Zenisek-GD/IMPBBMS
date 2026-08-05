@@ -127,19 +127,33 @@ export const createRfq = async (req, res) => {
   const lgu = await getLguProfile();
   const suggestion = suggestProcurementMode(abc, lgu);
 
-  const modeKey = procurementModeKey ?? suggestion.suggested;
-  const mode = await ProcurementMode.findOne({ where: { key: modeKey } });
-  if (!mode) return res.status(400).json({ message: "Unknown procurement mode." });
-
-  // Section 3: alternative modes require documented justification, and some
-  // require prior HOPE approval. The justification lives on the APP entry /
-  // requisition; block the obvious case of silently downgrading from the
-  // suggested mode without one.
-  if (mode.requiresJustification && modeKey !== suggestion.suggested && !req.body.justification?.trim()) {
-    return res.status(400).json({
-      message: `${mode.name} differs from the suggested mode (${suggestion.suggested}) and requires a written justification.`,
+  // ── The mode is inherited, not chosen here ─────────────────────────────────
+  // The BAC determines the mode on the requisition (step 19) before any
+  // solicitation exists, and that determination is a recorded act with a date,
+  // an officer and a justification behind it. Letting this form pick a
+  // different mode would mean the document advertised to the public disagreed
+  // with the decision the committee actually minuted.
+  //
+  // `procurementModeKey` is still accepted, but only to *confirm* the
+  // determination — a mismatch is refused rather than silently overriding it.
+  if (!pr.procurementModeId) {
+    return res.status(409).json({
+      message:
+        "No mode of procurement has been determined for this requisition. The BAC must determine the mode before it can be advertised.",
     });
   }
+
+  const mode = await ProcurementMode.findByPk(pr.procurementModeId);
+  if (!mode) return res.status(409).json({ message: "The determined procurement mode no longer exists." });
+
+  if (procurementModeKey && procurementModeKey !== mode.key) {
+    return res.status(409).json({
+      message: `The BAC determined ${mode.name} for ${pr.prNumber}. To advertise under a different mode, redetermine it on the requisition.`,
+      determinedMode: mode.key,
+    });
+  }
+
+  const modeKey = mode.key;
 
   const rfq = await Rfq.create({
     referenceNo: await nextReference(modeKey),

@@ -19,6 +19,38 @@ export {
   EXPENSE_CLASS_LABELS,
   APPROPRIATION_TYPES,
 } from "./appropriationModel.js";
+// The planning layer above procurement: the development plan the LGU committed
+// to, and the year's investment program derived from it.
+export {
+  DevelopmentPlan,
+  DevelopmentGoal,
+  SECTORS,
+  SECTOR_LABELS,
+  PLAN_STATUSES,
+  GOAL_STATUSES,
+} from "./developmentPlanModel.js";
+export {
+  InvestmentProgram,
+  AipEntry,
+  AIP_STATES,
+  AIP_ENTRY_STATES,
+} from "./investmentProgramModel.js";
+// Budget preparation and authorisation — everything between an office asking
+// for money and the Sanggunian granting it.
+export {
+  ExecutiveBudget,
+  BudgetProposal,
+  BudgetProposalLine,
+  BudgetProceeding,
+  EXECUTIVE_BUDGET_STATES,
+  EXECUTIVE_BUDGET_STATE_LABELS,
+  BUDGET_TYPES,
+  PROPOSAL_STATES,
+  PROCEEDING_TYPES,
+  PROCEEDING_TYPE_LABELS,
+  PROVINCIAL_REVIEW_OUTCOMES,
+  PROVINCIAL_REVIEW_LABELS,
+} from "./budgetPreparationModel.js";
 export { AppEntry, PLAN_STAGES, PLAN_STAGE_LABELS } from "./appEntryModel.js";
 export { BacResolution, RESOLUTION_TYPES, RESOLUTION_TYPE_LABELS } from "./bacResolutionModel.js";
 export { PrHeader, PrLineItem } from "./prModel.js";

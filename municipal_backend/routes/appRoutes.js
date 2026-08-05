@@ -23,7 +23,16 @@ router.patch("/:id", requirePermission("app.create"), updateAppEntry);
 // so it is checked inside the controller against the state machine.
 router.post(
   "/:id/transition",
-  requireAnyPermission("app.submit", "app.consolidate", "app.certify", "app.approve"),
+  requireAnyPermission(
+    "app.submit",
+    "app.consolidate",
+    "app.certify",
+    "app.approve",
+    // Revision and cancellation of an approved line. Missing from this list the
+    // holder would have the permission and still be refused before the
+    // controller ran — keep it in step with APP_TRANSITIONS.
+    "app.revise"
+  ),
   transitionAppEntry
 );
 

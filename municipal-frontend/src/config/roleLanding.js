@@ -10,6 +10,12 @@ const ROLE_LANDING_ROUTE = {
   twgMember: '/twg',
   departmentRequester: '/dashboard',
   budgetOfficer: '/budget',
+  // The two offices in the planning and budget-legislation chain land on the
+  // screen they actually work in, not a summary dashboard — the Planning Office
+  // lives in the development plan, and the Sanggunian's clerk of record lives in
+  // the budget calendar.
+  planningOfficer: '/planning',
+  sanggunianSecretary: '/budget/preparation',
   municipalAccountant: '/finance',
   municipalTreasurer: '/finance',
   vendor: '/supplier',

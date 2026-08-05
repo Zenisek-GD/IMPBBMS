@@ -6,6 +6,11 @@ import { Department } from "../models/departmentModel.js";
 import { Invoice, Payment } from "../models/paymentModel.js";
 import { Contract } from "../models/contractModel.js";
 import { Award, Rfq } from "../models/biddingModel.js";
+// A cancelled plan line releases the amount it had programmed, exactly as a
+// returned one does. Before cancellation existed the ledger only knew about
+// "returned", so a dropped project would have gone on consuming its
+// appropriation's programmed balance forever.
+import { RELEASED_APP_STATUSES } from "./appWorkflow.js";
 
 // ── THE BUDGET LEDGER ────────────────────────────────────────────────────────
 // Every balance the system reports is computed here, from one set of
@@ -148,7 +153,7 @@ export const programmedFor = async (appropriationId, { excludeAppEntryId } = {})
   const appropriation = await Appropriation.findByPk(appropriationId);
   if (!appropriation) return null;
 
-  const where = { appropriationId, status: { [Op.ne]: "returned" } };
+  const where = { appropriationId, status: { [Op.notIn]: RELEASED_APP_STATUSES } };
   if (excludeAppEntryId) where.id = { [Op.ne]: excludeAppEntryId };
 
   const programmed = num(await AppEntry.sum("abc", { where }));
@@ -194,7 +199,7 @@ export const buildLedger = async ({ fiscalYear, fund, departmentId } = {}) => {
     sumBy(AppEntry, {
       groupColumn: "appropriationId",
       sumColumn: "abc",
-      where: { ...scoped, status: { [Op.ne]: "returned" } },
+      where: { ...scoped, status: { [Op.notIn]: RELEASED_APP_STATUSES } },
     }),
     disbursedByObligation(),
   ]);

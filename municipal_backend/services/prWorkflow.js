@@ -1,21 +1,44 @@
-// Centralised state machine for Purchase Requisitions, per design doc
-// Section 5.2 and the Section 13 requirement for centralised state handling.
+// Centralised state machine for Purchase Requisitions.
 //
-//   draft → pendingDepartmentHeadEndorsement → pendingBudgetCertification
-//         → pendingTreasuryCertification → pendingSecretariatReview
-//         → pendingHopeApproval → approved
-// Any review stage may return the requisition to the requester.
+//   draft
+//     → pendingDepartmentHeadEndorsement   the Head of Office signs the request
+//     → pendingCashCertification           the Treasurer certifies that the
+//                                          funds are available
+//     → pendingMayorApproval               the Mayor approves the request
+//     → pendingBudgetCertification         the Budget Office certifies that an
+//                                          appropriation exists, identifies the
+//                                          funding source, and obligates it
+//     → pendingModeDetermination           the BAC determines the mode of
+//                                          procurement
+//     → approved                           cleared; procurement may begin
 //
-// The treasury stage implements the second half of LGC Sec. 344. The Budget
-// Officer certifies that an appropriation exists and obligates it; the Treasurer
-// then certifies that the cash to honour it is actually in the treasury. An
-// appropriation can be fully intact while collections have not come in, so the
-// two certifications are not interchangeable and cannot be merged.
+// Any stage may return the requisition to the requester.
 //
-// It sits *after* budget certification because there is nothing to certify cash
-// against until the amount has been obligated — and *before* Secretariat review,
-// so the BAC never begins procuring against a requisition the treasury cannot
-// fund.
+// ── WHY THIS ORDER, AND WHY IT CHANGED ───────────────────────────────────────
+// An earlier version ran Budget → Treasury → Secretariat → Mayor, reasoning
+// from LGC Sec. 344 that there is nothing to certify cash against until an
+// amount has been obligated. Sec. 344 does say the Budget Officer certifies the
+// appropriation, the Accountant obligates it and the Treasurer certifies
+// availability of funds — but it says so about *disbursement*, the moment money
+// leaves, which in this system is the voucher stage and is implemented there.
+//
+// The requisition is a different document earlier in the year, and the LGU's
+// actual practice — the order the boxes appear on the Purchase Request form —
+// is: the office requests, the Treasurer certifies cash is available, the Local
+// Chief Executive approves, and only then does the Budget Office issue the
+// Obligation Request against the appropriation.
+//
+// That order is also the more defensible one. Obligating funds encumbers an
+// appropriation: the money stops being available to anything else. Doing that
+// *before* the Mayor has approved the request means every requisition that is
+// later refused has silently held budget in the meantime. Obligating after
+// approval commits money only to requests the executive has actually agreed to.
+//
+// The two certifications remain separate officers answering separate questions
+// and must never be merged: the Treasurer answers "is the cash there?", the
+// Budget Officer answers "is there an appropriation, and is there room left
+// under it?". An appropriation can be intact while collections have not come
+// in, which is exactly the case the Treasurer's signature exists to catch.
 
 export const PR_TRANSITIONS = {
   submit: {
@@ -26,41 +49,48 @@ export const PR_TRANSITIONS = {
   },
   endorse: {
     from: ["pendingDepartmentHeadEndorsement"],
-    to: "pendingBudgetCertification",
+    to: "pendingCashCertification",
     permission: "pr.endorse",
     label: "Endorse",
   },
+  // Step 16 — the Treasurer.
+  certifyCash: {
+    from: ["pendingCashCertification"],
+    to: "pendingMayorApproval",
+    permission: "pr.certifyCash",
+    label: "Certify availability of funds",
+  },
+  // Step 17 — the Local Chief Executive. Named `approve` because that is what
+  // the box on the form says and what the officer is doing; the requisition is
+  // not finished at this point, and its status says so.
+  approve: {
+    from: ["pendingMayorApproval"],
+    to: "pendingBudgetCertification",
+    permission: "pr.approve",
+    label: "Approve the request",
+  },
+  // Step 18 — the Budget Office. This is the transition that writes the
+  // Obligation Request and stamps the funding source on the requisition.
   certify: {
     from: ["pendingBudgetCertification"],
-    to: "pendingTreasuryCertification",
+    to: "pendingModeDetermination",
     permission: "pr.certify",
-    label: "Certify appropriation",
+    label: "Certify appropriation and obligate",
   },
-  certifyCash: {
-    from: ["pendingTreasuryCertification"],
-    to: "pendingSecretariatReview",
-    permission: "pr.certifyCash",
-    label: "Certify cash availability",
-  },
-  review: {
-    from: ["pendingSecretariatReview"],
-    to: "pendingHopeApproval",
-    permission: "pr.review",
-    label: "Review",
-  },
-  approve: {
-    from: ["pendingHopeApproval"],
+  // Step 19 — the Bids and Awards Committee.
+  determineMode: {
+    from: ["pendingModeDetermination"],
     to: "approved",
-    permission: "pr.approve",
-    label: "Approve",
+    permission: "pr.determineMode",
+    label: "Determine the mode of procurement",
   },
   return: {
     from: [
       "pendingDepartmentHeadEndorsement",
+      "pendingCashCertification",
+      "pendingMayorApproval",
       "pendingBudgetCertification",
-      "pendingTreasuryCertification",
-      "pendingSecretariatReview",
-      "pendingHopeApproval",
+      "pendingModeDetermination",
     ],
     to: "returned",
     permission: null, // depends on the stage — see below
@@ -71,11 +101,26 @@ export const PR_TRANSITIONS = {
 
 const RETURN_PERMISSION_BY_STATE = {
   pendingDepartmentHeadEndorsement: "pr.endorse",
+  pendingCashCertification: "pr.certifyCash",
+  pendingMayorApproval: "pr.approve",
   pendingBudgetCertification: "pr.certify",
-  pendingTreasuryCertification: "pr.certifyCash",
-  pendingSecretariatReview: "pr.review",
-  pendingHopeApproval: "pr.approve",
+  pendingModeDetermination: "pr.determineMode",
 };
+
+// The stages at which a requisition is live: it has left the requester's desk
+// and has not been refused. Every one of these holds a claim on the linked APP
+// entry's balance.
+//
+// This list has to contain every non-draft, non-returned, non-approved state.
+// When `pendingCashCertification` was added and this list was not updated, a
+// requisition sitting with the Treasurer stopped counting against its APP
+// entry, and two requisitions could each pass the balance check for the same
+// money. Derive it rather than retyping it.
+export const LIVE_PR_STATUSES = [
+  ...new Set(Object.values(PR_TRANSITIONS).flatMap((transition) => transition.from)),
+]
+  .filter((status) => status !== "draft" && status !== "returned")
+  .concat("approved");
 
 export const permissionForTransition = (action, currentStatus) => {
   if (action === "return") return RETURN_PERMISSION_BY_STATE[currentStatus] ?? null;
@@ -87,7 +132,7 @@ export const evaluateTransition = ({ action, currentStatus, remarks }) => {
   if (!transition) return { ok: false, message: `Unknown action: ${action}` };
 
   if (currentStatus === "approved") {
-    return { ok: false, message: "This requisition is already approved." };
+    return { ok: false, message: "This requisition has already cleared and is ready for procurement." };
   }
 
   if (!transition.from.includes(currentStatus)) {

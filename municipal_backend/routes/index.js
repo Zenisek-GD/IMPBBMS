@@ -29,6 +29,8 @@ import authRoutes from "./authRoutes.js";
 import activationRoutes from "./activationRoutes.js";
 import userRoutes from "./userRoutes.js";
 import departmentRoutes from "./departmentRoutes.js";
+import planningRoutes from "./planningRoutes.js";
+import budgetPreparationRoutes from "./budgetPreparationRoutes.js";
 import appRoutes from "./appRoutes.js";
 import prRoutes from "./prRoutes.js";
 import settingsRoutes from "./settingsRoutes.js";
@@ -65,6 +67,13 @@ router.use("/api/activation", activationRoutes);
 
 router.use("/api/users", userRoutes);
 router.use("/api/departments", departmentRoutes);
+// Mounted before the procurement modules because that is the order the work
+// happens in: the development plan authorises the investment program, the
+// investment program grounds the budget, the budget authorises the APP, and the
+// APP authorises the requisition.
+router.use("/api/planning", planningRoutes);
+router.use("/api/budget-preparation", budgetPreparationRoutes);
+
 router.use("/api/app-entries", appRoutes);
 router.use("/api/purchase-requisitions", prRoutes);
 router.use("/api/settings", settingsRoutes);

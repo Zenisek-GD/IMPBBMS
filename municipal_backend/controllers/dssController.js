@@ -6,6 +6,7 @@ import { Rfq, Bid, Award } from "../models/biddingModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
 import { Invoice, Payment } from "../models/paymentModel.js";
+import { LIVE_PR_STATUSES } from "../services/prWorkflow.js";
 
 // Design doc Section 7.8: read-only analytics for HOPE, Budget Officer and
 // Internal Auditor — under/over-allocated department flags, historical spending
@@ -89,7 +90,10 @@ export const getDssOverview = async (req, res) => {
     byDepartment.get(key).allocated += Number(entry.abc);
   }
   for (const pr of prs) {
-    if (!["approved", "pendingHopeApproval", "pendingSecretariatReview", "pendingBudgetCertification"].includes(pr.status)) continue;
+    // Every requisition that still holds a claim on the department's budget.
+    // Taken from the state machine so a new stage cannot silently drop out of
+    // the utilisation figures the way it once dropped out of the balance check.
+    if (!LIVE_PR_STATUSES.includes(pr.status)) continue;
     const bucket = byDepartment.get(pr.departmentId);
     if (bucket) bucket.committed += Number(pr.totalAmount);
   }

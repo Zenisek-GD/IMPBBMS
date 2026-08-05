@@ -20,6 +20,11 @@ const ROLES = [
   { key: "twgMember", name: "TWG Member" },
   { key: "departmentRequester", name: "Department Requester" },
   { key: "budgetOfficer", name: "Budget Officer" },
+  // The two offices the planning and budget-legislation chain runs through.
+  // Without them the process began at "a Budget Officer types in the enacted
+  // figures", with no development plan behind it and no legislature in front.
+  { key: "planningOfficer", name: "Municipal Planning and Development Coordinator" },
+  { key: "sanggunianSecretary", name: "Secretary to the Sangguniang Bayan" },
   // Two roles, not one. A single "Finance Officer" holding both certification
   // and release meant either that one person controlled a whole disbursement,
   // or — once the same-person rule was enforced — that no payment could be
@@ -36,6 +41,8 @@ const ROLES = [
 // are seeded as end-user departments alongside the committee and support units.
 const DEPARTMENTS = [
   { code: "OMAYOR", name: "Office of the Mayor", type: "executive" },
+  { code: "SB", name: "Office of the Sangguniang Bayan", type: "executive" },
+  { code: "MPDO", name: "Municipal Planning and Development Office", type: "support" },
   { code: "BAC", name: "Bids and Awards Committee", type: "committee" },
   { code: "BACSEC", name: "BAC Secretariat", type: "committee" },
   { code: "TWG", name: "Technical Working Group", type: "committee" },
@@ -62,6 +69,8 @@ const ROLE_DEPARTMENT = {
   twgMember: "TWG",
   departmentRequester: "ENGR",
   budgetOfficer: "BUDGET",
+  planningOfficer: "MPDO",
+  sanggunianSecretary: "SB",
   municipalAccountant: "ACCTG",
   municipalTreasurer: "TREAS",
   internalAuditor: "INTAUDIT",
@@ -139,6 +148,12 @@ const LGU_SETTINGS = [
     key: SETTING_KEYS.LGU_INCOME_CLASS,
     value: "2nd",
     description: "1st–5th income class — drives IRR Sec. 34.2 thresholds",
+  },
+  {
+    key: SETTING_KEYS.CAPITALIZATION_THRESHOLD,
+    value: "50000",
+    description:
+      "Peso threshold at or above which a long-lived item is Capital Outlay; below it, semi-expendable (COA Circular 2022-004)",
   },
 ];
 

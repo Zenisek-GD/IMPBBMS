@@ -34,6 +34,18 @@ const buildResponse = (lgu) => ({
       label: "Mandatory pre-bid conference (at or above)",
       citation: "IRR Sec. 51.1",
     },
+    // Not a procurement ceiling — an accounting one. It decides whether a
+    // long-lived item bought on a requisition is capitalised as Property, Plant
+    // and Equipment or carried as semi-expendable, and therefore whether it may
+    // be charged to MOOE at all. Shown alongside the others because it is the
+    // same kind of thing from the operator's point of view: a figure a
+    // regulator sets that changes what the system allows.
+    capitalisation: {
+      amount: lgu.capitalizationThreshold,
+      label: "Capital Outlay threshold (at or above, per item)",
+      citation: "COA Circular 2022-004",
+      editable: true,
+    },
   },
 });
 
@@ -42,7 +54,7 @@ export const getSettings = async (req, res) => {
 };
 
 export const updateSettings = async (req, res) => {
-  const { name, lguType, incomeClass } = req.body;
+  const { name, lguType, incomeClass, capitalizationThreshold } = req.body;
 
   if (lguType && !LGU_TYPES.includes(lguType)) {
     return res.status(400).json({ message: "Unknown LGU type." });
@@ -54,11 +66,23 @@ export const updateSettings = async (req, res) => {
   if (name !== undefined && !name.trim()) {
     return res.status(400).json({ message: "LGU name cannot be empty." });
   }
+  if (capitalizationThreshold !== undefined && capitalizationThreshold !== null) {
+    const threshold = Number(capitalizationThreshold);
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      return res.status(400).json({ message: "The capitalisation threshold must be greater than 0." });
+    }
+  }
 
   const updates = [
     [SETTING_KEYS.LGU_NAME, name?.trim()],
     [SETTING_KEYS.LGU_TYPE, lguType],
     [SETTING_KEYS.LGU_INCOME_CLASS, incomeClass],
+    [
+      SETTING_KEYS.CAPITALIZATION_THRESHOLD,
+      capitalizationThreshold === undefined || capitalizationThreshold === null
+        ? undefined
+        : String(Number(capitalizationThreshold)),
+    ],
   ].filter(([, value]) => value !== undefined && value !== null);
 
   for (const [key, value] of updates) {

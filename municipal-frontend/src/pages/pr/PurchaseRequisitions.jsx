@@ -1,13 +1,16 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, FileText, Trash2, AlertTriangle, Wallet } from 'lucide-react'
+import { Plus, FileText, Trash2, AlertTriangle, Wallet, Gavel, Info } from 'lucide-react'
 import * as prApi from '../../api/purchaseRequisitions'
 import {
   PR_STATUS_LABELS,
   PR_STATUS_TONES,
   PR_TRANSITION_FOR_STATUS,
   PR_RETURN_PERMISSION_FOR_STATUS,
+  ASSET_CLASS_LABELS,
+  ASSET_CLASS_TONES,
 } from '../../api/purchaseRequisitions'
 import { fetchAppEntries } from '../../api/appEntries'
+import { fetchSettings } from '../../api/settings'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
@@ -21,7 +24,21 @@ import { usePagination } from '../../components/ui/usePagination'
 const peso = (value) =>
   `₱${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
-const emptyLine = () => ({ description: '', unit: '', quantity: '', unitCost: '' })
+const emptyLine = () => ({
+  description: '',
+  unit: '',
+  quantity: '',
+  unitCost: '',
+  hasUsefulLifeOverOneYear: false,
+})
+
+// Mirrors classifyLineItem() on the server so the requester sees the
+// consequence of ticking the box before saving. The server's answer is the one
+// that is stored — this is a preview, not a second source of truth.
+const previewAssetClass = (line, threshold) => {
+  if (!line.hasUsefulLifeOverOneYear) return 'expense'
+  return Number(line.unitCost || 0) >= threshold ? 'capitalOutlay' : 'semiExpendable'
+}
 
 function PrFormModal({ existing, onClose, onSaved }) {
   const [appEntries, setAppEntries] = useState([])
@@ -34,8 +51,26 @@ function PrFormModal({ existing, onClose, onSaved }) {
     existing?.lineItems?.length ? existing.lineItems.map((l) => ({ ...l })) : [emptyLine()]
   )
   const [balance, setBalance] = useState(null)
+  const [threshold, setThreshold] = useState(50000)
   const [serverError, setServerError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // The capitalisation threshold is configuration, not a constant — read it
+  // rather than hardcoding ₱50,000 here, or the preview would go stale the day
+  // COA moves it and the admin updates the setting.
+  useEffect(() => {
+    let cancelled = false
+    fetchSettings()
+      .then((data) => {
+        if (!cancelled && data?.lgu?.capitalizationThreshold) {
+          setThreshold(Number(data.lgu.capitalizationThreshold))
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Only approved/locked APP entries may be linked (Section 5.3).
   useEffect(() => {
@@ -91,6 +126,9 @@ function PrFormModal({ existing, onClose, onSaved }) {
           unit: line.unit,
           quantity: Number(line.quantity),
           unitCost: Number(line.unitCost),
+          // The classification itself is derived server-side; what the form
+          // sends is the only part it can know — whether the item lasts.
+          hasUsefulLifeOverOneYear: Boolean(line.hasUsefulLifeOverOneYear),
         })),
       }
       if (existing) await prApi.updatePr(existing.id, payload)
@@ -212,46 +250,76 @@ function PrFormModal({ existing, onClose, onSaved }) {
             </button>
           </div>
 
-          <div className="flex flex-col gap-2">
-            {lines.map((line, index) => (
-              <div key={index} className="grid grid-cols-12 items-center gap-2">
-                <input
-                  placeholder="Description"
-                  value={line.description}
-                  onChange={(event) => updateLine(index, 'description', event.target.value)}
-                  className="col-span-5 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
-                />
-                <input
-                  placeholder="Unit"
-                  value={line.unit ?? ''}
-                  onChange={(event) => updateLine(index, 'unit', event.target.value)}
-                  className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
-                />
-                <input
-                  type="number"
-                  placeholder="Qty"
-                  value={line.quantity}
-                  onChange={(event) => updateLine(index, 'quantity', event.target.value)}
-                  className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
-                />
-                <input
-                  type="number"
-                  placeholder="Unit cost"
-                  value={line.unitCost}
-                  onChange={(event) => updateLine(index, 'unitCost', event.target.value)}
-                  className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
-                  disabled={lines.length === 1}
-                  aria-label="Remove line"
-                  className="col-span-1 text-text-faint hover:text-danger disabled:opacity-30"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
+          <div className="flex flex-col gap-3">
+            {lines.map((line, index) => {
+              const assetClass = previewAssetClass(line, threshold)
+              return (
+                <div key={index} className="rounded border border-border-muted/70 p-2">
+                  <div className="grid grid-cols-12 items-center gap-2">
+                    <input
+                      placeholder="Description"
+                      value={line.description}
+                      onChange={(event) => updateLine(index, 'description', event.target.value)}
+                      className="col-span-5 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                    />
+                    <input
+                      placeholder="Unit"
+                      value={line.unit ?? ''}
+                      onChange={(event) => updateLine(index, 'unit', event.target.value)}
+                      className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Qty"
+                      value={line.quantity}
+                      onChange={(event) => updateLine(index, 'quantity', event.target.value)}
+                      className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Unit cost"
+                      value={line.unitCost}
+                      onChange={(event) => updateLine(index, 'unitCost', event.target.value)}
+                      className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
+                      disabled={lines.length === 1}
+                      aria-label="Remove line"
+                      className="col-span-1 text-text-faint hover:text-danger disabled:opacity-30"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+
+                  {/* Useful life is the question only the requester can answer,
+                      and it is what decides whether the item is capitalised.
+                      The badge shows the consequence as soon as the box is
+                      ticked, so nobody discovers the classification at
+                      certification. */}
+                  <div className="mt-2 flex flex-wrap items-center gap-3 pl-1">
+                    <label className="flex items-center gap-2 text-xs text-text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(line.hasUsefulLifeOverOneYear)}
+                        onChange={(event) =>
+                          updateLine(index, 'hasUsefulLifeOverOneYear', event.target.checked)
+                        }
+                      />
+                      Useful life over one year
+                    </label>
+                    <Badge tone={ASSET_CLASS_TONES[assetClass]}>{ASSET_CLASS_LABELS[assetClass]}</Badge>
+                    {assetClass === 'capitalOutlay' && (
+                      <span className="text-[11px] text-text-faint">
+                        At or above {peso(threshold)} per item — must be charged to a Capital Outlay
+                        appropriation.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
 
           <p className="mt-3 text-right text-sm font-bold text-navy">Total: {peso(total)}</p>
@@ -274,6 +342,154 @@ function PrFormModal({ existing, onClose, onSaved }) {
             className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
             {saving ? 'SAVING...' : 'SAVE DRAFT'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Step 19: the BAC determines the mode of procurement ──────────────────────
+// The committee sees what the IRR ceilings indicate for this ABC *before* it
+// chooses, with the citation behind the figure. Departing from the indicated
+// mode is allowed — the committee may always fall back to competitive bidding,
+// and an alternative mode may rest on grounds the amount alone cannot express —
+// but the form makes the departure explicit and demands the reason, which is
+// the same rule the server enforces.
+function ModeDeterminationModal({ pr, onClose, onConfirm }) {
+  const [suggestion, setSuggestion] = useState(null)
+  const [modeKey, setModeKey] = useState('')
+  const [justification, setJustification] = useState('')
+  const [hopeApprovalReference, setHopeApprovalReference] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    prApi
+      .fetchModeSuggestion(pr.id)
+      .then((data) => {
+        if (cancelled) return
+        setSuggestion(data)
+        setModeKey(data.suggested)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.response?.data?.message ?? 'Could not load the thresholds.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [pr.id])
+
+  const chosen = suggestion?.modes?.find((mode) => mode.key === modeKey)
+  const departing = Boolean(suggestion && modeKey && modeKey !== suggestion.suggested)
+
+  return (
+    <Modal title={`Determine the mode — ${pr.prNumber}`} onClose={onClose}>
+      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
+        {!suggestion ? (
+          <p className="text-[13px] text-text-faint">Loading the applicable thresholds...</p>
+        ) : (
+          <>
+            <div className="flex items-start gap-2 rounded border border-navy/10 bg-chip/40 p-3">
+              <Info size={14} className="mt-0.5 shrink-0 text-navy" />
+              <div className="text-xs text-text-secondary">
+                <p>
+                  ABC <strong className="text-navy">{peso(suggestion.abc)}</strong> — for a{' '}
+                  {suggestion.lgu.incomeClass} class {suggestion.lgu.type}, the thresholds indicate{' '}
+                  <strong className="text-navy">
+                    {suggestion.modes.find((m) => m.key === suggestion.suggested)?.name ?? suggestion.suggested}
+                  </strong>
+                  .
+                </p>
+                <p className="mt-1">{suggestion.rationale}</p>
+                <p className="mt-1 text-text-faint">{suggestion.citation}</p>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                Mode of procurement resolved by the committee
+              </label>
+              <select
+                value={modeKey}
+                onChange={(event) => setModeKey(event.target.value)}
+                className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+              >
+                {suggestion.modes.map((mode) => (
+                  <option key={mode.key} value={mode.key}>
+                    {mode.name} — {mode.citation}
+                    {mode.isSuggested ? ' (indicated)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {departing && (
+              <div>
+                <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                  Why the committee departed from the indicated mode (required)
+                </label>
+                <textarea
+                  rows={3}
+                  value={justification}
+                  onChange={(event) => setJustification(event.target.value)}
+                  className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+                />
+              </div>
+            )}
+
+            {chosen?.requiresHopeApproval && (
+              <div>
+                <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                  Prior approval of the Head of the Procuring Entity — reference (required)
+                </label>
+                <input
+                  value={hopeApprovalReference}
+                  onChange={(event) => setHopeApprovalReference(event.target.value)}
+                  placeholder="e.g. Office Order No. 2027-114"
+                  className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-text-faint">
+                  {chosen.name} cannot be adopted on the committee&apos;s own authority ({chosen.citation}).
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        {error && (
+          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
+            {error}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            CANCEL
+          </Button>
+          <button
+            type="button"
+            disabled={submitting || !modeKey}
+            onClick={async () => {
+              setError('')
+              setSubmitting(true)
+              try {
+                await onConfirm({
+                  procurementModeKey: modeKey,
+                  justification: justification.trim() || undefined,
+                  hopeApprovalReference: hopeApprovalReference.trim() || undefined,
+                })
+                onClose()
+              } catch (err) {
+                setError(err.response?.data?.message ?? 'Could not record the determination.')
+              } finally {
+                setSubmitting(false)
+              }
+            }}
+            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
+          >
+            {submitting ? 'RECORDING...' : 'RECORD DETERMINATION'}
           </button>
         </div>
       </div>
@@ -327,6 +543,7 @@ export default function PurchaseRequisitions() {
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [returning, setReturning] = useState(null)
+  const [determiningMode, setDeterminingMode] = useState(null)
   const [actionError, setActionError] = useState('')
 
   const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
@@ -349,10 +566,10 @@ export default function PurchaseRequisitions() {
     }
   }, [statusFilter, refreshToken])
 
-  const runTransition = async (pr, action, remarks) => {
+  const runTransition = async (pr, action, payload) => {
     setActionError('')
     try {
-      await prApi.transitionPr(pr.id, action, remarks)
+      await prApi.transitionPr(pr.id, action, payload)
       refresh()
     } catch (err) {
       setActionError(err.response?.data?.message ?? 'Could not update that requisition.')
@@ -440,8 +657,40 @@ export default function PurchaseRequisitions() {
                         )}
                         {pr.returnRemarks && <p className="mt-1 text-xs text-danger">Returned: {pr.returnRemarks}</p>}
                       </td>
-                      <td className="px-4 py-3 text-[13px] text-text-secondary">{pr.appEntryTitle ?? '—'}</td>
-                      <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">{peso(pr.totalAmount)}</td>
+                      <td className="px-4 py-3 text-[13px] text-text-secondary">
+                        {pr.appEntryTitle ?? '—'}
+                        {/* The two things the later stages stamp on the
+                            requisition: which fund pays, and how it will be
+                            procured. Both are decisions of record, so they
+                            belong in the list rather than behind a click. */}
+                        {(pr.fundSourceLabel || pr.procurementModeName) && (
+                          <p className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-text-faint">
+                            {pr.fundSourceLabel && <span>{pr.fundSourceLabel}</span>}
+                            {pr.procurementModeName && (
+                              <span className="inline-flex items-center gap-1">
+                                <Gavel size={11} />
+                                {pr.procurementModeName}
+                                {pr.modeDepartedFromSuggestion && (
+                                  <Badge tone="warning">DEPARTS FROM THRESHOLD</Badge>
+                                )}
+                              </span>
+                            )}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">
+                        {peso(pr.totalAmount)}
+                        {pr.assetSummary?.capitalOutlay > 0 && (
+                          <p className="mt-1 text-[11px] font-normal text-text-faint">
+                            incl. {peso(pr.assetSummary.capitalOutlay)} capital outlay
+                          </p>
+                        )}
+                        {pr.assetSummary?.semiExpendable > 0 && (
+                          <p className="text-[11px] font-normal text-text-faint">
+                            {peso(pr.assetSummary.semiExpendable)} semi-expendable
+                          </p>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">{pr.dateRequired}</td>
                       <td className="px-4 py-3">
                         <Badge tone={PR_STATUS_TONES[pr.status]}>{PR_STATUS_LABELS[pr.status]}</Badge>
@@ -460,7 +709,11 @@ export default function PurchaseRequisitions() {
                           {canAdvance && (
                             <button
                               type="button"
-                              onClick={() => runTransition(pr, next.action).catch(() => {})}
+                              onClick={() =>
+                                next.opensForm
+                                  ? setDeterminingMode(pr)
+                                  : runTransition(pr, next.action).catch(() => {})
+                              }
                               className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
                               {next.label}
@@ -493,7 +746,14 @@ export default function PurchaseRequisitions() {
         <ReturnModal
           pr={returning}
           onClose={() => setReturning(null)}
-          onConfirm={(remarks) => runTransition(returning, 'return', remarks)}
+          onConfirm={(remarks) => runTransition(returning, 'return', { remarks })}
+        />
+      )}
+      {determiningMode && (
+        <ModeDeterminationModal
+          pr={determiningMode}
+          onClose={() => setDeterminingMode(null)}
+          onConfirm={(payload) => runTransition(determiningMode, 'determineMode', payload)}
         />
       )}
     </DashboardPage>

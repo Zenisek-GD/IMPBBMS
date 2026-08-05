@@ -3,6 +3,12 @@ import { apiClient } from './client'
 export const fetchDepartments = (params = {}) =>
   apiClient.get('/departments', { params }).then((res) => res.data)
 
+// Names and codes of the active offices, readable by any signed-in user. Use
+// this in forms that have to name an office — `fetchDepartments` is the
+// administrator's listing and 403s for everyone else.
+export const fetchOfficeDirectory = () =>
+  apiClient.get('/departments/directory').then((res) => res.data)
+
 export const createDepartment = (payload) =>
   apiClient.post('/departments', payload).then((res) => res.data)
 

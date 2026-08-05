@@ -6,6 +6,9 @@ import { User } from "../models/userModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import { suggestProcurementMode } from "../services/procurementThresholds.js";
 import { Appropriation } from "../models/appropriationModel.js";
+import { AipEntry, InvestmentProgram } from "../models/investmentProgramModel.js";
+import { PrHeader } from "../models/prModel.js";
+import { LIVE_PR_STATUSES } from "../services/prWorkflow.js";
 import { programmedFor } from "../services/budgetLedger.js";
 import { evaluateTransition, permissionForTransition, isEditable } from "../services/appWorkflow.js";
 import { notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
@@ -43,6 +46,15 @@ const serialize = (entry) => ({
   appropriationId: entry.appropriationId ?? null,
   appropriationOrdinanceNo: entry.appropriation?.ordinanceNo ?? null,
   appropriationTitle: entry.appropriation?.title ?? null,
+  appropriationExpenseClass: entry.appropriation?.expenseClass ?? null,
+  // The investment-program project this procurement serves — the other half of
+  // the authority: the appropriation says the money exists, this says it was
+  // programmed for this purpose.
+  aipEntryId: entry.aipEntryId ?? null,
+  aipEntryTitle: entry.aipEntry?.title ?? null,
+  revisionRemarks: entry.revisionRemarks,
+  revisedAt: entry.revisedAt,
+  cancelledAt: entry.cancelledAt,
 });
 
 const withIncludes = {
@@ -50,6 +62,7 @@ const withIncludes = {
     { model: Department, as: "implementingUnit" },
     { model: User, as: "createdBy", attributes: ["id", "name"] },
     { model: Appropriation, as: "appropriation" },
+    { model: AipEntry, as: "aipEntry" },
   ],
 };
 
@@ -90,6 +103,48 @@ const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId }
 
   return { balance };
 };
+
+// The other half of the authority check. The appropriation says the money
+// exists; the investment program says the municipality actually planned to
+// spend it on this. Without both, an office could file a PPMP line for anything
+// at all so long as some budget line had room — which is how an appropriation
+// for a health centre ends up buying something else entirely.
+const validateAipLink = async (aipEntryId, fiscalYear) => {
+  if (!aipEntryId) {
+    return {
+      error:
+        "An investment program entry is required. A PPMP line must procure for a project the LGU programmed.",
+    };
+  }
+
+  const aipEntry = await AipEntry.findByPk(Number(aipEntryId), {
+    include: [{ model: InvestmentProgram, as: "program" }],
+  });
+  if (!aipEntry) return { error: "That investment program entry does not exist." };
+
+  if (aipEntry.program?.status !== "adopted") {
+    return { error: "That entry belongs to an investment program that has not been adopted." };
+  }
+  if (aipEntry.status !== "planned") {
+    return { error: "That investment program entry has been dropped." };
+  }
+  if (fiscalYear && aipEntry.program.fiscalYear !== Number(fiscalYear)) {
+    return {
+      error: `That entry is from the ${aipEntry.program.fiscalYear} investment program, not ${fiscalYear}.`,
+    };
+  }
+
+  return { aipEntry };
+};
+
+// Requisitions that are still live against this plan line. Reopening or
+// cancelling a line that money has already been committed against would leave
+// those requisitions charged to a plan that no longer exists.
+const liveRequisitionsFor = (appEntryId) =>
+  PrHeader.findAll({
+    where: { appEntryId, status: { [Op.in]: LIVE_PR_STATUSES } },
+    attributes: ["id", "prNumber", "status"],
+  });
 
 // Section 4.3 validation rules, enforced server-side.
 const validateEntry = ({ abc, targetStartQuarter, targetCompletionQuarter, procurementMode, justification }) => {
@@ -173,16 +228,22 @@ export const createAppEntry = async (req, res) => {
     return res.status(400).json({ message: "That implementing unit is not available." });
   }
 
+  const fiscalYear = payload.fiscalYear ?? new Date().getFullYear();
+
   const funding = await validateAppropriation(payload.appropriationId, payload.abc);
   if (funding.error) return res.status(400).json({ message: funding.error, balance: funding.balance });
+
+  const programmed = await validateAipLink(payload.aipEntryId, fiscalYear);
+  if (programmed.error) return res.status(400).json({ message: programmed.error });
 
   const entry = await AppEntry.create({
     ...payload,
     abc: Number(payload.abc),
     appropriationId: Number(payload.appropriationId),
+    aipEntryId: Number(payload.aipEntryId),
     implementingUnitId,
     createdById: req.currentUser.id,
-    fiscalYear: payload.fiscalYear ?? new Date().getFullYear(),
+    fiscalYear,
     status: "draft",
   });
 
@@ -214,12 +275,18 @@ export const updateAppEntry = async (req, res) => {
   });
   if (funding.error) return res.status(400).json({ message: funding.error, balance: funding.balance });
 
+  if (req.body.aipEntryId !== undefined) {
+    const programmed = await validateAipLink(req.body.aipEntryId, merged.fiscalYear);
+    if (programmed.error) return res.status(400).json({ message: programmed.error });
+  }
+
   await entry.update({
     ...req.body,
     ...(req.body.abc !== undefined ? { abc: Number(req.body.abc) } : {}),
     ...(req.body.appropriationId !== undefined
       ? { appropriationId: Number(req.body.appropriationId) }
       : {}),
+    ...(req.body.aipEntryId !== undefined ? { aipEntryId: Number(req.body.aipEntryId) } : {}),
   });
 
   const updated = await AppEntry.findByPk(entry.id, withIncludes);
@@ -243,12 +310,44 @@ export const transitionAppEntry = async (req, res) => {
   const result = evaluateTransition({ action, currentStatus: entry.status, remarks });
   if (!result.ok) return res.status(409).json({ message: result.message });
 
+  // Reopening or dropping a plan line that requisitions are already drawing on
+  // would strand them: they would be charged to a plan that no longer says what
+  // they are for, and a cancelled line releases its programmed amount while
+  // their obligations go on holding the appropriation.
+  if (action === "revise" || action === "cancel") {
+    const live = await liveRequisitionsFor(entry.id);
+    if (live.length > 0) {
+      return res.status(409).json({
+        message:
+          `${live.length} requisition(s) are still live against this entry ` +
+          `(${live.map((pr) => pr.prNumber).join(", ")}). Return or complete them before ` +
+          `${action === "cancel" ? "cancelling" : "revising"} the plan line.`,
+        requisitions: live.map((pr) => ({ prNumber: pr.prNumber, status: pr.status })),
+      });
+    }
+  }
+
   // Section 13: state-changing operations run inside a transaction.
   await sequelize.transaction(async (transaction) => {
     const changes = { status: result.to };
 
     if (action === "return") changes.returnRemarks = remarks.trim();
     if (action === "submit") changes.returnRemarks = null;
+
+    // A revised line goes back to draft and must travel the whole approval
+    // chain again — consolidation, certification, approval. That is the point:
+    // the plan the Mayor approved is not the plan the office has now.
+    if (action === "revise") {
+      changes.revisionRemarks = remarks.trim();
+      changes.revisedAt = new Date();
+      changes.lockedAt = null;
+      changes.planStage = "ppmp";
+    }
+
+    if (action === "cancel") {
+      changes.revisionRemarks = remarks.trim();
+      changes.cancelledAt = new Date();
+    }
 
     // The plan document advances with the workflow: an office's PPMP line
     // becomes part of the consolidated indicative APP, and is marked final once

@@ -40,6 +40,39 @@ export const APP_TRANSITIONS = {
     label: "Return to requester",
     requiresRemarks: true,
   },
+
+  // ── Revision and cancellation ──────────────────────────────────────────────
+  // An approved entry is locked, which was right for the ordinary case and
+  // wrong for the real one: projects get rescoped and dropped mid-year, and the
+  // municipality's own process says a cancelled project's PPMP is revised.
+  // Without a way back, the only options were an unrecorded database edit or a
+  // plan that no longer described what the office was doing.
+  //
+  // Both are gated on `app.revise` and both demand remarks — the point is not
+  // to make an approved plan editable, it is to make changing it an act that
+  // leaves a record.
+  revise: {
+    from: ["approved", "locked"],
+    to: "draft",
+    permission: "app.revise",
+    label: "Reopen for revision",
+    requiresRemarks: true,
+  },
+  cancel: {
+    from: [
+      "draft",
+      "returned",
+      "pendingConsolidation",
+      "pendingBudgetCertification",
+      "pendingHopeApproval",
+      "approved",
+      "locked",
+    ],
+    to: "cancelled",
+    permission: "app.revise",
+    label: "Cancel the project",
+    requiresRemarks: true,
+  },
 };
 
 // Which permission may return an entry, by the stage it is sitting in.
@@ -48,6 +81,12 @@ const RETURN_PERMISSION_BY_STATE = {
   pendingBudgetCertification: "app.certify",
   pendingHopeApproval: "app.approve",
 };
+
+// Statuses in which the entry still holds a claim on its appropriation — every
+// status except the two that release it. Written as an exclusion so a new
+// status added to the model counts as live by default, which is the safe way
+// round: over-counting a claim blocks an overspend, under-counting permits one.
+export const RELEASED_APP_STATUSES = ["returned", "cancelled"];
 
 export const permissionForTransition = (action, currentStatus) => {
   if (action === "return") return RETURN_PERMISSION_BY_STATE[currentStatus] ?? null;
@@ -59,9 +98,23 @@ export const evaluateTransition = ({ action, currentStatus, remarks }) => {
   const transition = APP_TRANSITIONS[action];
   if (!transition) return { ok: false, message: `Unknown action: ${action}` };
 
-  // Section 4.3 / 4.2: an approved APP is locked and cannot be edited or moved.
-  if (currentStatus === "approved" || currentStatus === "locked") {
-    return { ok: false, message: "This APP entry is approved and locked." };
+  if (currentStatus === "cancelled") {
+    return { ok: false, message: "This APP entry has been cancelled." };
+  }
+
+  // Section 4.3 / 4.2: an approved APP is locked and cannot be edited or moved
+  // through the normal workflow. Revision and cancellation are the deliberate
+  // exceptions — they exist precisely to act on a locked entry — so they are
+  // checked against their own `from` lists below rather than being caught here.
+  if (
+    (currentStatus === "approved" || currentStatus === "locked") &&
+    action !== "revise" &&
+    action !== "cancel"
+  ) {
+    return {
+      ok: false,
+      message: "This APP entry is approved and locked. Reopen it for revision if the project has changed.",
+    };
   }
 
   if (!transition.from.includes(currentStatus)) {
