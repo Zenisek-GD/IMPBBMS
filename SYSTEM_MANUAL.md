@@ -1,5 +1,15 @@
 # Municipal Budgeting and Procurement Workflow Manual
 
+## 0. Legal basis
+
+Procurement in this system implements **Republic Act No. 12009, the New Government Procurement Act (NGPA)**, and its **Implementing Rules and Regulations, 1st Edition, as of 30 March 2026**.
+
+RA 12009 was signed on 20 July 2024 and took effect on **13 August 2024**. It **repealed RA 9184** (the Government Procurement Reform Act) and Commonwealth Act No. 138. Any reference in older project documents to RA 9184 or its 2016 IRR describes superseded law and should be read as historical.
+
+Budgeting implements **Republic Act No. 7160, the Local Government Code of 1991**, Book II (Local Fiscal Administration) — principally Sections 316 to 344.
+
+Where this manual cites a section number without qualification, it is a section of the **IRR of RA 12009**. Local Government Code citations are written in full as "LGC Sec. NNN".
+
 ## 1. Purpose
 This system is a role-based municipal platform covering the whole chain from development planning through budgeting, requisitioning, bidding, contracting, delivery tracking, invoicing, budget monitoring, audit review, and transparency publishing.
 
@@ -16,8 +26,10 @@ The twenty steps below are the municipality's process. Each one is a distinct ac
 1. Prepare the Comprehensive Development Plan (multi-year).
 2. Determine the Mayor's priorities for the year.
 3. Prepare the Annual Investment Program (AIP).
-4. Departments prepare Project Procurement Management Plans (PPMPs).
-5. Consolidate PPMPs into the Annual Procurement Plan (APP).
+4. Departments prepare **indicative** Project Procurement Management Plans (PPMPs) to support their budget proposals (Sec. 7.7.1).
+5. Consolidate the indicative PPMPs into the **Indicative** Annual Procurement Plan; the BAC recommends the mode of procurement to the HoPE (Sec. 7.7.2).
+
+Steps 4 and 5 run *alongside* budget preparation, not after it — that is the whole point of the word "indicative". The **final** APP is a separate, later document: once the Appropriation Ordinance is enacted the offices finalise their PPMPs against the authorised allocation, and those are consolidated into the final APP (Sec. 7.7.5). See §8.
 
 **Budgeting**
 6. Departments prepare proposed budgets.
@@ -35,8 +47,11 @@ The twenty steps below are the municipality's process. Each one is a distinct ac
 16. The Municipal Treasurer certifies the availability of funds.
 17. The Mayor approves the request.
 18. The Budget Office certifies that an appropriation exists and identifies the funding source.
+18b. The Municipal Accountant obligates that appropriation and raises the Obligation Request (ORS).
 19. The BAC determines the mode of procurement.
 20. Procurement proceeds through competitive bidding or another legally authorised mode.
+
+Steps 18 and 18b are two officers, not one. LGC Sec. 344 names three: *"the local budget officer certifies to the existence of appropriation that has been legally made for the purpose, the local accountant has obligated said appropriation, and the local treasurer certifies to the availability of funds."* Certifying that an appropriation exists is a statement about the ordinance; obligating it is the entry in the books that encumbers the money. One office doing both puts the check and the book-keeping in the same pair of hands.
 
 ### 1.2 Why nothing can be spent without the chain above it
 Each layer authorises the one below it, and the system refuses to skip a link:
@@ -88,14 +103,23 @@ Backend scripts are defined in `municipal_backend/package.json`:
 - `npm run migrate` drops and recreates all Sequelize tables using `sync({ force: true })`.
 - `npm run seed` loads demo roles, departments, permissions, procurement modes, settings, and users.
 
-The database connection in `municipal_backend/models/db.js` is currently:
-- database: `municipal_backend`
-- user: `root`
-- password: empty string
-- host: `localhost`
-- dialect: `mysql`
+The database connection in `municipal_backend/models/db.js` reads from the environment, with local development defaults:
 
-So MySQL must be running locally and the credentials must match that file unless you change it.
+| Variable | Default |
+|---|---|
+| `DB_NAME` | `municipal_backend` |
+| `DB_USER` | `root` |
+| `DB_PASSWORD` | empty string |
+| `DB_HOST` | `127.0.0.1` |
+| `DB_PORT` | `3306` |
+
+Set them in `municipal_backend/.env`. The host defaults to `127.0.0.1` rather than `localhost` deliberately: on Windows `localhost` resolves to the IPv6 `::1` first while MySQL binds IPv4 only, which fails with `ECONNREFUSED` against a server that is running perfectly well.
+
+Because the name is an environment variable, a throwaway database can be pointed at without touching the working one — useful for testing:
+
+```bash
+DB_NAME=impbbms_scratch PORT=3100 node index.js
+```
 
 ### Frontend
 Frontend scripts are defined in `municipal-frontend/package.json`:
@@ -106,11 +130,30 @@ Frontend scripts are defined in `municipal-frontend/package.json`:
 
 ### Typical local run order
 1. Start MySQL.
-2. Run the backend migrate script.
-3. Run the backend seed script.
-4. Start the backend server.
-5. Start the frontend dev server.
-6. Open the frontend and log in with a seeded account.
+2. `node migrate.js` — creates the database if absent, then syncs. Add `--alter` to add new columns to existing tables, or `--force --yes` to drop and recreate everything.
+3. `npm run seed` — roles, departments, permissions, procurement modes, settings, demo accounts.
+4. `node seedDemo.js` — six full-lifecycle demo projects. Without this, every data-driven screen is empty.
+5. Start the backend server.
+6. Start the frontend dev server.
+7. Open the frontend and log in with a seeded account.
+
+`migrate.js` used to prompt through `inquirer`, so it could not run in a script; and it only ever offered `sync({ force: true })`, which drops every table. It now takes flags, defaults to the safe operation, and `--force` refuses to run non-interactively without `--yes`.
+
+### Automated conformance tests
+
+Three harnesses live in `municipal_backend/` and are the regression suite for the statutory rules:
+
+| File | Covers |
+|---|---|
+| `tests-e2e-conformance.mjs` | LGC Sec. 323 reenactment, the indicative APP cycle, EPA, observers (Sec. 43), protests (Sec. 83–85), Abstract of Bids |
+| `tests-e2e-award.mjs` | The requisition chain through five officers, pre-bid, posting periods, LCRB enforcement, protests blocking award, Sec. 66, performance security, NTP |
+| `tests-e2e-sanctions.mjs` | Blacklisting (Sec. 69), failure of bidding (Sec. 64), variation orders and termination (Sec. 71), the 4% contingency ceiling, GPPB submission |
+
+Run them against a **throwaway** database, never your working one:
+
+```bash
+DB_NAME=impbbms_scratch node migrate.js --force --yes && DB_NAME=impbbms_scratch node seed.js
+```
 
 ## 4. Authentication and Access Control
 ### Login flow
@@ -138,6 +181,7 @@ Seeded roles are created in `municipal_backend/seed.js`. Each role has a landing
 - Municipal Planning and Development Coordinator -> `/planning`
 - Secretary to the Sangguniang Bayan -> `/budget/preparation`
 - BAC Chairperson -> `/bac-chair`
+- BAC Vice-Chairperson -> `/bac-chair`
 - BAC Member -> `/bac-member`
 - BAC Secretariat -> `/secretariat`
 - TWG Member -> `/twg`
@@ -154,7 +198,9 @@ Three bodies in the process have no role of their own, because their membership 
 
 - **Local Finance Committee** — LGC Sec. 316 fixes its membership as the Planning and Development Coordinator, the Budget Officer and the Treasurer. All three hold `budget.conductForum` and `budget.conductHearing`; nobody else does.
 - **Municipal Budget Council** — membership is not fixed by statute, so it is expressed by holding `budget.reviewProposal`. An administrator can widen it without a code change.
-- **Bids and Awards Committee** — already modelled through the BAC roles; the mode determination is held by the Chairperson and the Secretariat.
+- **Bids and Awards Committee** — modelled through the BAC roles. The mode determination is held by the **Chairperson and Vice-Chairperson**, not the Secretariat: recommending the method of procurement is a responsibility of the committee, and the Secretariat is its support unit, not a member of it.
+
+The **Vice-Chairperson** is a role rather than a courtesy title. The quorum rule turns on it — a majority constitutes a quorum *"provided that the Chairperson or the Vice-Chairperson should be present in all meetings and deliberations"* — so without the office a committee whose Chairperson is on leave cannot lawfully sit at all. See `services/bacCommittee.js`.
 
 The **Sangguniang Bayan** and the **Sangguniang Panlalawigan** are deliberative bodies outside the system. What belongs in the system is the minute of their action, entered by the Sanggunian's secretary — which is why that role records ordinances and provincial reviews but decides nothing.
 
@@ -386,7 +432,13 @@ Backend routes:
 - `/api/documents`
 
 ## 8. The End-to-End Workflow
-This is the full path the system implements, in the order the municipality performs it. Every status change goes through a centralised state machine — there are no direct status writes anywhere in the codebase, so a stage cannot be skipped.
+This is the full path the system implements, in the order the municipality performs it.
+
+**How stage-skipping is prevented — and how it was not.** Every status change goes through a centralised state machine. That was always true of the `/transition` endpoints, but it was *not* true of the system as a whole: the `PATCH` endpoints for requisitions and APP entries spread the request body straight into the model, and `status` is a model attribute. A Department Requester holding only `pr.create` could `PATCH` their own draft to `status: "approved"`, raise the total past the APP balance, and stamp all four signature columns with other officers' ids — producing no obligation and no audit entry.
+
+The fix is a **field whitelist** on every write path (`EDITABLE_PR_FIELDS`, `EDITABLE_APP_FIELDS`), not a blacklist: a blacklist has to be updated every time a column is added, and the failure mode of forgetting is silent. Anything the state machine or the server derives — status, the certification stamps, the obligation fields, the determined mode, totals — is simply not writable from a request body.
+
+When adding a column to `PrHeader` or `AppEntry`, ask whether an officer should be able to type it. If not, leave it out of the whitelist and it is safe by default.
 
 | Stage | State machine |
 |---|---|
@@ -429,14 +481,54 @@ Rules enforced and verified:
 
 **Enactment is what creates budget.** Recording the provincial review writes one `Appropriation` per finalised proposal line, carrying the ordinance number and the ids it came from, so every peso traces back to the request and the AIP project behind it. Lines struck to zero in deliberation are not appropriated but stay on the proposal as the record of what was asked and refused.
 
+**When the Sanggunian does not enact in time (LGC Sec. 323).** If the ordinance has not passed by the start of the fiscal year, *"the annual appropriations of the preceding fiscal year shall be deemed reenacted and shall remain in force and effect"* until it does. This happens by operation of law — the LGU keeps operating and keeps spending — so the system has to be able to express it, or a municipality in that position would find every requisition refused for want of an appropriation.
+
+`POST /api/finance/appropriations/reenact` copies the prior year's enacted lines forward as `type: "reenacted"`. What carries over is limited to salaries of existing positions, statutory and contractual obligations, and essential operating expenses — so **Personal Services and MOOE only. Capital Outlay is deliberately excluded**, which is exactly the constraint that stops an LGU under a reenacted budget from starting new projects.
+
+**The general limitations (LGC Sec. 324(b), 324(d), 325(a)).** The balanced-budget rule is not the only arithmetic constraint on an LGU budget, and the other three are the ones COA raises findings on:
+
+| Limitation | Rule |
+|---|---|
+| **Personal Services cap** (Sec. 325(a)) | ≤ 45% of the *prior* year's regular income for 1st–3rd class LGUs; 55% for 4th class and below |
+| **20% Development Fund** (Sec. 324(b)) | ≥ 20% of the National Tax Allotment must go to development projects |
+| **5% LDRRMF** (Sec. 324(d)) | ≥ 5% of estimated regular income set aside for disaster risk reduction |
+
+These are checked at **finalisation** — the point where the figures stop moving — and **reported, not refused**. The figures they need (the prior year's regular income, the NTA) are recorded on the budget by the Finance Committee, and a municipality that has not entered them yet should not be blocked by a check it cannot satisfy. What it should not be able to do is finalise without being told: the findings are written onto the budget so the Mayor and the Sanggunian see them, and into the audit trail so a later reviewer can see they were known about.
+
+**The statutory calendar (Sec. 318, 319, 321).** Departmental estimates 15 July; executive budget to the Sanggunian by 16 October; ordinance by year end. Reported rather than gated — a budget submitted late is late, not void.
+
 ### Steps 4–5: PPMP lines and the APP
-A department files its PPMP line against **both** an enacted appropriation and a live AIP entry. The BAC Secretariat consolidates it into the indicative APP, the Budget Officer certifies, and the Mayor approves — at which point it is marked final and locked.
+
+Sec. 7.7 gives the plan **two cycles**, and the system models both through `AppEntry.planCycle`.
+
+**The indicative cycle** (`planCycle: "indicative"`) runs during budget preparation, before anything is appropriated. An indicative line cites a live AIP entry and **must not cite an appropriation** — there is none yet. Its purpose is to support the office's budget proposal (Sec. 7.7.1) and to be consolidated into the Indicative APP, which the BAC then uses to recommend the mode of procurement to the HoPE (Sec. 7.7.2).
+
+**The final cycle** (`planCycle: "final"`) runs once the Appropriation Ordinance is enacted. A final line cites **both** an enacted appropriation and a live AIP entry, and cannot exceed either (Sec. 7.7.5).
+
+Both travel the same approval chain:
 
 ```
 draft → pendingConsolidation → pendingBudgetCertification → pendingHopeApproval → approved (locked)
 ```
 
-The plan stage advances with the workflow: `ppmp` → `indicativeApp` → `finalApp`.
+The plan stage advances with the workflow, and where it lands depends on the cycle:
+
+| Cycle | On consolidation | On approval |
+|---|---|---|
+| indicative | `indicativeApp` | `updatedIndicativeApp` (Sec. 7.7.4 — the EPA basis) |
+| final | `indicativeApp` | `finalApp` (Sec. 7.7.5) |
+
+**Early Procurement Activities (EPA).** An indicative line flagged `earlyProcurement` may be advertised *before* the ordinance is enacted, against the updated Indicative APP. This is one of the substantive changes RA 12009 made and it is why the indicative cycle matters operationally rather than only on paper — without it an LGU cannot start buying until the ordinance passes, and loses the first quarter of the year.
+
+An EPA solicitation is raised against the **plan line**, not a requisition, because there is nothing to obligate yet:
+
+```
+POST /api/bidding/rfqs   { appEntryId, title, category, closingDate }
+```
+
+Everything up to award is lawful. **The award is not**: `approveAward` refuses on an EPA solicitation until the plan line has been finalised against an enacted appropriation. That is the line EPA may not cross.
+
+**The mode of procurement appears twice, and the two must agree.** Sec. 7.7.2(d) makes the mode a required field of the APP; Sec. 7.8 says no procurement may be undertaken except in accordance with the approved APP. So the APP's mode is checked against the Sec. 32/34 ceilings when the line is created, and the BAC's determination on the requisition is refused if it silently disagrees with the plan. Departing from the plan is allowed — it just has to be written down.
 
 **Revision and cancellation.** Projects get rescoped and dropped mid-year, so `app.revise` reopens a locked line (sending it back through the whole approval chain) or cancels it outright. Both demand remarks, and both are refused while any requisition is still live against the line. A cancelled line releases the amount it had programmed back to its appropriation.
 
@@ -454,15 +546,24 @@ draft
   → pendingDepartmentHeadEndorsement   Head of Office endorses
   → pendingCashCertification           Treasurer certifies funds available   (step 16)
   → pendingMayorApproval               Mayor approves the request            (step 17)
-  → pendingBudgetCertification         Budget Office certifies the appropriation,
-                                       names the funding source, raises the ORS (step 18)
+  → pendingBudgetCertification         Budget Office certifies the appropriation
+                                       and names the funding source          (step 18)
+  → pendingAccountantObligation        Accountant obligates it, raises the ORS (step 18b)
   → pendingModeDetermination           BAC determines the mode of procurement (step 19)
   → approved                           cleared for procurement               (step 20)
 ```
 
 > **Note on ordering.** An earlier build ran Budget → Treasury → Secretariat → Mayor, reasoning from LGC Sec. 344. That section governs **disbursement** — the voucher stage, which this system implements separately — not the requisition. The order above is the LGU's actual practice, and it is also the safer one: obligating an appropriation before the Mayor has approved the request means every refused requisition silently holds budget in the meantime. The reasoning is recorded in full at the top of `services/prWorkflow.js`.
 
-The two certifications remain separate officers answering separate questions and must never be merged. The Treasurer answers "is the cash there?"; the Budget Officer answers "is there an appropriation, and is there room left under it?". An appropriation can be intact while collections have not come in — which is exactly the case the Treasurer's signature exists to catch.
+**Three officers, three questions, LGC Sec. 344.** They must never be merged:
+
+| Officer | Question | Stamp |
+|---|---|---|
+| Municipal Treasurer | Is the cash actually there? | `cashCertifiedAt` |
+| Budget Officer | Is there an appropriation, and room left under it? | `appropriationCertifiedAt` |
+| Municipal Accountant | Obligate it — encumber the money in the books | `fundsReservedAt` + an `Obligation` row |
+
+An appropriation can be intact while collections have not come in, which is what the Treasurer's signature exists to catch. And certifying that an appropriation exists is a different act from making the entry that commits it — the system originally had the Budget Officer doing both, leaving the Accountant out of the requisition chain entirely.
 
 **Asset classification.** Each line item declares whether it has a useful life beyond one year. The server derives the class from that and the **unit** cost against the capitalisation threshold (ten chairs at ₱6,000 are ten semi-expendable items, not one capital asset):
 
@@ -501,6 +602,20 @@ Backend:
 Vendors can view published opportunities and submit bids where allowed.
 
 ### Bid opening and evaluation
+
+**Two different instruments for two different questions.** Philippine competitive bidding does *not* score Goods and Infrastructure on a weighted rubric:
+
+| Category | Technical component | Award goes to |
+|---|---|---|
+| Goods, Infrastructure | **Pass / fail** against the requirements. One failure fails the bid — the requirements are a floor, not an average. | The **lowest calculated** responsive bid (LCRB) |
+| Consulting Services | A **rating** out of 100, against the minimum the Bidding Documents set | The **highest rated** responsive bid (HRRB) |
+
+The system originally applied a 0–100 rubric with a hard-coded 60 pass mark to everything, which meant a goods procurement could turn on how generously a member scored rather than on price — and could not produce a legally correct goods award at all.
+
+**Conflict of interest.** An evaluator must positively declare no actual or potential interest in the bidder before scoring. There was no check at all: any holder of `bidding.evaluate` could score any bid.
+
+**Failure of bidding (Sec. 64).** Declared with a stated ground, and *counted*: after the **second** failure on the same project the LGU may resort to Negotiated Procurement under Sec. 35.1, subject to the BAC's mandatory review of terms and cost estimates, and an ABC that may not rise more than 20% over the last failed bidding.
+
 The BAC and TWG evaluate the received bids.
 
 Frontend:
@@ -515,15 +630,57 @@ Backend:
 
 At this point the system records scoring, technical input, and post-qualification results.
 
+### Observers (Sec. 43)
+
+The BAC must invite, in addition to the COA representative, **at least two observers** — one from a duly recognised private group relevant to the procurement, one from a CSO or PO — to six stages: eligibility checking, short-listing, the pre-bid conference, preliminary examination of bids, bid evaluation, and post-qualification.
+
+Enforced rules:
+- **Five calendar days' notice**, in writing (Sec. 43.2). A shorter invitation is refused, not flagged — an invitation that arrives too late to act on does not discharge the obligation.
+- Private groups and CSOs must be **registered with the SEC or the CDA** (Sec. 43.1.2). COA carries no such requirement.
+- An observer must enter a **confidentiality agreement** before attending (Sec. 43.5).
+- An observer with an interest must **inhibit in writing** (Sec. 43.4(c)).
+- **Observation Reports** go to the HoPE, PhilGEPS, COA, the GPPB and the Ombudsman. If none is filed within **seven calendar days**, the proceedings are presumed regular (Sec. 43.4(b)) — so the *absence* of a report is itself a finding, and the system reports it as `presumedRegular`.
+
+Absence does not nullify the proceedings **provided the observers were duly invited**. That is exactly why the invitation is a record rather than a courtesy.
+
+Backend: `/api/observers/*` — roster, invitations, per-stage coverage, attendance, reports.
+
 ### Award recommendation and approval
 After evaluation, the BAC Chairperson recommends the award and HOPE approves it.
 
 Backend:
 - `POST /api/bidding/bids/:bidId/recommend-award`
 - `POST /api/bidding/awards/:id/approve`
+- `POST /api/bidding/awards/:id/disapprove` — Sec. 66; requires written grounds, furnished to the BAC
+- `GET /api/bidding/rfqs/:id/abstract` — the Abstract of Bids (Sec. 34.3(f), 43.5)
 - `GET /api/bidding/awards`
 
 This is where the Notice of Award is generated.
+
+**Who is entitled to the award is not the committee's choice.** Sec. 65 gives the contract to the **Lowest Calculated Responsive Bid** for Goods and Infrastructure, and the **Highest Rated Responsive Bid** for Consulting Services. `recommendAward` ranks the contenders and refuses any bid that is not top of the ranking, naming the bidder that is. The award moves down the list only when the bidder ahead fails post-qualification — which is the real procedure.
+
+Three further gates sit on the award:
+- **Quorum.** The BAC resolves as a body: a majority (one-half plus one, never fewer than three) with the Chairperson **or Vice-Chairperson** presiding. Checked *before* the Award row is written, so a committee that cannot lawfully sit leaves no dangling Notice of Award.
+- **Protests.** Sec. 84: *"Protests must first be resolved before any award is made."* Checked at both recommendation and approval — a protest is most likely to be filed in the window between the two.
+- **EPA.** No award until the ordinance is enacted (see §Steps 4–5).
+
+### Protests (Sec. 83–85)
+
+A losing bidder's remedy, and under Sec. 85 a **precondition to going to court** — cases filed without exhausting it are dismissed for lack of jurisdiction.
+
+Two stages, and the first is a condition of the second:
+
+```
+requestForReconsideration → to the BAC, within 3 calendar days of notice; decided within 7
+protest                   → only if DENIED; to the HoPE, within 7 days, as a verified
+                            position paper with a non-refundable fee; decided within 7
+```
+
+The BAC decides reconsiderations (`protest.resolve`); the HoPE decides protests (`protest.decide`). They are deliberately different permissions — one holder for both would let the committee decide the appeal against its own decision.
+
+An unverified position paper "produces no legal effect, and results in the outright dismissal of the protest" (Sec. 83.3), so verification and the no-forum-shopping certification are hard requirements. The fee follows the Sec. 83.2 schedule (0.75% of ABC at or below ₱50M, rising by band). For LGUs the local chief executive's decision is final and executory at or below ₱1.25M for Goods, ₱12.5M for Infrastructure and ₱2.5M for Consulting Services (Sec. 84.3).
+
+Backend: `/api/protests/*`.
 
 ### The Notice of Award
 In the codebase, NOA is not a separate page. It is stored as the award record field `noaNumber`.
@@ -540,7 +697,15 @@ Frontend views that expose it:
 - supplier and BAC dashboard summaries
 
 ### Contract, delivery and payment
-After NOA approval, the workflow continues into contract drafting, signature, delivery reporting, and invoice processing.
+After NOA approval, the workflow continues into contract drafting, security, signature, the Notice to Proceed, delivery reporting, and invoice processing.
+
+```
+draft → pendingSignatures → active → (Notice to Proceed) → deliveries → completed
+```
+
+**Performance security comes first.** Sec. 68.1: the winning bidder *"shall post a performance security prior to the signing of the contract"*. `signContract` refuses without one, and the amount is checked against the Sec. 68.4 schedule — 30% by surety bond, 5% (goods/consulting) or 10% (infrastructure) in cash. A Performance Securing Declaration carries no deposit and is measured differently.
+
+**The Notice to Proceed is a separate instrument from the signature.** It is the day contract time starts, and therefore the day from which delay — and liquidated damages — are measured. A contract is drafted with a `contractDays` period; without an NTP there is no day zero and `services/deductions.js` can compute nothing. Deliveries are refused before one has been issued.
 
 Frontend:
 - Contracts
@@ -549,11 +714,33 @@ Frontend:
 
 Backend:
 - `GET /api/contracts`
-- `POST /api/contracts`
+- `POST /api/contracts` — requires `contractDays`
 - `POST /api/contracts/:id/issue`
+- `POST /api/contracts/:id/performance-security`
 - `POST /api/contracts/:id/sign`
+- `POST /api/contracts/:id/notice-to-proceed`
 - `GET /api/contracts/deliveries/all`
 - `POST /api/contracts/:id/deliveries`
+
+The LGU's signature is the **Local Chief Executive's**, not the BAC Chairperson's. LGC Sec. 22(c) puts it there, and the officer who chaired the committee recommending the award must not also be the officer who binds the municipality to it.
+
+### Contract implementation (Sec. 71)
+
+**Variation orders.** Change and Extra Work Orders for infrastructure, Amendments to Order for goods. Two rules are enforced: the **cumulative** value may not exceed **10% of the original contract price** — the ceiling is on the total, not on each order — and the **performance security must be updated first** (Sec. 68.1), because a variation that enlarges the contract while the security still covers the original price leaves the LGU under-secured on the difference.
+
+**Termination.** For default, breach, unlawful acts, or the LGU's own convenience. The ground decides what happens to the money: termination for fault **forfeits** the performance security; termination for convenience **releases** it, because that is the LGU's choice rather than the supplier's failure.
+
+**Warranty security.** Posted on final acceptance at 1% of the contract price, covering defects during the warranty period. Posting it releases the performance security — one instrument hands over to the next.
+
+`POST /api/contracts/:id/variation-order`, `/terminate`, `/warranty-security`.
+
+### Blacklisting (Sec. 69)
+
+The sanction that bars a supplier from **all** government procurement. The status and the eligibility check that reads it both existed from the start; the *act* did not, so the only way to blacklist a supplier was to edit the database — precisely the unrecorded change the audit log exists to prevent.
+
+A blacklisting has a **term**: one year for a first offence, two where there is a prior similar offence. It is stored as an end date so the sanction lapses on its own rather than needing somebody to remember. Lifting one restores the status the supplier held *before* the sanction, not an assumed "verified", and the original `blacklistedAt` is kept — it is the record of a prior offence that makes the next one a repeat.
+
+Issued by the **HoPE** (`bidding.award`), not by the Secretariat that reviews accreditations. Barring a firm from every government contract is not a clerical act.
 
 ## 9. Role Workspaces
 ### System Administrator
@@ -638,8 +825,11 @@ Deliberately **cannot** approve the executive budget or enact the ordinance — 
 
 ### Municipal Accountant
 Primary focus:
+- **obligating the appropriation on requisitions and raising the ORS (step 18b, LGC Sec. 344)**
 - certifying invoices and preparing disbursement vouchers
 - finance work queue
+
+Never holds `pr.certify`: saying an appropriation exists and making the entry that commits it are two acts by two officers.
 
 ### Municipal Treasurer
 Primary focus:
@@ -688,6 +878,19 @@ This is the practical route map for the backend.
 - `GET /api/purchase-requisitions`, `POST /api/purchase-requisitions`, `PATCH /api/purchase-requisitions/:id`
 - `POST /api/purchase-requisitions/:id/transition`, `GET /api/purchase-requisitions/:id/mode-suggestion`
 - `GET /api/bidding/*` for RFQs, bids, evaluations, and awards
+- `POST /api/bidding/awards/:id/disapprove`, `GET /api/bidding/rfqs/:id/abstract`
+- `GET /api/observers/options`, `GET|POST /api/observers/organizations`
+- `GET /api/observers/invitations`, `POST /api/observers/rfqs/:rfqId/invitations`
+- `GET /api/observers/rfqs/:rfqId/coverage`, `GET /api/observers/rfqs/:rfqId/summary`
+- `POST /api/observers/invitations/:id/attendance`, `POST /api/observers/invitations/:id/report`
+- `GET /api/protests`, `GET /api/protests/options`
+- `POST /api/protests/rfqs/:rfqId/reconsideration`, `POST /api/protests`, `POST /api/protests/:id/resolve`
+- `POST /api/finance/appropriations/reenact` — LGC Sec. 323
+- `POST /api/contracts/:id/performance-security`, `POST /api/contracts/:id/notice-to-proceed`
+- `POST /api/contracts/:id/variation-order`, `/terminate`, `/warranty-security` — Sec. 71, 68
+- `POST /api/vendors/:id/blacklist`, `POST /api/vendors/:id/blacklist/lift` — Sec. 69
+- `POST /api/bidding/rfqs/:id/declare-failure` — Sec. 64
+- `GET /api/app-entries/contingency`, `POST /api/app-entries/gppb-submission` — Sec. 7.7
 - `GET /api/vendors`, `POST /api/vendors/:id/review`, plus vendor self-service endpoints
 - `GET /api/conferences`, `POST /api/conferences`, `PATCH /api/conferences/:id`
 - `GET /api/contracts`, `POST /api/contracts`, `POST /api/contracts/:id/sign`, delivery endpoints
@@ -712,12 +915,15 @@ Each office is notified when work reaches its desk — the budget call, a propos
 ## 12. Notes for Maintenance
 - `municipal_backend/models/index.js` is the single registration point for Sequelize models.
 - `municipal_backend/config/permissionMatrix.js` is the source of truth for role permissions.
-- `municipal_backend/seed.js` should be rerun after permission or role changes so demo data stays aligned. It is idempotent-with-updates: re-running corrects drifted settings, departments and role grants rather than skipping them.
-- `municipal-frontend/src/config/roleLanding.js` and `municipal-frontend/src/config/navigation.js` should stay in sync with seeded roles and backend permissions.
-- The current database connection is hardcoded in `municipal_backend/models/db.js`, so deployment requires updating that file or replacing it with environment-based configuration.
+- `municipal_backend/seed.js` should be rerun after permission or role changes so demo data stays aligned. It is idempotent-with-updates: re-running corrects drifted settings, departments and role grants rather than skipping them. **Permissions drift silently otherwise** — a role can hold a permission in `permissionMatrix.js` that it does not have in the database.
+- `municipal-frontend/src/config/roleLanding.js` and `municipal-frontend/src/config/navigation.js` should stay in sync with seeded roles and backend permissions. Every nav `href` must resolve to a route in `App.jsx` **and** be permitted by that route's `RoleRoute` allow-list; a link that is neither presents as a dead link or a 403. Cross-reference the three files after touching any of them.
+- Database configuration is read from the environment (`DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`) with local development defaults — see §3.
+- **Sequelize stores dates in UTC.** Writing a timestamp with MySQL's `NOW()` in a script or a fixture produces a value eight hours out from what the application reads back. Use `UTC_TIMESTAMP()` in raw SQL, or go through the models.
 
-### Two traps when adding a workflow stage
-Both have bitten this codebase before.
+### Three traps when adding a workflow stage
+All three have bitten this codebase before.
+
+0. **Never spread `req.body` into `create()` or `update()`.** `status` is a model attribute, so a controller that does `pr.update({ ...req.body })` hands the state machine to whoever can reach the endpoint. This is how a Department Requester could walk a draft requisition to `approved` with forged signatures. Add fields to the explicit whitelist instead — see §8.
 
 1. **The route gate and the state machine must be kept in step.** Every `/:id/transition` route carries its own `requireAnyPermission(...)` list, *separate* from the per-transition permission the controller enforces. A permission missing from that outer list is refused before the controller runs, which presents as "the officer has the permission but still gets a 403". Add the new permission to both, and to the route's `RoleRoute` allow-list in `App.jsx`.
 

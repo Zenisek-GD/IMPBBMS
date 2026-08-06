@@ -6,6 +6,7 @@ import { User } from "./models/userModel.js";
 import { Permission } from "./models/permissionModel.js";
 import { SystemSetting, SETTING_KEYS } from "./models/systemSettingModel.js";
 import { ProcurementMode } from "./models/procurementModeModel.js";
+import { ObserverOrganization } from "./models/observerModel.js";
 import { PERMISSIONS, ROLE_PERMISSIONS } from "./config/permissionMatrix.js";
 
 // One row per role from the system design doc, Section 2.1. `key` must match
@@ -15,9 +16,18 @@ const ROLES = [
   { key: "systemAdministrator", name: "System Administrator" },
   { key: "hope", name: "HOPE (Municipal Mayor)" },
   { key: "bacChairperson", name: "BAC Chairperson" },
+  // The quorum rule turns on this office: a majority constitutes a quorum
+  // "provided that the Chairperson or the Vice-Chairperson should be present in
+  // all meetings and deliberations". Without the role a committee whose
+  // Chairperson was absent could never lawfully sit.
+  { key: "bacViceChairperson", name: "BAC Vice-Chairperson" },
   { key: "bacMember", name: "BAC Member" },
   { key: "bacSecretariat", name: "BAC Secretariat" },
   { key: "twgMember", name: "TWG Member" },
+  // The office head who endorses what their staff prepare (step 15). Two people,
+  // not one: the controller refuses a requester who endorses their own request,
+  // so without this role every requisition stopped at the endorsement stage.
+  { key: "headOfOffice", name: "Head of Office" },
   { key: "departmentRequester", name: "Department Requester" },
   { key: "budgetOfficer", name: "Budget Officer" },
   // The two offices the planning and budget-legislation chain runs through.
@@ -64,9 +74,11 @@ const ROLE_DEPARTMENT = {
   systemAdministrator: "IT",
   hope: "OMAYOR",
   bacChairperson: "BAC",
+  bacViceChairperson: "BAC",
   bacMember: "BAC",
   bacSecretariat: "BACSEC",
   twgMember: "TWG",
+  headOfOffice: "ENGR",
   departmentRequester: "ENGR",
   budgetOfficer: "BUDGET",
   planningOfficer: "MPDO",
@@ -120,6 +132,89 @@ const PROCUREMENT_MODES = [
 
   { key: "stiProcurement", name: "Direct Procurement for Science, Technology, and Innovation", requiresHopeApproval: true, citation: "IRR Sec. 37", sortOrder: 11,
     requiresCompetitiveBidding: false, minimumOffers: 1, allowsDirectAward: true, requiresBidSecurity: false },
+];
+
+// ── The observer roster (RA 12009 Sec. 43.1) ─────────────────────────────────
+// The BAC invites, in addition to the COA representative, at least two
+// observers: one from "a duly recognized private group in a sector or
+// discipline relevant to the procurement at hand", and one from a civil society
+// or people's organisation.
+//
+// `relevantCategories` is what makes "relevant to the procurement at hand"
+// operable — a constructors' association observes infrastructure, a PCCI
+// chamber member observes goods, and a PRC-recognised professional body
+// observes consulting services. The CSO and COA sit on everything.
+//
+// Sec. 43.1.2 requires the private group or CSO/PO to be registered with the
+// SEC or the CDA. The registration numbers below are placeholders for a
+// demonstration LGU; a real deployment replaces them with the actual
+// registrations of the bodies it has accredited.
+const OBSERVER_ORGANIZATIONS = [
+  {
+    name: "Commission on Audit — Resident Auditor, Municipal Office",
+    sector: "coa",
+    registryBody: "coa",
+    registrationNo: null,
+    relevantCategories: ["goods", "infrastructure", "consulting"],
+    contactPerson: "Office of the Resident Auditor",
+    status: "active",
+  },
+  {
+    name: "Philippine Constructors Association, Inc. (PCA)",
+    sector: "privateGroup",
+    registryBody: "sec",
+    registrationNo: "SEC-PCA-000123",
+    relevantCategories: ["infrastructure"],
+    status: "active",
+  },
+  {
+    name: "National Constructors Association of the Philippines, Inc. (NACAP)",
+    sector: "privateGroup",
+    registryBody: "sec",
+    registrationNo: "SEC-NACAP-000456",
+    relevantCategories: ["infrastructure"],
+    status: "active",
+  },
+  {
+    name: "Philippine Chamber of Commerce and Industry — Provincial Chapter",
+    sector: "privateGroup",
+    registryBody: "sec",
+    registrationNo: "SEC-PCCI-000789",
+    relevantCategories: ["goods"],
+    status: "active",
+  },
+  {
+    name: "Philippine Institute of Civil Engineers (PICE) — Provincial Chapter",
+    sector: "privateGroup",
+    registryBody: "sec",
+    registrationNo: "SEC-PICE-001011",
+    relevantCategories: ["infrastructure", "consulting"],
+    status: "active",
+  },
+  {
+    name: "Philippine Institute of Certified Public Accountants (PICPA)",
+    sector: "privateGroup",
+    registryBody: "sec",
+    registrationNo: "SEC-PICPA-001213",
+    relevantCategories: ["consulting"],
+    status: "active",
+  },
+  {
+    name: "Municipal Federation of Peoples Organizations",
+    sector: "csoOrPo",
+    registryBody: "cda",
+    registrationNo: "CDA-MFPO-001415",
+    relevantCategories: ["goods", "infrastructure", "consulting"],
+    status: "active",
+  },
+  {
+    name: "Parish Social Action Council — Diocesan Commission on Governance",
+    sector: "csoOrPo",
+    registryBody: "sec",
+    registrationNo: "SEC-PSAC-001617",
+    relevantCategories: ["goods", "infrastructure", "consulting"],
+    status: "active",
+  },
 ];
 
 // Dev-only seed password for every demo account below. This is not a real
@@ -185,6 +280,23 @@ try {
   }
   console.log(`✅ ${PROCUREMENT_MODES.length} procurement modes registered`);
 
+  // The observer roster. Without at least one organisation of each of the three
+  // constituencies the BAC has nobody to invite, and the Sec. 43 machinery —
+  // which is the most visible transparency control in the whole process — is
+  // present but unusable. Seeded as reference data for the same reason the
+  // procurement modes are: it is a list every Procuring Entity needs and none
+  // of them should have to type from scratch.
+  for (const organization of OBSERVER_ORGANIZATIONS) {
+    const [record, created] = await ObserverOrganization.findOrCreate({
+      where: { name: organization.name },
+      defaults: organization,
+    });
+    if (!created) {
+      await record.update(organization);
+    }
+  }
+  console.log(`✅ ${OBSERVER_ORGANIZATIONS.length} observer organisations on the roster`);
+
   const permissionsByKey = {};
   for (const permission of PERMISSIONS) {
     const [record] = await Permission.findOrCreate({
@@ -226,7 +338,7 @@ try {
     const grantedKeys = ROLE_PERMISSIONS[role.key] ?? [];
     await record.setPermissions(grantedKeys.map((key) => permissionsByKey[key]));
 
-    const email = `${role.key.toLowerCase()}@civicbid.test`;
+    const email = `${role.key.toLowerCase()}@civicbid.com`;
     const [user, created] = await User.findOrCreate({
       where: { email },
       defaults: {
@@ -249,6 +361,22 @@ try {
       `${created ? "✅ created" : "↷ exists"}: ${email} (${role.name})` +
         `${departmentCode ? ` → ${departmentCode}` : " → external"} · ${grantedKeys.length} permission(s)`
     );
+
+    // ── Designate the office head ────────────────────────────────────────────
+    // Endorsement (step 15) is decided by *headship* — `Department.headUserId` —
+    // not by permission, and the controller refuses a requester who endorses
+    // their own requisition. With no head designated anywhere, every requisition
+    // stopped at `pendingDepartmentHeadEndorsement` with no officer able to move
+    // it and no screen to fix it. The Head of Office account is designated here
+    // so the chain runs end to end out of the box.
+    if (role.key === "headOfOffice" && departmentId) {
+      const office = await Department.findByPk(departmentId);
+      if (office && office.headUserId !== user.id) {
+        office.headUserId = user.id;
+        await office.save();
+        console.log(`   ↳ designated as Head of ${departmentCode}`);
+      }
+    }
   }
 
   console.log(`\nAll seed accounts use the password: ${SEED_PASSWORD}`);

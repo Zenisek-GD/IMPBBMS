@@ -11,7 +11,9 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 function ScheduleModal({ onClose, onScheduled }) {
   const [rfqs, setRfqs] = useState([])
@@ -178,9 +180,13 @@ export default function LiveConference() {
     if (session.meetingUrl) window.open(session.meetingUrl, '_blank', 'noreferrer')
   }
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(sessions)
+  const table = useTableControls(sessions, {
+    searchKeys: ['title', 'referenceNo'],
+    filters: [{ key: 'status', label: 'All statuses' }],
+    accessors: { attendanceCount: (session) => Number(session.attendanceCount ?? 0) },
+    initialSort: { key: 'scheduledAt', direction: 'desc' },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -211,21 +217,28 @@ export default function LiveConference() {
       )}
 
       <Card title="Sessions" icon={CalendarClock} bodyClassName="">
-        {sessions.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">Nothing scheduled.</p>
+        {sessions.length > 0 && (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar {...table.toolbarProps} searchPlaceholder="Search session or procurement…" />
+          </div>
+        )}
+        {table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'Nothing scheduled.'
+              : 'No sessions match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Session', 'Procurement', 'When', 'Attendance', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('title')}>Session</SortableTh>
+                  <SortableTh {...table.sortProps('referenceNo')}>Procurement</SortableTh>
+                  <SortableTh {...table.sortProps('scheduledAt')}>When</SortableTh>
+                  <SortableTh {...table.sortProps('attendanceCount')}>Attendance</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>

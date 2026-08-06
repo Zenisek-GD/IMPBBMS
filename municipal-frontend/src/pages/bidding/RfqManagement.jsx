@@ -10,7 +10,9 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -163,9 +165,33 @@ export default function RfqManagement() {
     }
   }
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(rfqs)
+  // Sorting by closing date is the one this office needs most: it is the order
+  // in which the work becomes urgent.
+  const table = useTableControls(rfqs, {
+    searchKeys: ['referenceNo', 'title', 'modeName'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: Object.entries(RFQ_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      },
+      { key: 'modeName', label: 'All modes' },
+      {
+        key: 'prebidRequired',
+        label: 'Pre-bid conference',
+        options: [
+          { value: 'true', label: 'Pre-bid required' },
+          { value: 'false', label: 'No pre-bid' },
+        ],
+        accessor: (rfq) => String(Boolean(rfq.prebidRequired)),
+      },
+    ],
+    accessors: {
+      abc: (rfq) => Number(rfq.abc ?? 0),
+      status: (rfq) => RFQ_STATUS_LABELS[rfq.status] ?? rfq.status,
+    },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -186,23 +212,29 @@ export default function RfqManagement() {
       )}
 
       <Card title="Procurements" icon={Megaphone} bodyClassName="">
-        {rfqs.length === 0 ? (
+        {rfqs.length > 0 && (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar {...table.toolbarProps} searchPlaceholder="Search reference, title or mode…" />
+          </div>
+        )}
+        {table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            Nothing advertised yet. Create one from an approved requisition.
+            {table.totalBeforeFilters === 0
+              ? 'Nothing advertised yet. Create one from an approved requisition.'
+              : 'No procurements match your search or filters.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Reference', 'Title', 'Mode', 'ABC', 'Closing', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('referenceNo')}>Reference</SortableTh>
+                  <SortableTh {...table.sortProps('title')}>Title</SortableTh>
+                  <SortableTh {...table.sortProps('modeName')}>Mode</SortableTh>
+                  <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
+                  <SortableTh {...table.sortProps('closingDate')}>Closing</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>

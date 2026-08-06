@@ -925,3 +925,125 @@ export const resendBidderInvitation = async (req, res) => {
     ),
   });
 };
+
+// ── Blacklisting (RA 12009 Sec. 69) ──────────────────────────────────────────
+// The sanction that bars a supplier from participating in any government
+// procurement. The status and the eligibility check that reads it both existed;
+// the act did not, so the only way to blacklist a supplier was to edit the
+// database — which is precisely the kind of unrecorded change the audit log is
+// supposed to make impossible.
+//
+// A blacklisting has a term rather than being permanent. The IRR carries one
+// year for a first offence and two where there is a prior similar offence, and
+// the term is stored as an end date so the sanction lapses on its own.
+const BLACKLIST_YEARS_FIRST_OFFENCE = 1;
+const BLACKLIST_YEARS_REPEAT_OFFENCE = 2;
+
+export const blacklistVendor = async (req, res) => {
+  const { grounds, orderNo, years } = req.body ?? {};
+  const vendor = await Vendor.findByPk(req.params.id, withIncludes);
+  if (!vendor) return res.status(404).json({ message: "Supplier not found." });
+
+  if (vendor.registrationStatus === "blacklisted") {
+    return res.status(409).json({
+      message: `${vendor.businessName} is already blacklisted until ${
+        vendor.blacklistedUntil ? new Date(vendor.blacklistedUntil).toLocaleDateString() : "further notice"
+      }.`,
+    });
+  }
+
+  // A blacklisting order is a written instrument. Grounds are its substance.
+  if (!grounds?.trim() || grounds.trim().length < 30) {
+    return res.status(400).json({
+      message:
+        "A Blacklisting Order must state the grounds in writing (RA 12009 Sec. 69). Record them here " +
+        "in at least 30 characters.",
+    });
+  }
+  if (!orderNo?.trim()) {
+    return res.status(400).json({ message: "Record the Blacklisting Order number." });
+  }
+
+  // A repeat offence carries the longer term. Decided from the record rather
+  // than asked for, so it cannot be softened by whoever fills in the form.
+  const isRepeat = Boolean(vendor.blacklistedAt);
+  const term = Number(years) || (isRepeat ? BLACKLIST_YEARS_REPEAT_OFFENCE : BLACKLIST_YEARS_FIRST_OFFENCE);
+
+  const until = new Date();
+  until.setFullYear(until.getFullYear() + term);
+
+  await vendor.update({
+    statusBeforeBlacklist: vendor.registrationStatus,
+    registrationStatus: "blacklisted",
+    blacklistedAt: new Date(),
+    blacklistedUntil: until,
+    blacklistGrounds: grounds.trim(),
+    blacklistOrderNo: orderNo.trim(),
+  });
+
+  await auditFromRequest(req, {
+    actionType: AUDIT_ACTIONS.VENDOR_BLACKLISTED,
+    entityRef: "vendor",
+    entityId: vendor.id,
+    summary: `${vendor.businessName} blacklisted for ${term} year(s) under ${orderNo.trim()}`,
+    beforeState: { registrationStatus: vendor.statusBeforeBlacklist },
+    afterState: { registrationStatus: "blacklisted", blacklistedUntil: until, grounds: grounds.trim() },
+  });
+
+  if (vendor.userId) {
+    await notifyUsers([vendor.userId], {
+      type: NOTIFICATION_EVENTS.BID_RESULT,
+      title: `Blacklisting Order ${orderNo.trim()}`,
+      body: `Your firm is barred from government procurement until ${until.toLocaleDateString()}. Grounds: ${grounds.trim()}`,
+      link: "/supplier",
+      refEntity: "vendor",
+      refId: vendor.id,
+      severity: "danger",
+    });
+  }
+
+  res.json({
+    id: vendor.id,
+    registrationStatus: "blacklisted",
+    blacklistedUntil: until,
+    termYears: term,
+    repeatOffence: isRepeat,
+  });
+};
+
+// Lifting a blacklisting before its term runs out — on appeal, or because the
+// order was set aside. The restored status is the one the supplier held before
+// the sanction, not an assumed "verified".
+export const liftBlacklist = async (req, res) => {
+  const { reason } = req.body ?? {};
+  const vendor = await Vendor.findByPk(req.params.id, withIncludes);
+  if (!vendor) return res.status(404).json({ message: "Supplier not found." });
+
+  if (vendor.registrationStatus !== "blacklisted") {
+    return res.status(409).json({ message: "This supplier is not blacklisted." });
+  }
+  if (!reason?.trim()) {
+    return res.status(400).json({ message: "State why the blacklisting is being lifted." });
+  }
+
+  const restored = vendor.statusBeforeBlacklist || "submitted";
+
+  await vendor.update({
+    registrationStatus: restored,
+    blacklistedUntil: null,
+    // `blacklistedAt` is deliberately kept: it is the record of a prior offence,
+    // and a later blacklisting reads it to decide the longer term.
+    statusBeforeBlacklist: null,
+  });
+
+  await auditFromRequest(req, {
+    actionType: AUDIT_ACTIONS.VENDOR_BLACKLIST_LIFTED,
+    entityRef: "vendor",
+    entityId: vendor.id,
+    summary: `Blacklisting lifted for ${vendor.businessName} — ${reason.trim()}`,
+    beforeState: { registrationStatus: "blacklisted" },
+    afterState: { registrationStatus: restored, reason: reason.trim() },
+  });
+
+  res.json({ id: vendor.id, registrationStatus: restored });
+};

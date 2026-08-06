@@ -21,6 +21,23 @@ export default function Login() {
   // discloses nothing to someone guessing.
   const [needsActivation, setNeedsActivation] = useState(false)
 
+  // Set by the shell when a sign-out could not reach the server. The browser is
+  // signed out either way, but the session cookie is httpOnly so it could not be
+  // cleared from here — on a shared machine that difference matters, and saying
+  // nothing would let the officer walk away believing it was fully ended.
+  //
+  // Read once, during the initial state computation, and cleared immediately so
+  // it shows on this visit to the sign-in screen and not the next one.
+  const [logoutWarning] = useState(() => {
+    try {
+      const flagged = sessionStorage.getItem('logout.serverUnreachable')
+      if (flagged) sessionStorage.removeItem('logout.serverUnreachable')
+      return Boolean(flagged)
+    } catch {
+      return false
+    }
+  })
+
   const {
     register,
     handleSubmit,
@@ -41,6 +58,19 @@ export default function Login() {
 
   return (
     <AuthLayout title="Sign in" subtitle="Use the account issued to you — there is no public sign-up.">
+      {logoutWarning && (
+        <p
+          role="status"
+          className="mb-4 flex items-start gap-2 rounded-md border border-warning/25 bg-warning/10 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-warning"
+        >
+          <AlertCircle size={15} className="mt-0.5 shrink-0" />
+          <span>
+            You were signed out of this browser, but the server could not be reached to end the
+            session there. If this is a shared computer, close the browser to be certain.
+          </span>
+        </p>
+      )}
+
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
         <FormField
           label="Email"

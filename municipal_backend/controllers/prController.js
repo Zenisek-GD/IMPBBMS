@@ -23,6 +23,22 @@ import {
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 
+// ── What a requester may actually write ──────────────────────────────────────
+// Everything else on the model — status, the four certification stamps, the
+// obligation fields, the determined mode, prNumber, totalAmount, appEntryId —
+// is written by the state machine or derived from the line items, and must
+// never be settable from a request body.
+//
+// This list exists because spreading `req.body` into `update()` let a requester
+// holding only `pr.create` PATCH their own draft to status "approved" with all
+// four signatures forged and the total raised past the APP balance, producing
+// no obligation and no audit entry. A whitelist is the fix; a blacklist would
+// have to be updated every time a column is added.
+const EDITABLE_PR_FIELDS = ["purpose", "dateRequired", "isEmergency", "justification"];
+
+const pickEditable = (body, allowed) =>
+  Object.fromEntries(Object.entries(body ?? {}).filter(([key]) => allowed.includes(key)));
+
 // Section 5.3: "Date required must be at least 15 days after submission,
 // unless emergency rules apply."
 const MINIMUM_LEAD_DAYS = 15;
@@ -41,6 +57,8 @@ const withIncludes = {
     { model: User, as: "cashCertifiedBy", attributes: ["id", "name"] },
     { model: User, as: "mayorApprovedBy", attributes: ["id", "name"] },
     { model: User, as: "modeDeterminedBy", attributes: ["id", "name"] },
+    { model: User, as: "appropriationCertifiedBy", attributes: ["id", "name"] },
+    { model: User, as: "obligatedBy", attributes: ["id", "name"] },
     { model: ProcurementMode, as: "procurementMode" },
   ],
 };
@@ -63,7 +81,10 @@ const serialize = (pr) => ({
   cashCertifiedByName: pr.cashCertifiedBy?.name ?? null,
   mayorApprovedAt: pr.mayorApprovedAt,
   mayorApprovedByName: pr.mayorApprovedBy?.name ?? null,
+  appropriationCertifiedAt: pr.appropriationCertifiedAt,
+  appropriationCertifiedByName: pr.appropriationCertifiedBy?.name ?? null,
   fundsReservedAt: pr.fundsReservedAt,
+  obligatedByName: pr.obligatedBy?.name ?? null,
   fundSource: pr.fundSource,
   fundSourceLabel: pr.fundSource ? FUND_LABELS[pr.fundSource] : null,
 
@@ -280,6 +301,7 @@ export const listPrs = async (req, res) => {
   const canSeeAll = [
     "pr.endorse",
     "pr.certify",
+    "pr.obligate",
     "pr.certifyCash",
     "pr.review",
     "pr.determineMode",
@@ -295,7 +317,8 @@ export const listPrs = async (req, res) => {
 };
 
 export const createPr = async (req, res) => {
-  const { appEntryId, lineItems, ...header } = req.body;
+  const { appEntryId, lineItems } = req.body;
+  const header = pickEditable(req.body, EDITABLE_PR_FIELDS);
 
   // Section 5.3: a PR must link to an approved APP entry.
   if (!appEntryId) return res.status(400).json({ message: "A linked APP entry is required." });
@@ -304,6 +327,24 @@ export const createPr = async (req, res) => {
   if (!appEntry) return res.status(400).json({ message: "That APP entry does not exist." });
   if (!["approved", "locked"].includes(appEntry.status)) {
     return res.status(400).json({ message: "The linked APP entry must be approved first." });
+  }
+
+  // An indicative plan line has no enacted appropriation behind it, so there is
+  // nothing for the Budget Officer to obligate and the requisition would stall
+  // at step 18. Where the project is flagged for Early Procurement, the lawful
+  // route is an EPA solicitation raised directly against the indicative APP —
+  // procurement short of award — not a requisition.
+  if (appEntry.planCycle === "indicative") {
+    return res.status(409).json({
+      message: appEntry.earlyProcurement
+        ? "This is an indicative APP line flagged for Early Procurement. Raise the EPA solicitation " +
+          "against the plan line directly; a requisition can only be raised once the appropriation " +
+          "ordinance is enacted and the line is finalised."
+        : "This is an indicative APP line supporting the budget proposal. Finalise it against the " +
+          "enacted appropriation (IRR Sec. 7.7.5) before raising a requisition against it.",
+      planCycle: appEntry.planCycle,
+      earlyProcurement: appEntry.earlyProcurement,
+    });
   }
 
   const headerError = validateHeader(header, { submitting: false });
@@ -362,7 +403,15 @@ export const updatePr = async (req, res) => {
     return res.status(409).json({ message: `This requisition is in "${pr.status}" and can no longer be edited.` });
   }
 
-  const { lineItems, ...header } = req.body;
+  // `pr.create` says an officer may raise requisitions for their own office —
+  // not that they may edit anybody's. Without this, one department could revise
+  // another department's draft, including its amounts, before it was signed.
+  if (pr.departmentId && pr.departmentId !== req.currentUser.departmentId) {
+    return res.status(403).json({ message: "This requisition belongs to another office." });
+  }
+
+  const { lineItems } = req.body;
+  const header = pickEditable(req.body, EDITABLE_PR_FIELDS);
   const merged = { ...serialize(pr), ...header };
 
   const headerError = validateHeader(merged, { submitting: false });
@@ -460,21 +509,25 @@ export const transitionPr = async (req, res) => {
     }
   }
 
-  // ── Obligation (step 18) ───────────────────────────────────────────────────
-  // The Budget Office's certification *is* the obligation. From that moment the
-  // amount is committed and unavailable to anything else, whether or not a peso
-  // has moved, which is why it writes an Obligation Request rather than only
-  // stamping a date on the requisition.
+  // ── Certification (step 18) and obligation (step 18b) ──────────────────────
+  // LGC Sec. 344 names three officers. The Budget Officer certifies that an
+  // appropriation exists and that there is room under it, and identifies the
+  // fund; the Accountant then obligates it, which is the entry that actually
+  // encumbers the money. Those were previously one act by one officer.
   //
-  // This now happens after the Mayor has approved the request, so an
-  // appropriation is only ever encumbered for requests the executive has agreed
-  // to — see the note at the top of services/prWorkflow.js.
+  // Both stages check the same balance, because it can move between them: a
+  // certification made on Monday against an appropriation another requisition
+  // consumes on Tuesday must not obligate on Wednesday regardless.
+  //
+  // This happens after the Mayor has approved the request, so an appropriation
+  // is only ever encumbered for requests the executive has agreed to — see the
+  // note at the top of services/prWorkflow.js.
   //
   // Checked before the transaction opens so a failure here returns a clean 409
   // rather than rolling back a partially applied transition.
   let obligationNumber = null;
   let fundSource = null;
-  if (action === "certify") {
+  if (action === "certify" || action === "obligate") {
     const appropriationId = pr.appEntry?.appropriationId ?? null;
     if (!appropriationId) {
       return res.status(409).json({
@@ -506,7 +559,10 @@ export const transitionPr = async (req, res) => {
     const appropriation = await Appropriation.findByPk(appropriationId);
     fundSource = appropriation?.fund ?? null;
 
-    obligationNumber = await nextObligationNo(new Date().getFullYear());
+    // Only the Accountant's act raises the ORS number.
+    if (action === "obligate") {
+      obligationNumber = await nextObligationNo(new Date().getFullYear());
+    }
   }
 
   // ── Mode determination (step 19) ───────────────────────────────────────────
@@ -535,6 +591,25 @@ export const transitionPr = async (req, res) => {
           `The thresholds indicate ${suggestion.suggested} for ₱${Number(pr.totalAmount).toLocaleString()} ` +
           `(${suggestion.rationale}). Record why the committee determined ${modeRecord.name} instead.`,
         suggestion,
+      });
+    }
+
+    // ── The plan and the determination must agree ─────────────────────────────
+    // IRR Sec. 7.8 — "No government procurement shall be undertaken unless it is
+    // in accordance with the approved Indicative APP or final APP." The APP
+    // carries a mode of procurement as a required field (Sec. 7.7.2(d)), and
+    // nothing previously compared it with what the committee determined here.
+    // The plan could say Competitive Bidding and the requisition proceed under
+    // Small Value Procurement with no one told the two disagreed.
+    const plannedMode = pr.appEntry?.procurementMode ?? null;
+    if (plannedMode && plannedMode !== chosenKey && !req.body.justification?.trim()) {
+      return res.status(409).json({
+        message:
+          `The approved APP plans this project for ${plannedMode}, but ${modeRecord.name} is being ` +
+          `determined. Procurement must accord with the approved APP (IRR Sec. 7.8) — either determine ` +
+          `the planned mode, revise the APP line, or record why the committee departed from the plan.`,
+        plannedMode,
+        determinedMode: chosenKey,
       });
     }
 
@@ -573,10 +648,19 @@ export const transitionPr = async (req, res) => {
       changes.mayorApprovedById = req.currentUser.id;
     }
 
-    // Step 18 — the Budget Office.
+    // Step 18 — the Budget Office certifies and names the fund.
     if (action === "certify") {
-      changes.fundsReservedAt = new Date();
+      changes.appropriationCertifiedAt = new Date();
+      changes.appropriationCertifiedById = req.currentUser.id;
       changes.fundSource = fundSource;
+    }
+
+    // Step 18b — the Accountant obligates. `fundsReservedAt` is the moment the
+    // money actually stops being available to anything else, which is this one
+    // and not the certification before it.
+    if (action === "obligate") {
+      changes.fundsReservedAt = new Date();
+      changes.obligatedById = req.currentUser.id;
     }
 
     // Step 19 — the BAC.
@@ -592,7 +676,7 @@ export const transitionPr = async (req, res) => {
 
     await pr.update(changes, { transaction });
 
-    if (action === "certify") {
+    if (action === "obligate") {
       await Obligation.create(
         {
           obligationNo: obligationNumber,
@@ -690,6 +774,11 @@ export const transitionPr = async (req, res) => {
       permission: "pr.certify",
       title: `${pr.prNumber} awaiting appropriation certification`,
       body: `₱${amount}, approved by the Mayor. Certify the appropriation and identify the funding source.`,
+    },
+    pendingAccountantObligation: {
+      permission: "pr.obligate",
+      title: `${pr.prNumber} awaiting obligation`,
+      body: `₱${amount}, appropriation certified by the Budget Office. Obligate it and raise the ORS.`,
     },
     pendingModeDetermination: {
       permission: "pr.determineMode",

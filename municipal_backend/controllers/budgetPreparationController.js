@@ -29,7 +29,9 @@ import {
   proposalsEditableIn,
   PROPOSAL_STAGE_FOR_BUDGET_STATE,
   BUDGET_TRANSITIONS,
+  generalLimitationFindings,
 } from "../services/budgetPreparationWorkflow.js";
+import { getLguProfile } from "../models/systemSettingModel.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { notifyByPermission, notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
 
@@ -471,6 +473,54 @@ export const transitionBudget = async (req, res) => {
         ceiling,
       });
     }
+
+    // ── The general limitations (LGC Sec. 324(b), 324(d), 325(a)) ────────────
+    // The balanced-budget rule above is not the only arithmetic constraint on
+    // an LGU budget, and the other three are the ones COA raises findings on.
+    // They are reported rather than refused: the figures they need — the prior
+    // year's regular income, the National Tax Allotment — are recorded on the
+    // budget by the Finance Committee, and a municipality that has not entered
+    // them yet should not be blocked from finalising by a check it cannot
+    // satisfy. What it should not be able to do is finalise without being told.
+    const lgu = await getLguProfile();
+    const totalsByClass = (budget.proposals ?? []).reduce(
+      (totals, proposal) => {
+        for (const line of proposal.lines ?? []) {
+          const amount = num(line.finalAmount);
+          if (line.expenseClass === "personalServices") totals.personalServices += amount;
+          if (line.isDevelopmentFund) totals.developmentFund += amount;
+          if (line.isLdrrmf) totals.ldrrmf += amount;
+        }
+        return totals;
+      },
+      { personalServices: 0, developmentFund: 0, ldrrmf: 0 }
+    );
+
+    const findings = generalLimitationFindings({
+      incomeClass: lgu.incomeClass,
+      estimatedIncome: num(budget.estimatedIncome),
+      regularIncomePriorYear: num(budget.regularIncomePriorYear),
+      nationalTaxAllotment: num(budget.nationalTaxAllotment),
+      personalServicesTotal: totalsByClass.personalServices,
+      developmentFundTotal: totalsByClass.developmentFund,
+      ldrrmfTotal: totalsByClass.ldrrmf,
+    });
+
+    if (findings.length > 0) {
+      // Recorded on the budget so the Mayor and the Sanggunian see them, and in
+      // the audit trail so a later reviewer can see they were known about.
+      changes.limitationFindings = findings;
+      await auditFromRequest(req, {
+        actionType: "budget.limitations.flagged",
+        entityRef: "executiveBudget",
+        entityId: budget.id,
+        summary: `FY ${budget.fiscalYear} budget finalised with ${findings.length} statutory limitation finding(s)`,
+        afterState: { findings },
+      });
+    } else {
+      changes.limitationFindings = null;
+    }
+
     changes.finalisedAt = new Date();
   }
 

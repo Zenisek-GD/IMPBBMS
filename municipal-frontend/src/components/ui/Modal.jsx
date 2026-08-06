@@ -46,23 +46,26 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`w-full ${WIDTHS[size]} overflow-hidden rounded-xl border border-border-muted bg-surface shadow-lg focus:outline-none`}
+        // Dialogs were the tightest surface in the system — a 13px title over a
+        // 16px gutter, with multi-section forms inside. They now match the cards
+        // they open from.
+        className={`max-h-[90vh] w-full ${WIDTHS[size]} overflow-y-auto rounded-xl border border-border-muted bg-surface shadow-xl focus:outline-none`}
       >
-        <header className="flex items-start justify-between gap-3 border-b border-border-muted px-4 py-3">
+        <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border-muted bg-surface px-5 py-4">
           <div className="min-w-0">
-            <h2 className="text-[13px] font-semibold text-navy">{title}</h2>
-            {subtitle && <p className="mt-0.5 text-[11.5px] text-text-faint">{subtitle}</p>}
+            <h2 className="text-[15px] font-semibold text-navy">{title}</h2>
+            {subtitle && <p className="mt-1 text-[12.5px] leading-relaxed text-text-faint">{subtitle}</p>}
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy"
+            className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy"
           >
-            <X size={15} />
+            <X size={16} />
           </button>
         </header>
-        <div className="p-4">{children}</div>
+        <div className="p-5">{children}</div>
       </div>
     </div>
   )

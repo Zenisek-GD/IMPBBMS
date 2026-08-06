@@ -17,6 +17,7 @@ import * as publicApi from '../../api/publicProjects'
 import PublicHeader from '../../components/public/PublicHeader'
 import PublicFooter from '../../components/public/PublicFooter'
 import ProjectTimeline from '../../components/public/ProjectTimeline'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
 
 const peso = (value) =>
   value === null || value === undefined
@@ -67,29 +68,71 @@ function Field({ label, value, mono }) {
   )
 }
 
-// Compact table shared by the record sections. `columns` is [label, accessor].
+// Compact table shared by the record sections. `columns` is
+// [label, accessor, sortValue?] — the accessor returns what is drawn (often a
+// styled node), so a column that should be sortable supplies a third function
+// returning the plain value to compare.
+//
+// ── WHY THIS ONE HAS NO SEARCH OR FILTER ─────────────────────────────────────
+// Every other table in the system got all three controls. These blocks are the
+// records of *one* project — its requisition, its solicitation, its award, its
+// deliveries — so they hold one to five rows each. A search field and two
+// dropdowns above three rows is more chrome than data, and filtering a single
+// project's own award list answers no question a reader has. Sorting is kept
+// because a delivery or payment list can genuinely run long on a big project.
 function RecordTable({ columns, rows, empty }) {
+  const [sort, setSort] = useState(null)
+
   if (!rows?.length) {
     return <p className="px-4 py-8 text-center text-[13px] text-text-faint">{empty}</p>
   }
+
+  const sortColumn = sort && columns.find(([label]) => label === sort.label)
+  const sortValue = sortColumn?.[2]
+
+  const visible = sortValue
+    ? [...rows].sort((left, right) => {
+        const direction = sort.direction === 'desc' ? -1 : 1
+        const a = sortValue(left)
+        const b = sortValue(right)
+        if (a == null || a === '') return b == null || b === '' ? 0 : 1
+        if (b == null || b === '') return -1
+        if (typeof a === 'number' && typeof b === 'number') return direction * (a - b)
+        return direction * String(a).localeCompare(String(b), undefined, { numeric: true })
+      })
+    : rows
+
+  const toggle = (label) =>
+    setSort((current) => {
+      if (current?.label !== label) return { label, direction: 'asc' }
+      if (current.direction === 'asc') return { label, direction: 'desc' }
+      return null
+    })
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left">
         <thead className="bg-sidebar">
           <tr>
-            {columns.map(([label]) => (
-              <th
-                key={label}
-                className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-              >
-                {label}
-              </th>
-            ))}
+            {columns.map(([label, , sortable]) =>
+              sortable ? (
+                <SortableTh
+                  key={label}
+                  sortKey={label}
+                  activeKey={sort?.label ?? null}
+                  direction={sort?.direction ?? null}
+                  onSort={toggle}
+                >
+                  {label}
+                </SortableTh>
+              ) : (
+                <Th key={label}>{label}</Th>
+              )
+            )}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
+          {visible.map((row, index) => (
             <tr key={index} className="border-t border-border-muted">
               {columns.map(([label, accessor]) => (
                 <td key={label} className="px-4 py-2.5 text-[13px] whitespace-nowrap text-text-secondary">
@@ -333,10 +376,14 @@ export default function PublicProjectDetail() {
                 empty="No requisition has been raised for this project yet."
                 rows={records.requisitions}
                 columns={[
-                  ['PR Number', (row) => <span className="font-mono text-xs text-navy">{row.prNumber}</span>],
-                  ['Amount', (row) => peso(row.totalAmount)],
-                  ['Date required', (row) => shortDate(row.dateRequired)],
-                  ['Status', (row) => readable(row.status)],
+                  [
+                    'PR Number',
+                    (row) => <span className="font-mono text-xs text-navy">{row.prNumber}</span>,
+                    (row) => row.prNumber,
+                  ],
+                  ['Amount', (row) => peso(row.totalAmount), (row) => Number(row.totalAmount ?? 0)],
+                  ['Date required', (row) => shortDate(row.dateRequired), (row) => row.dateRequired],
+                  ['Status', (row) => readable(row.status), (row) => row.status],
                 ]}
               />
             </Section>
@@ -346,13 +393,17 @@ export default function PublicProjectDetail() {
                 empty="This project has not been advertised for bidding yet."
                 rows={records.solicitations}
                 columns={[
-                  ['Reference', (row) => <span className="font-mono text-xs text-navy">{row.referenceNo}</span>],
-                  ['Mode', (row) => row.mode ?? '—'],
-                  ['ABC', (row) => peso(row.abc)],
-                  ['Published', (row) => shortDate(row.publishDate)],
-                  ['Closing', (row) => shortDate(row.closingDate)],
-                  ['Bids', (row) => row.bidsReceived],
-                  ['Status', (row) => readable(row.status)],
+                  [
+                    'Reference',
+                    (row) => <span className="font-mono text-xs text-navy">{row.referenceNo}</span>,
+                    (row) => row.referenceNo,
+                  ],
+                  ['Mode', (row) => row.mode ?? '—', (row) => row.mode],
+                  ['ABC', (row) => peso(row.abc), (row) => Number(row.abc ?? 0)],
+                  ['Published', (row) => shortDate(row.publishDate), (row) => row.publishDate],
+                  ['Closing', (row) => shortDate(row.closingDate), (row) => row.closingDate],
+                  ['Bids', (row) => row.bidsReceived, (row) => Number(row.bidsReceived ?? 0)],
+                  ['Status', (row) => readable(row.status), (row) => row.status],
                 ]}
               />
             </Section>
@@ -362,11 +413,15 @@ export default function PublicProjectDetail() {
                 empty="No award has been issued for this project yet."
                 rows={records.awards}
                 columns={[
-                  ['NOA', (row) => <span className="font-mono text-xs text-navy">{row.noaNumber}</span>],
-                  ['Date', (row) => shortDate(row.noaDate)],
-                  ['Amount', (row) => peso(row.amount)],
-                  ['Awarded to', (row) => row.awardedTo ?? '—'],
-                  ['Status', (row) => readable(row.status)],
+                  [
+                    'NOA',
+                    (row) => <span className="font-mono text-xs text-navy">{row.noaNumber}</span>,
+                    (row) => row.noaNumber,
+                  ],
+                  ['Date', (row) => shortDate(row.noaDate), (row) => row.noaDate],
+                  ['Amount', (row) => peso(row.amount), (row) => Number(row.amount ?? 0)],
+                  ['Awarded to', (row) => row.awardedTo ?? '—', (row) => row.awardedTo],
+                  ['Status', (row) => readable(row.status), (row) => row.status],
                 ]}
               />
               {records.contracts.length > 0 && (
@@ -374,11 +429,15 @@ export default function PublicProjectDetail() {
                   empty=""
                   rows={records.contracts}
                   columns={[
-                    ['Contract', (row) => <span className="font-mono text-xs text-navy">{row.contractNo}</span>],
-                    ['Amount', (row) => peso(row.amount)],
-                    ['Start', (row) => shortDate(row.startDate)],
-                    ['Delivery due', (row) => shortDate(row.deliveryDeadline)],
-                    ['Status', (row) => readable(row.status)],
+                    [
+                      'Contract',
+                      (row) => <span className="font-mono text-xs text-navy">{row.contractNo}</span>,
+                      (row) => row.contractNo,
+                    ],
+                    ['Amount', (row) => peso(row.amount), (row) => Number(row.amount ?? 0)],
+                    ['Start', (row) => shortDate(row.startDate), (row) => row.startDate],
+                    ['Delivery due', (row) => shortDate(row.deliveryDeadline), (row) => row.deliveryDeadline],
+                    ['Status', (row) => readable(row.status), (row) => row.status],
                   ]}
                 />
               )}
@@ -389,10 +448,10 @@ export default function PublicProjectDetail() {
                 empty="No delivery has been reported for this project yet."
                 rows={records.deliveries}
                 columns={[
-                  ['Description', (row) => row.description ?? '—'],
-                  ['Delivered', (row) => shortDate(row.deliveredAt)],
-                  ['Inspected', (row) => shortDate(row.inspectedAt)],
-                  ['Status', (row) => readable(row.status)],
+                  ['Description', (row) => row.description ?? '—', (row) => row.description],
+                  ['Delivered', (row) => shortDate(row.deliveredAt), (row) => row.deliveredAt],
+                  ['Inspected', (row) => shortDate(row.inspectedAt), (row) => row.inspectedAt],
+                  ['Status', (row) => readable(row.status), (row) => row.status],
                 ]}
               />
               {records.payments.length > 0 && (
@@ -403,10 +462,11 @@ export default function PublicProjectDetail() {
                     [
                       'Disbursement',
                       (row) => <span className="font-mono text-xs text-navy">{row.disbursementNo}</span>,
+                      (row) => row.disbursementNo,
                     ],
-                    ['Amount', (row) => peso(row.amount)],
-                    ['Released', (row) => shortDate(row.releasedAt)],
-                    ['Status', (row) => readable(row.status)],
+                    ['Amount', (row) => peso(row.amount), (row) => Number(row.amount ?? 0)],
+                    ['Released', (row) => shortDate(row.releasedAt), (row) => row.releasedAt],
+                    ['Status', (row) => readable(row.status), (row) => row.status],
                   ]}
                 />
               )}

@@ -23,7 +23,9 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
 import FormField from '../../components/ui/FormField'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 import CounterSubmissionModal from './CounterSubmissionModal'
 
 const STATUS_TONES = {
@@ -200,7 +202,9 @@ function RequirementRow({ document, busy, onDecide }) {
         <Badge tone={tone}>{label}</Badge>
       </div>
 
-      {rejecting ? (
+      {/* Read-only for anyone who is not the office that checks the papers —
+          the committee reads these findings, it does not re-mark them. */}
+      {!onDecide ? null : rejecting ? (
         <div className="mt-2.5">
           <textarea
             rows={2}
@@ -252,7 +256,16 @@ function RequirementRow({ document, busy, onDecide }) {
   )
 }
 
-function ReviewModal({ vendor, onClose, onDecided }) {
+// ── Two offices, one file ────────────────────────────────────────────────────
+// `canCheckDocuments` is the BAC Secretariat: it receives the counter
+// submission and marks each requirement against the rule it answers. `canDecide`
+// is the BAC — the committee that rules on eligibility once the file is
+// assembled (GPM, "Responsibilities of the BAC", item iv).
+//
+// Both halves live in one dialog because they are one file and the second act
+// is read against the first: a Chairperson deciding eligibility needs to see
+// exactly which papers the Secretariat checked and what it found.
+function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide }) {
   const [remarks, setRemarks] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -370,8 +383,13 @@ function ReviewModal({ vendor, onClose, onDecided }) {
                 key={document.id}
                 document={document}
                 busy={busy}
-                onDecide={(status, documentRemarks) =>
-                  decideDocument(document.id, status, documentRemarks)
+                // The committee reads the findings; it does not re-mark the
+                // papers. Passing null leaves the row read-only.
+                onDecide={
+                  canCheckDocuments
+                    ? (status, documentRemarks) =>
+                        decideDocument(document.id, status, documentRemarks)
+                    : null
                 }
               />
             ))}
@@ -414,15 +432,19 @@ function ReviewModal({ vendor, onClose, onDecided }) {
         )}
       </div>
 
-      <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-        Remarks (required to return or blacklist)
-      </label>
-      <textarea
-        rows={3}
-        value={remarks}
-        onChange={(event) => setRemarks(event.target.value)}
-        className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-      />
+      {canDecide && (
+        <>
+          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+            Remarks (required to return or blacklist)
+          </label>
+          <textarea
+            rows={3}
+            value={remarks}
+            onChange={(event) => setRemarks(event.target.value)}
+            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+          />
+        </>
+      )}
 
       {error && (
         <p role="alert" className="mt-3 rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -432,7 +454,7 @@ function ReviewModal({ vendor, onClose, onDecided }) {
 
       {/* Says why the button is unavailable. A disabled control with no
           explanation reads as a broken screen. */}
-      {!review.complete && (
+      {canDecide && !review.complete && (
         <p className="mt-3 text-[11.5px] leading-relaxed text-text-faint">
           {review.total === 0
             ? 'This registration declares no requirements, so there is nothing to verify.'
@@ -442,29 +464,51 @@ function ReviewModal({ vendor, onClose, onDecided }) {
         </p>
       )}
 
+      {/* The Secretariat's half of the job ends here. Saying so is the whole
+          point — an officer who has just checked every requirement and finds no
+          approve button would otherwise think the screen is broken. */}
+      {!canDecide && (
+        <p className="mt-3 rounded-md border border-border-muted bg-chip px-3 py-2.5 text-[11.5px] leading-relaxed text-text-secondary">
+          {canCheckDocuments ? (
+            <>
+              Checking the requirements is this office&rsquo;s part. Determining whether the bidder
+              is <strong className="text-navy">eligible</strong> is the{' '}
+              <strong className="text-navy">BAC&rsquo;s</strong> decision, taken by the Chairperson
+              or Vice-Chairperson on the file you have assembled.
+            </>
+          ) : (
+            <>You can read this registration, but not decide it.</>
+          )}
+        </p>
+      )}
+
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>
-          CANCEL
+          {canDecide ? 'CANCEL' : 'CLOSE'}
         </Button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => decide('return')}
-          className="rounded-sm border border-danger/30 px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-danger"
-        >
-          RETURN
-        </button>
-        <button
-          type="button"
-          // Approval requires every requirement to have been examined and none
-          // to have failed. The server refuses either way; this stops the
-          // officer discovering that only after clicking.
-          disabled={busy || !review.complete}
-          onClick={() => decide('verify')}
-          className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
-        >
-          VERIFY
-        </button>
+        {canDecide && (
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => decide('return')}
+              className="rounded-sm border border-danger/30 px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-danger"
+            >
+              RETURN
+            </button>
+            <button
+              type="button"
+              // Approval requires every requirement to have been examined and
+              // none to have failed. The server refuses either way; this stops
+              // the officer discovering that only after clicking.
+              disabled={busy || !review.complete}
+              onClick={() => decide('verify')}
+              className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
+            >
+              VERIFY
+            </button>
+          </>
+        )}
       </div>
     </Modal>
   )
@@ -480,11 +524,17 @@ function ReviewModal({ vendor, onClose, onDecided }) {
 // that would come back 403.
 export default function VendorVerification() {
   const { has } = usePermissions()
+  // ── Three offices reach this screen, and each does one thing ──────────────
+  // The Secretariat records what arrives at the counter and checks the papers;
+  // the BAC determines eligibility on the file it assembled; Admin/IT issues the
+  // credential afterwards. `canReview` used to mean all of the first two, which
+  // is what put a committee determination on a support office's signature.
   const canCreateAccounts = has('bidders.createAccount') // Admin/IT
-  const canReview = has('bidding.publish') // BAC Secretariat
+  const canIntake = has('bidding.publish') // BAC Secretariat
+  const canDecideEligibility = has('vendor.determineEligibility') // BAC Chair / Vice-Chair
+  const canOpenReview = canIntake || canDecideEligibility
 
   const [vendors, setVendors] = useState([])
-  const [statusFilter, setStatusFilter] = useState('')
   const [reviewing, setReviewing] = useState(null)
   const [recording, setRecording] = useState(false)
   const [creatingFor, setCreatingFor] = useState(null)
@@ -497,7 +547,7 @@ export default function VendorVerification() {
   useEffect(() => {
     let cancelled = false
     biddingApi
-      .fetchVendors(statusFilter ? { status: statusFilter } : {})
+      .fetchVendors()
       .then((data) => {
         if (!cancelled) setVendors(data)
       })
@@ -505,7 +555,7 @@ export default function VendorVerification() {
     return () => {
       cancelled = true
     }
-  }, [statusFilter, refreshToken])
+  }, [refreshToken])
 
   const resendInvitation = async (vendor) => {
     setResendingId(vendor.id)
@@ -530,26 +580,64 @@ export default function VendorVerification() {
   // and easy to forget about because nothing prompts for it.
   const awaitingAccount = vendors.filter((vendor) => vendor.canCreateAccount).length
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(vendors)
+  // Two filters that answer the questions this queue actually gets asked: what
+  // is waiting on me, and who has been approved but still cannot sign in.
+  const table = useTableControls(vendors, {
+    searchKeys: [
+      'businessName',
+      'contactEmail',
+      'contactPerson',
+      'referenceCode',
+      'organizationType',
+    ],
+    filters: [
+      {
+        key: 'registrationStatus',
+        label: 'All registrations',
+        options: ['draft', 'submitted', 'verified', 'returned', 'blacklisted'],
+      },
+      {
+        key: 'hasAccount',
+        label: 'Account issued?',
+        options: [
+          { value: 'true', label: 'Account issued' },
+          { value: 'false', label: 'No account yet' },
+        ],
+        accessor: (vendor) => String(Boolean(vendor.hasAccount)),
+      },
+      { key: 'organizationType', label: 'All organisation types' },
+    ],
+    accessors: {
+      documents: (vendor) => vendor.documents?.length ?? 0,
+      hasAccount: (vendor) => String(Boolean(vendor.hasAccount)),
+    },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
       <PageHeader
-        title={canReview ? 'Bidder Verification' : 'Bidder Accounts'}
+        title={
+          canDecideEligibility
+            ? 'Bidder Eligibility'
+            : canIntake
+              ? 'Bidder Registrations'
+              : 'Bidder Accounts'
+        }
         subtitle={
-          canReview
-            ? 'Check each submitted requirement, then approve the registration. Approved bidders are forwarded to Admin/IT, who issue the account.'
-            : 'Accounts for bidders the BAC Secretariat has already verified. Issuing the account is the last step before a bidder can sign in.'
+          canDecideEligibility
+            ? 'Determine whether each prospective bidder is eligible, on the file the Secretariat has assembled and checked.'
+            : canIntake
+              ? 'Record what arrives at the counter and check each requirement. The BAC then determines eligibility, and Admin/IT issues the account.'
+              : 'Accounts for bidders the BAC has already found eligible. Issuing the account is the last step before a bidder can sign in.'
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {canReview && pending > 0 && <Badge tone="warning">{pending} awaiting review</Badge>}
+            {canOpenReview && pending > 0 && <Badge tone="warning">{pending} awaiting review</Badge>}
             {awaitingAccount > 0 && <Badge tone="info">{awaitingAccount} approved, no account</Badge>}
             {/* The only way an accreditation enters the system now that there is
                 no online submission. */}
-            {canReview && (
+            {canIntake && (
               <Button icon={Inbox} onClick={() => setRecording(true)}>
                 RECORD COUNTER SUBMISSION
               </Button>
@@ -563,19 +651,27 @@ export default function VendorVerification() {
       <div className="flex items-start gap-2.5 rounded-lg border border-border-muted bg-chip px-4 py-3">
         <ShieldCheck size={15} className="mt-0.5 shrink-0 text-navy" />
         <p className="text-[12.5px] leading-relaxed text-text-secondary">
-          {canReview ? (
+          {canDecideEligibility ? (
+            <>
+              The <strong className="text-navy">Secretariat</strong> receives each application at the
+              counter and checks the requirements one by one. Determining whether the bidder is{' '}
+              <strong className="text-navy">eligible</strong> is the committee&rsquo;s act, and it is
+              yours. <strong className="text-navy">Admin/IT</strong> issues the account afterwards,
+              so finding a bidder eligible here does not by itself let anyone in.
+            </>
+          ) : canIntake ? (
             <>
               Bidders submit their requirements <strong className="text-navy">in person</strong> at
               this office — there is no online submission and no sign-up. Record what you receive at
-              the counter, check each document, then approve or return it.{' '}
-              <strong className="text-navy">Admin/IT</strong> creates the account afterwards, so
-              approving a registration here does not by itself let anyone in.
+              the counter and check each document against the rule it answers. The{' '}
+              <strong className="text-navy">BAC</strong> then determines eligibility on the file you
+              assembled — that decision is not this office&rsquo;s to make.
             </>
           ) : (
             <>
-              Registrations are reviewed by the{' '}
-              <strong className="text-navy">BAC Secretariat</strong>. You cannot approve one here,
-              and an account can only be issued for a registration they have already verified.
+              Eligibility is determined by the <strong className="text-navy">BAC</strong>. You cannot
+              approve a registration here, and an account can only be issued for a bidder the
+              committee has already found eligible.
             </>
           )}
         </p>
@@ -600,38 +696,30 @@ export default function VendorVerification() {
       )}
 
       <Card bodyClassName="p-4">
-        <select
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
-          className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-        >
-          <option value="">All statuses</option>
-          {['draft', 'submitted', 'verified', 'returned', 'blacklisted'].map((status) => (
-            <option key={status} value={status}>
-              {status}
-            </option>
-          ))}
-        </select>
+        <TableToolbar
+          {...table.toolbarProps}
+          searchPlaceholder="Search business, email, contact or reference…"
+        />
       </Card>
 
       <Card title="Registered Bidders" icon={Users} bodyClassName="">
-        {vendors.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No bidders match those filters.</p>
+        {table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No bidders registered yet.'
+              : 'No bidders match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Business', 'Accredited email', 'Docs', 'Registration', 'Account', 'Actions'].map(
-                    (head) => (
-                      <th
-                        key={head}
-                        className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                      >
-                        {head}
-                      </th>
-                    )
-                  )}
+                  <SortableTh {...table.sortProps('businessName')}>Business</SortableTh>
+                  <SortableTh {...table.sortProps('contactEmail')}>Accredited email</SortableTh>
+                  <SortableTh {...table.sortProps('documents')}>Docs</SortableTh>
+                  <SortableTh {...table.sortProps('registrationStatus')}>Registration</SortableTh>
+                  <SortableTh {...table.sortProps('hasAccount')}>Account</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
@@ -712,13 +800,14 @@ export default function VendorVerification() {
 
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1.5">
-                        {canReview && vendor.registrationStatus === 'submitted' && (
+                        {canOpenReview && vendor.registrationStatus === 'submitted' && (
                           <button
                             type="button"
                             onClick={() => setReviewing(vendor)}
                             className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:underline"
                           >
-                            <ShieldCheck size={12} /> Review
+                            <ShieldCheck size={12} />{' '}
+                            {canDecideEligibility ? 'Decide eligibility' : 'Check requirements'}
                           </button>
                         )}
 
@@ -779,7 +868,13 @@ export default function VendorVerification() {
       )}
 
       {reviewing && (
-        <ReviewModal vendor={reviewing} onClose={() => setReviewing(null)} onDecided={refresh} />
+        <ReviewModal
+          vendor={reviewing}
+          onClose={() => setReviewing(null)}
+          onDecided={refresh}
+          canCheckDocuments={canIntake}
+          canDecide={canDecideEligibility}
+        />
       )}
 
       {creatingFor && (

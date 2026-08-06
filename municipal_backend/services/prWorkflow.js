@@ -6,8 +6,10 @@
 //                                          funds are available
 //     → pendingMayorApproval               the Mayor approves the request
 //     → pendingBudgetCertification         the Budget Office certifies that an
-//                                          appropriation exists, identifies the
-//                                          funding source, and obligates it
+//                                          appropriation exists and identifies
+//                                          the funding source
+//     → pendingAccountantObligation        the Accountant obligates the
+//                                          appropriation and raises the ORS
 //     → pendingModeDetermination           the BAC determines the mode of
 //                                          procurement
 //     → approved                           cleared; procurement may begin
@@ -69,13 +71,31 @@ export const PR_TRANSITIONS = {
     permission: "pr.approve",
     label: "Approve the request",
   },
-  // Step 18 — the Budget Office. This is the transition that writes the
-  // Obligation Request and stamps the funding source on the requisition.
+  // Step 18 — the Budget Office. Certifies that an appropriation exists and
+  // that there is room left under it, and names the funding source.
   certify: {
     from: ["pendingBudgetCertification"],
-    to: "pendingModeDetermination",
+    to: "pendingAccountantObligation",
     permission: "pr.certify",
-    label: "Certify appropriation and obligate",
+    label: "Certify the appropriation",
+  },
+  // Step 18b — the Municipal Accountant. LGC Sec. 344 names three officers, not
+  // two: "the local budget officer certifies to the existence of appropriation
+  // that has been legally made for the purpose, THE LOCAL ACCOUNTANT HAS
+  // OBLIGATED SAID APPROPRIATION, and the local treasurer certifies to the
+  // availability of funds".
+  //
+  // The permission matrix quoted that sentence and the system then implemented
+  // two of the three: the Budget Officer both certified the appropriation and
+  // raised the Obligation Request, and the Accountant had no part in the
+  // requisition at all. Obligating is the Accountant's act — it is the entry in
+  // the books that encumbers the appropriation — and merging it into the
+  // certification put the check and the entry in one office.
+  obligate: {
+    from: ["pendingAccountantObligation"],
+    to: "pendingModeDetermination",
+    permission: "pr.obligate",
+    label: "Obligate the appropriation (ORS)",
   },
   // Step 19 — the Bids and Awards Committee.
   determineMode: {
@@ -90,6 +110,7 @@ export const PR_TRANSITIONS = {
       "pendingCashCertification",
       "pendingMayorApproval",
       "pendingBudgetCertification",
+      "pendingAccountantObligation",
       "pendingModeDetermination",
     ],
     to: "returned",
@@ -104,6 +125,7 @@ const RETURN_PERMISSION_BY_STATE = {
   pendingCashCertification: "pr.certifyCash",
   pendingMayorApproval: "pr.approve",
   pendingBudgetCertification: "pr.certify",
+  pendingAccountantObligation: "pr.obligate",
   pendingModeDetermination: "pr.determineMode",
 };
 

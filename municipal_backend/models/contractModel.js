@@ -74,7 +74,34 @@ export const Contract = sequelize.define("Contract", {
   // released — it is the supplier's money, withheld, not the LGU's income.
   retentionHeld: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 },
   retentionReleasedAt: { type: DataTypes.DATE, allowNull: true },
+
+  // ── Variation orders (RA 12009 Sec. 71) ────────────────────────────────────
+  // Change and Extra Work Orders for infrastructure, Amendments to Order for
+  // goods. Cumulative, because the ceiling is cumulative: variations may not
+  // exceed ten percent of the original contract price, and the performance
+  // security has to be updated before one is issued (Sec. 68.1).
+  variationTotal: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 },
+
+  // ── Termination (Sec. 71) ──────────────────────────────────────────────────
+  // A contract can end without being completed — default, breach, or the LGU's
+  // own convenience. Recorded rather than left as a cancelled row, because the
+  // ground decides what happens to the securities and the retention.
+  terminatedAt: { type: DataTypes.DATE, allowNull: true },
+  terminationGround: {
+    type: DataTypes.ENUM("default", "breach", "convenience", "unlawfulActs"),
+    allowNull: true,
+  },
+  terminationReason: { type: DataTypes.TEXT, allowNull: true },
 });
+
+// The original contract price, before any variation order. Kept as a derived
+// read rather than a column so `amount` stays the single figure everything else
+// measures against.
+export const originalAmountOf = (contract) =>
+  Number(contract.amount) - Number(contract.variationTotal ?? 0);
+
+// Sec. 71 — the cumulative ceiling on variation orders.
+export const VARIATION_ORDER_CEILING_RATE = 0.1;
 
 Contract.belongsTo(Award, { as: "award", foreignKey: "awardId" });
 Contract.belongsTo(Vendor, { as: "vendor", foreignKey: "vendorId" });

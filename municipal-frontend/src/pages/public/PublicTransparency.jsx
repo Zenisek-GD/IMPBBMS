@@ -9,11 +9,15 @@ import {
   CheckCircle2,
   Loader2,
   CalendarClock,
+  Scale,
+  Lock,
+  FileCheck2,
 } from 'lucide-react'
 import * as publicApi from '../../api/publicProjects'
 import PublicHeader from '../../components/public/PublicHeader'
 import PublicFooter from '../../components/public/PublicFooter'
 import AnnouncementFeed from '../../components/public/AnnouncementFeed'
+import ContactPanel from '../../components/public/ContactPanel'
 import Pagination from '../../components/ui/Pagination'
 import { usePagination } from '../../components/ui/usePagination'
 
@@ -153,6 +157,80 @@ function StatTile({ label, value, delta, hint }) {
 // ── Project card ────────────────────────────────────────────────────────────
 // Card/box layout, kept as it was by request. Restyled to the reference: larger
 // radius, hairline border on white, soft green status chip, green progress bar.
+// ── ABOUT ────────────────────────────────────────────────────────────────────
+// The fourth section in the header's pill. It exists because the answers to the
+// three questions a citizen actually arrives with — what is this, is it
+// complete, and how do I bid — were previously buried in a three-dot menu or not
+// stated at all.
+//
+// Every claim here is one the system can stand behind. There is no "our mission"
+// paragraph, because a transparency portal that opens with marketing copy has
+// already told you what it is.
+function AboutPanel({ overview }) {
+  const items = [
+    {
+      icon: Scale,
+      title: 'What the law requires',
+      body: 'RA 12009, the New Government Procurement Act, and its Implementing Rules require procurement information to be publicly accessible. This portal is how this municipality meets that — it is not a summary written after the fact, it is the record itself.',
+    },
+    {
+      icon: Building2,
+      title: 'What is published',
+      body: 'Approved procurement plans, advertised biddings, awarded contracts, deliveries and payments. Each record carries the office that raised it and the officials who signed it, so a project can be traced from the plan it came from to the peso that paid for it.',
+    },
+    {
+      icon: Lock,
+      title: 'What is not published — and why',
+      body: 'Drafts, internal remarks, evaluator scores and anything before an award are withheld. Publishing a bid under evaluation would let a competitor read it; publishing a draft would present a proposal as a decision. Records appear here once they are approved.',
+    },
+    {
+      icon: FileCheck2,
+      title: 'Becoming a bidder',
+      body: 'Eligibility requirements are submitted in person at the BAC Secretariat office. The Secretariat checks each requirement, the Bids and Awards Committee determines eligibility, and Admin/IT issues the account. There is no online sign-up.',
+    },
+  ]
+
+  return (
+    <div className="mt-8 flex flex-col gap-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        {items.map((item) => (
+          <section
+            key={item.title}
+            className="rounded-xl border border-border-muted bg-surface p-5 shadow-sm"
+          >
+            <span className="flex size-9 items-center justify-center rounded-lg bg-info-soft text-info">
+              <item.icon size={17} />
+            </span>
+            <h3 className="mt-3.5 text-[15px] font-semibold text-navy">{item.title}</h3>
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-secondary">{item.body}</p>
+          </section>
+        ))}
+      </div>
+
+      <section className="rounded-xl border border-border-muted bg-surface p-5 shadow-sm">
+        <h3 className="text-[15px] font-semibold text-navy">Found something wrong?</h3>
+        <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-text-secondary">
+          If a figure here does not match a document you hold, or a project is missing, tell the
+          municipality. Reports are routed to the office responsible for the record concerned.
+        </p>
+        <Link
+          to="/?view=contact"
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-accent-fg transition-opacity hover:opacity-90"
+        >
+          Contact the municipality
+          <ArrowRight size={15} />
+        </Link>
+      </section>
+
+      {overview?.lgu?.name && (
+        <p className="text-[12.5px] text-text-faint">
+          Published by {overview.lgu.name} under RA 12009 and its Implementing Rules and Regulations.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function ProjectCard({ project }) {
   const style = CATEGORY_STYLES[project.category] ?? CATEGORY_STYLES.upcoming
   const { financials } = project
@@ -238,8 +316,20 @@ export default function PublicTransparency() {
   // component — so `?view=` is the one place both can agree on. It also gives
   // each section a shareable link and makes the browser Back button work
   // between them, which a useState toggle could not.
+  //
+  // Four sections now, matching the header's pill. `home` is the default and
+  // shows the hero, the figures and the projects together — a first-time
+  // visitor should not have to pick a section before seeing anything.
   const [searchParams, setSearchParams] = useSearchParams()
-  const view = searchParams.get('view') === 'announcements' ? 'announcements' : 'projects'
+  const requested = searchParams.get('view')
+  const view = ['announcements', 'about', 'projects', 'contact'].includes(requested)
+    ? requested
+    : 'home'
+
+  // The hero and the key figures are orientation, so they belong to the front
+  // page and to nothing else. Once a reader has chosen a section they have their
+  // bearings and the space is better spent on the records.
+  const showsIntro = view === 'home'
 
   const [tab, setTab] = useState('all')
   const [searchInput, setSearchInput] = useState('')
@@ -324,7 +414,7 @@ export default function PublicTransparency() {
   // records when they press one. The header pills only switch — they are already
   // in view and yanking the page would be disorienting.
   const showSection = (next) => {
-    setSearchParams(next === 'announcements' ? { view: 'announcements' } : {})
+    setSearchParams(next === 'home' ? {} : { view: next })
     document.getElementById('records')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -336,7 +426,10 @@ export default function PublicTransparency() {
     }`
 
   return (
-    <div className="flex min-h-screen flex-col bg-canvas">
+    // `pattern-dots` is the page texture the glass header needs something to
+    // diffuse. Without it the bar has nothing behind it and reads as a plain
+    // translucent slab.
+    <div className="pattern-dots flex min-h-screen flex-col bg-canvas">
       <PublicHeader lguName={overview?.lgu?.name} />
 
       <main className="flex-1">
@@ -345,6 +438,7 @@ export default function PublicTransparency() {
               One column, left-aligned, plenty of air. No decorative artwork:
               the headline states what the site is, and the two pills are the
               only things asking to be clicked. */}
+          {showsIntro && (
           <section className="pt-12 pb-10 sm:pt-16 sm:pb-12">
             <p className="text-[11px] font-medium tracking-[0.12em] text-text-faint uppercase">
               Republic of the Philippines
@@ -379,9 +473,11 @@ export default function PublicTransparency() {
               </button>
             </div>
           </section>
+          )}
 
           {/* ── FIGURES ─────────────────────────────────────────────────────
               One dark tile among three light ones, as in the reference. */}
+          {showsIntro && (
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Key figures">
             <FeatureTile overview={overview} />
 
@@ -416,25 +512,40 @@ export default function PublicTransparency() {
               }
             />
           </section>
+          )}
 
           {/* ── RECORDS ─────────────────────────────────────────────────── */}
-          <div id="records" className="scroll-mt-6 pt-14 pb-16">
+          <div id="records" className={`scroll-mt-6 pb-16 ${showsIntro ? 'pt-14' : 'pt-10'}`}>
             {/* The section switch used to sit here as a pill group. It moved to
                 the header, so this is now just the heading for whichever section
                 the header selected — duplicating the control in both places
                 would leave two "you are here" indicators to keep in step. */}
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="text-[20px] font-semibold tracking-[-0.02em] text-navy">
-                {view === 'announcements' ? 'Announcements' : 'Procurement projects'}
+                {view === 'announcements'
+                  ? 'Announcements'
+                  : view === 'about'
+                    ? 'About this portal'
+                    : view === 'contact'
+                      ? 'Contact the municipality'
+                      : 'Procurement projects'}
               </h2>
               <p className="text-[13px] text-text-faint">
                 {view === 'announcements'
                   ? 'Notices, open procurements and system updates'
-                  : `${tabCounts.all} published ${tabCounts.all === 1 ? 'project' : 'projects'}`}
+                  : view === 'about'
+                    ? 'What is published here, and why'
+                    : view === 'contact'
+                      ? 'Routed to the office responsible for the subject'
+                      : `${tabCounts.all} published ${tabCounts.all === 1 ? 'project' : 'projects'}`}
               </p>
             </div>
 
-            {view === 'announcements' ? (
+            {view === 'contact' ? (
+              <ContactPanel />
+            ) : view === 'about' ? (
+              <AboutPanel overview={overview} />
+            ) : view === 'announcements' ? (
               <div className="mt-8">
                 <AnnouncementFeed />
               </div>
@@ -521,8 +632,8 @@ export default function PublicTransparency() {
                       </p>
                     </div>
                   ) : isLoading && projects.length === 0 ? (
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {[0, 1, 2, 3].map((key) => (
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      {[0, 1, 2, 3, 4, 5].map((key) => (
                         <div
                           key={key}
                           className="h-56 animate-pulse rounded-xl border border-border-muted bg-sidebar"
@@ -548,7 +659,10 @@ export default function PublicTransparency() {
                         </p>
                       )}
 
-                      <div className="grid gap-4 lg:grid-cols-2">
+                      {/* Three across on a wide screen, per the wireframe. Two
+                          columns wasted the right-hand third of a desktop
+                          window and made each card taller than it needed to be. */}
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {pageProjects.map((project) => (
                           <ProjectCard key={project.id} project={project} />
                         ))}

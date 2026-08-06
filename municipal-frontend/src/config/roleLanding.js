@@ -5,9 +5,15 @@ const ROLE_LANDING_ROUTE = {
   systemAdministrator: '/admin',
   hope: '/executive',
   bacChairperson: '/bac-chair',
+  // Shares the Chairperson's workspace — the office exists so the committee can
+  // sit when the Chairperson is absent, so it needs the same screen.
+  bacViceChairperson: '/bac-chair',
   bacMember: '/bac-member',
   bacSecretariat: '/secretariat',
   twgMember: '/twg',
+  // The office head works the same screens as their staff — they prepare the
+  // office's budget proposal and PPMP lines, and endorse what staff requisition.
+  headOfOffice: '/dashboard',
   departmentRequester: '/dashboard',
   budgetOfficer: '/budget',
   // The two offices in the planning and budget-legislation chain land on the

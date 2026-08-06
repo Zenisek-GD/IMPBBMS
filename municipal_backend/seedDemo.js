@@ -11,8 +11,17 @@ import { Vendor } from "./models/vendorModel.js";
 import { Contract, Delivery } from "./models/contractModel.js";
 import { Invoice, Payment } from "./models/paymentModel.js";
 import { Appropriation, Obligation } from "./models/appropriationModel.js";
+import { DevelopmentPlan, DevelopmentGoal } from "./models/developmentPlanModel.js";
+import { InvestmentProgram, AipEntry } from "./models/investmentProgramModel.js";
 import { Security, requiredBidSecurity, requiredPerformanceSecurity } from "./models/securityModel.js";
 import { BacResolution } from "./models/bacResolutionModel.js";
+import {
+  ObserverOrganization,
+  ObserverInvitation,
+  ObservationReport,
+  OBSERVER_NOTICE_DAYS,
+  OBSERVATION_REPORT_DAYS,
+} from "./models/observerModel.js";
 import { recordAudit, AUDIT_ACTIONS } from "./services/auditLog.js";
 import { computeDeductions } from "./services/deductions.js";
 
@@ -58,6 +67,7 @@ const PROJECTS = [
     reach: "completed",
     department: "HEALTH",
     appropriation: "healthCO",
+    aipEntry: "health",
     projectTitle: "Supply and Delivery of Medical Equipment for the Municipal Health Office",
     description:
       "Procurement of diagnostic and treatment equipment for the Rural Health Unit, including patient monitors, " +
@@ -75,6 +85,7 @@ const PROJECTS = [
     reach: "completed",
     department: "ENGR",
     appropriation: "infraCO",
+    aipEntry: "roads",
     projectTitle: "Concreting of Barangay San Vicente Farm-to-Market Road (Phase 1)",
     description:
       "Concreting of 1.2 kilometres of farm-to-market road serving four upland barangays, including drainage " +
@@ -92,6 +103,7 @@ const PROJECTS = [
     reach: "contract",
     department: "HEALTH",
     appropriation: "healthCO",
+    aipEntry: "health",
     projectTitle: "Construction of Barangay Malitbog Health Station",
     description:
       "Construction of a one-storey barangay health station with consultation rooms, a birthing area, a " +
@@ -109,6 +121,7 @@ const PROJECTS = [
     reach: "bidding",
     department: "IT",
     appropriation: "itMOOE",
+    aipEntry: "digital",
     projectTitle: "Supply and Delivery of Information Technology Equipment for Municipal Offices",
     description:
       "Procurement of desktop computers, network switches and uninterruptible power supplies to replace " +
@@ -124,6 +137,7 @@ const PROJECTS = [
     reach: "upcoming",
     department: "GSO",
     appropriation: "gsoCO",
+    aipEntry: "disaster",
     projectTitle: "Procurement of Two (2) Units Garbage Compactor Truck",
     description:
       "Acquisition of two garbage compactor trucks to expand solid waste collection coverage to the remaining " +
@@ -139,6 +153,7 @@ const PROJECTS = [
     reach: "upcoming",
     department: "ENGR",
     appropriation: "infraCO",
+    aipEntry: "disaster",
     projectTitle: "Construction of Municipal Evacuation Center",
     description:
       "Construction of a disaster-resilient evacuation centre with a capacity of 500 persons, including " +
@@ -293,9 +308,14 @@ const log = (users, roleKey, payload) => recordAudit({ ...actorFor(users, roleKe
 // written, in the same shape, so the public timeline reads identically to one
 // produced by real use.
 
-const runAppStage = async (users, spec, department, timing, appropriation) => {
+const runAppStage = async (users, spec, department, timing, appropriation, aipEntry) => {
   const entry = await AppEntry.create({
     appropriationId: appropriation.id,
+    // The other half of the authority: the appropriation says the money exists,
+    // this says the municipality programmed it for this purpose. The controller
+    // requires it on creation, so seeded rows carry it too — otherwise the demo
+    // data would be in a state the application itself would refuse to produce.
+    aipEntryId: aipEntry?.id ?? null,
     projectTitle: spec.projectTitle,
     description: spec.description,
     papCode: spec.papCode,
@@ -385,12 +405,21 @@ const runPrStage = async (users, spec, entry, department, timing, index, appropr
     cashCertifiedById: users.get("municipalTreasurer").id,
     mayorApprovedAt: timing.prMayorApproved,
     mayorApprovedById: users.get("hope").id,
+
+    // LGC Sec. 344's three officers, each on their own column. The Budget
+    // Officer certifies that the appropriation exists; the Accountant obligates
+    // it. These used to be one act by one officer.
+    appropriationCertifiedAt: timing.prCertified,
+    appropriationCertifiedById: users.get("budgetOfficer").id,
     fundsReservedAt: timing.prCertified,
+    obligatedById: users.get("municipalAccountant").id,
     fundSource: appropriation.fund,
 
     procurementModeId: mode.id,
     modeDeterminedAt: timing.prModeDetermined,
-    modeDeterminedById: users.get("bacSecretariat").id,
+    // The determination is the committee's, so it is stamped with the
+    // Chairperson rather than the Secretariat that staffs it.
+    modeDeterminedById: users.get("bacChairperson").id,
     suggestedModeKey: mode.key,
     modeJustification: `Determined per ${mode.citation}: the ABC exceeds this LGU's Small Value Procurement ceiling, so competitive bidding applies.`,
   });
@@ -453,32 +482,44 @@ const runPrStage = async (users, spec, entry, department, timing, index, appropr
     "Approved. Forwarded to the Budget Office for certification of appropriation."
   );
 
-  // Step 18 — the Budget Office. Certification *is* the obligation: the ORS is
-  // what actually commits the money against the ordinance line, and the
-  // requisition status alone commits nothing.
+  // Step 18 — the Budget Office certifies that an appropriation exists and
+  // names the fund. It does not obligate: LGC Sec. 344 gives that to the
+  // Accountant, and the two are separate stages below.
+  await transition(
+    "budgetOfficer",
+    "certify",
+    "pendingBudgetCertification",
+    "pendingAccountantObligation",
+    timing.prCertified,
+    `Appropriation certified against ${appropriation.ordinanceNo}. Referred to the Accountant for obligation.`
+  );
+
+  // Step 18b — the Accountant. The ORS is what actually commits the money
+  // against the ordinance line; the requisition status alone commits nothing.
   await Obligation.create({
     obligationNo,
     amount: spec.abc,
     status: "obligated",
     certifiedAt: timing.prCertified,
-    certifiedById: users.get("budgetOfficer").id,
+    certifiedById: users.get("municipalAccountant").id,
     particulars: spec.projectTitle,
     appropriationId: appropriation.id,
     prHeaderId: pr.id,
   });
 
   await transition(
-    "budgetOfficer",
-    "certify",
-    "pendingBudgetCertification",
+    "municipalAccountant",
+    "obligate",
+    "pendingAccountantObligation",
     "pendingModeDetermination",
     timing.prCertified,
     `${obligationNo} issued against ${appropriation.ordinanceNo}. ${peso(spec.abc)} obligated.`
   );
 
   // Step 19 — the committee's determination, logged under its own action type
-  // so an auditor can filter for every mode decision in the year.
-  await log(users, "bacSecretariat", {
+  // so an auditor can filter for every mode decision in the year. Recorded
+  // under the Chairperson: the determination is the BAC's, not its Secretariat's.
+  await log(users, "bacChairperson", {
     actionType: AUDIT_ACTIONS.PR_MODE_DETERMINED,
     entityRef: "pr",
     entityId: pr.id,
@@ -578,6 +619,17 @@ const runBidStage = async (users, spec, rfq, vendors, timing, opened) => {
       recordedById: users.get("bacSecretariat").id,
     });
   }
+
+  // ── Observers (RA 12009 Sec. 43) ───────────────────────────────────────────
+  // The opening record below has always *said* a COA representative and two
+  // civil society observers witnessed the session. Now they exist as records:
+  // invited in writing with the statutory five days' notice, marked present,
+  // and — for the stages that have already happened — having filed the
+  // observation report Sec. 43.4 obliges them to file.
+  //
+  // Without this the Observers screen is empty for every demo project, and the
+  // most visible transparency control in the process looks unimplemented.
+  await seedObserversFor({ rfq, spec, timing, users, opened });
 
   if (!opened) return bids;
 
@@ -751,7 +803,10 @@ const runContractStage = async (users, spec, award, vendor, timing, index, statu
     recordedById: users.get("bacSecretariat").id,
   });
 
-  await log(users, "bacChairperson", {
+  // Signed for the LGU by the Local Chief Executive. LGC Sec. 22(c) puts the
+  // signature there, not with the BAC Chairperson who chaired the committee
+  // that recommended the award.
+  await log(users, "hope", {
     actionType: AUDIT_ACTIONS.CONTRACT_SIGNED,
     entityRef: "contract",
     entityId: contract.id,
@@ -761,6 +816,21 @@ const runContractStage = async (users, spec, award, vendor, timing, index, statu
       remarks: `Contract executed at ${peso(spec.winningBid)}. Delivery due ${dateOnly(timing.deliveryDeadline)}.`,
     },
     recordedAt: timing.contractSigned,
+  });
+
+  // The Notice to Proceed is a separate instrument from the signature: it is
+  // the day contract time starts running, and therefore the day from which
+  // delay and liquidated damages are measured.
+  await log(users, "hope", {
+    actionType: AUDIT_ACTIONS.NOTICE_TO_PROCEED_ISSUED,
+    entityRef: "contract",
+    entityId: contract.id,
+    summary: `Notice to Proceed issued on ${contractNo} — ${contractDays} calendar days`,
+    afterState: {
+      noticeToProceedAt: timing.contractStart,
+      contractDays,
+    },
+    recordedAt: timing.contractStart,
   });
 
   return contract;
@@ -926,6 +996,95 @@ const timingFor = (offset) => ({
 
 // Clears previously seeded demonstration activity so the script is repeatable.
 // Order matters: children before parents, or the foreign keys refuse.
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// ── Observers for one procurement (RA 12009 Sec. 43) ─────────────────────────
+// Sec. 43.1 requires the COA representative plus at least two observers — one
+// from a private group relevant to the procurement at hand, one from a CSO or
+// PO. "Relevant to the procurement at hand" is what `relevantCategories` on the
+// roster expresses, so an infrastructure project draws the constructors'
+// association and a goods procurement draws the chamber of commerce.
+//
+// Invitations are backdated to the statutory five days before each activity,
+// because an invitation issued later than that does not discharge the duty and
+// the demo should not model a non-compliant LGU.
+const seedObserversFor = async ({ rfq, spec, timing, users, opened }) => {
+  const roster = await ObserverOrganization.findAll({ where: { status: "active" } });
+
+  const relevantTo = (sector) =>
+    roster.find(
+      (organization) =>
+        organization.sector === sector &&
+        (organization.sector === "coa" ||
+          (organization.relevantCategories ?? []).includes(spec.rfqCategory))
+    ) ?? roster.find((organization) => organization.sector === sector);
+
+  const invitees = ["coa", "privateGroup", "csoOrPo"].map(relevantTo).filter(Boolean);
+  if (invitees.length === 0) return;
+
+  // The stages this procurement actually reached. A solicitation still open for
+  // bids has not been evaluated, so inviting observers to an evaluation that
+  // has not happened would be inventing a record.
+  const stages = [
+    { stage: "eligibilityChecking", at: timing.bidOpened },
+    ...(rfq.prebidRequired && rfq.prebidAt ? [{ stage: "prebidConference", at: timing.prebid }] : []),
+    ...(opened
+      ? [
+          { stage: "preliminaryExamination", at: timing.bidOpened },
+          { stage: "bidEvaluation", at: timing.evaluated },
+          { stage: "postQualification", at: timing.evaluated },
+        ]
+      : []),
+  ];
+
+  for (const { stage, at } of stages) {
+    if (!at) continue;
+    const scheduledAt = new Date(at);
+    const invitedAt = new Date(scheduledAt.getTime() - (OBSERVER_NOTICE_DAYS + 2) * DAY_MS);
+    const noticeDays = Math.floor((scheduledAt - invitedAt) / DAY_MS);
+
+    for (const organization of invitees) {
+      const invitation = await ObserverInvitation.create({
+        rfqId: rfq.id,
+        stage,
+        scheduledAt,
+        invitedAt,
+        noticeDays,
+        noticeCompliant: noticeDays >= OBSERVER_NOTICE_DAYS,
+        observerOrganizationId: organization.id,
+        representativeName: organization.contactPerson ?? null,
+        // Sec. 43.5 — a confidentiality agreement is entered into in all
+        // instances, so an observer recorded as present has one.
+        confidentialityAgreedAt: invitedAt,
+        attendance: "attended",
+        attendedAt: scheduledAt,
+        invitedById: users.get("bacSecretariat").id,
+      });
+
+      // Sec. 43.4 — the report is due within seven calendar days of the
+      // activity. Filed only where that window has already closed; a stage that
+      // happened yesterday should still be showing as awaiting a report.
+      const dueAt = new Date(scheduledAt.getTime() + OBSERVATION_REPORT_DAYS * DAY_MS);
+      if (dueAt < new Date()) {
+        await ObservationReport.create({
+          invitationId: invitation.id,
+          complianceAssessment:
+            `The BAC observed the substantive and procedural requirements of RA 12009 and its IRR at the ` +
+            `${stage} stage for ${rfq.referenceNo}. Documents were made available on request and the ` +
+            `proceedings were conducted in the presence of the invited observers.`,
+          areasForImprovement:
+            "Copies of the abstract of bids could be circulated to observers before the session closes.",
+          findingsRegular: true,
+          submittedAt: new Date(scheduledAt.getTime() + 3 * DAY_MS),
+          dueAt,
+          submittedLate: false,
+          furnishedTo: { hope: true, philgeps: true, coa: true, gppb: true, ombudsman: true },
+        });
+      }
+    }
+  }
+};
+
 const clearDemoData = async () => {
   await Security.destroy({ where: {} });
   await BacResolution.destroy({ where: {} });
@@ -937,11 +1096,19 @@ const clearDemoData = async () => {
   await Award.destroy({ where: {} });
   await BidOpeningRecord.destroy({ where: {} });
   await Bid.destroy({ where: {} });
+  await ObservationReport.destroy({ where: {} });
+  await ObserverInvitation.destroy({ where: {} });
   await Rfq.destroy({ where: {} });
   await PrLineItem.destroy({ where: {} });
   await PrHeader.destroy({ where: {} });
   await AppEntry.destroy({ where: {} });
   await Appropriation.destroy({ where: {} });
+  // The planning layer, innermost first: AIP entries hang off the programme and
+  // off a goal, and goals hang off the plan.
+  await AipEntry.destroy({ where: {} });
+  await InvestmentProgram.destroy({ where: {} });
+  await DevelopmentGoal.destroy({ where: {} });
+  await DevelopmentPlan.destroy({ where: {} });
   await Vendor.destroy({ where: {} });
   console.log("↷ cleared previous demonstration records");
 };
@@ -1007,7 +1174,96 @@ try {
   }
   console.log(`✅ ${Object.keys(vendors).length} suppliers registered`);
 
-  // The Appropriation Ordinance comes first — nothing downstream can exist
+  // ── The planning layer ─────────────────────────────────────────────────────
+  // This used to start at the Appropriation Ordinance, which left the whole
+  // layer above it empty: no development plan, no investment programme, no AIP
+  // entries. That was invisible on the seeded projects — they were written
+  // straight into the database — but it made the system unusable for anyone
+  // trying to file their *own* plan line, because an APP entry must cite a live
+  // AIP entry and there were none to cite.
+  //
+  // Every peso in the demonstration data now traces up to a development goal.
+  const plan = await DevelopmentPlan.create({
+    title: `Comprehensive Development Plan ${YEAR - 2}–${YEAR + 3}`,
+    startYear: YEAR - 2,
+    endYear: YEAR + 3,
+    vision:
+      "A resilient, healthy and productive municipality where every barangay is reachable by " +
+      "all-weather road and served by a functioning health station.",
+    resolutionNo: `SB Res. No. ${YEAR - 2}-014`,
+    adoptedAt: dateOnly(at(1, 5)),
+    status: "adopted",
+    preparedById: users.get("planningOfficer")?.id ?? null,
+  });
+
+  const GOALS = [
+    ["health", "social", "Universal access to primary health care in every barangay"],
+    ["roads", "infrastructure", "All-weather road access between the poblacion and upland barangays"],
+    ["disaster", "environment", "Disaster-resilient evacuation and solid waste management"],
+    ["digital", "institutional", "Digitalised frontline services in all municipal offices"],
+  ];
+
+  const goals = {};
+  for (const [key, sector, title] of GOALS) {
+    goals[key] = await DevelopmentGoal.create({
+      developmentPlanId: plan.id,
+      sector,
+      title,
+      status: "active",
+      // The Mayor's priorities for the year (step 2). Named against the adopted
+      // plan, which is the only thing a priority may be set against.
+      isMayorPriority: key === "health" || key === "roads",
+      priorityRank: key === "health" ? 1 : key === "roads" ? 2 : null,
+      priorityFiscalYear: key === "health" || key === "roads" ? YEAR : null,
+      prioritisedAt: key === "health" || key === "roads" ? at(1, 8) : null,
+      prioritisedById: key === "health" || key === "roads" ? users.get("hope")?.id ?? null : null,
+    });
+  }
+
+  // The Annual Investment Program: the year's costed list of projects, drawn
+  // from the plan's goals and adopted by the Sanggunian.
+  const program = await InvestmentProgram.create({
+    fiscalYear: YEAR,
+    title: `Annual Investment Program ${YEAR}`,
+    status: "adopted",
+    endorsedAt: at(1, 10),
+    adoptedAt: at(1, 14),
+    resolutionNo: `SB Res. No. ${YEAR}-002`,
+    developmentPlanId: plan.id,
+    preparedById: users.get("planningOfficer")?.id ?? null,
+    endorsedById: users.get("hope")?.id ?? null,
+  });
+
+  // Entries deliberately costed ABOVE what the demonstration projects consume,
+  // so there is headroom left for anyone walking the flow themselves.
+  const aipEntries = {};
+  for (const entry of [
+    { key: "health", goal: "health", dept: "HEALTH", title: "Health facilities and medical equipment", cost: 9_500_000, expenseClass: "capitalOutlay" },
+    { key: "roads", goal: "roads", dept: "ENGR", title: "Local roads and public infrastructure", cost: 32_000_000, expenseClass: "capitalOutlay" },
+    { key: "disaster", goal: "disaster", dept: "GSO", title: "Solid waste and evacuation facilities", cost: 14_000_000, expenseClass: "capitalOutlay" },
+    { key: "digital", goal: "digital", dept: "IT", title: "Municipal digitalisation programme", cost: 3_400_000, expenseClass: "mooe" },
+    { key: "schoolHealth", goal: "health", dept: "HEALTH", title: "School health and nutrition programme", cost: 2_200_000, expenseClass: "mooe" },
+  ]) {
+    aipEntries[entry.key] = await AipEntry.create({
+      investmentProgramId: program.id,
+      developmentGoalId: goals[entry.goal].id,
+      implementingUnitId: departments.get(entry.dept)?.id ?? null,
+      reference: `AIP-${YEAR}-${entry.key.toUpperCase().slice(0, 6)}`,
+      title: entry.title,
+      expectedOutput: entry.title,
+      expenseClass: entry.expenseClass,
+      fund: entry.key === "schoolHealth" ? "specialEducationFund" : "generalFund",
+      estimatedCost: entry.cost,
+      startQuarter: "Q1",
+      endQuarter: "Q4",
+      status: "planned",
+    });
+  }
+  console.log(
+    `✅ development plan adopted, ${Object.keys(aipEntries).length} AIP entries under ${program.title}`
+  );
+
+  // The Appropriation Ordinance comes next — nothing downstream can exist
   // without a budget line to charge against.
   const ordinanceNo = `Ord. No. ${YEAR}-01`;
   const appropriations = {};
@@ -1050,7 +1306,7 @@ try {
     }
 
     const timing = timingFor(index);
-    const entry = await runAppStage(users, spec, department, timing, appropriation);
+    const entry = await runAppStage(users, spec, department, timing, appropriation, aipEntries[spec.aipEntry]);
 
     if (spec.reach === "upcoming") {
       console.log(`✅ ${spec.projectTitle} — upcoming (approved plan)`);

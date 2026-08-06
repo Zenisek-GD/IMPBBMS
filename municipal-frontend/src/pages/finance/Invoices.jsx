@@ -11,7 +11,9 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -191,9 +193,34 @@ export default function Invoices() {
   const canProcess = canCertify || canRelease
   const isSupplier = permissions.has('delivery.submitInvoice')
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(invoices)
+  const table = useTableControls(invoices, {
+    searchKeys: [
+      'invoiceNo',
+      'contractNo',
+      'vendorName',
+      'remarks',
+      (invoice) => invoice.payment?.disbursementNo,
+    ],
+    filters: [
+      { key: 'status', label: 'All statuses' },
+      { key: 'vendorName', label: 'All suppliers' },
+      {
+        key: 'paymentStatus',
+        label: 'Disbursement',
+        options: [
+          { value: 'released', label: 'Released' },
+          { value: 'prepared', label: 'Voucher prepared' },
+          { value: 'none', label: 'No voucher yet' },
+        ],
+        accessor: (invoice) => invoice.payment?.status ?? 'none',
+      },
+    ],
+    accessors: {
+      amount: (invoice) => Number(invoice.amount ?? 0),
+      disbursementNo: (invoice) => invoice.payment?.disbursementNo ?? null,
+    },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -227,23 +254,32 @@ export default function Invoices() {
       )}
 
       <Card title="Invoices" icon={Receipt} bodyClassName="">
-        {invoices.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No invoices yet.</p>
+        {invoices.length > 0 && (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar
+              {...table.toolbarProps}
+              searchPlaceholder="Search invoice, contract, supplier or voucher…"
+            />
+          </div>
+        )}
+        {table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No invoices yet.'
+              : 'No invoices match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Invoice', 'Contract', 'Supplier', 'Amount', 'Disbursement', 'Status', 'Actions'].map(
-                    (head) => (
-                      <th
-                        key={head}
-                        className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                      >
-                        {head}
-                      </th>
-                    )
-                  )}
+                  <SortableTh {...table.sortProps('invoiceNo')}>Invoice</SortableTh>
+                  <SortableTh {...table.sortProps('contractNo')}>Contract</SortableTh>
+                  <SortableTh {...table.sortProps('vendorName')}>Supplier</SortableTh>
+                  <SortableTh {...table.sortProps('amount')}>Amount</SortableTh>
+                  <SortableTh {...table.sortProps('disbursementNo')}>Disbursement</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>

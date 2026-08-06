@@ -103,3 +103,24 @@ export const EVALUATION_RUBRIC = [
   { key: 'deliveryCapability', label: 'Delivery capability and schedule' },
   { key: 'trackRecord', label: 'Track record and completed contracts' },
 ]
+
+// ── Abstract of Bids / Quotations (Sec. 34.3(f), 43.5) ───────────────────────
+// The tabulation of who responded and at what. One of the five documents
+// observers are entitled to demand, and the one they sign as witnesses.
+export const fetchAbstractOfBids = (rfqId) =>
+  apiClient.get(`/bidding/rfqs/${rfqId}/abstract`).then((res) => res.data)
+
+// Sec. 66 — the HoPE may disapprove the committee's recommendation, but only on
+// valid, reasonable and justifiable grounds expressed in writing.
+export const disapproveAward = (awardId, grounds) =>
+  apiClient.post(`/bidding/awards/${awardId}/disapprove`, { grounds }).then((res) => res.data)
+
+// Sec. 64 — a failed bidding is a recorded act. Two on one project is what opens
+// Negotiated Procurement under Sec. 35.1.
+export const declareFailureOfBidding = (rfqId, reason) =>
+  apiClient.post(`/bidding/rfqs/${rfqId}/declare-failure`, { reason }).then((res) => res.data)
+
+// Goods and Infrastructure are rated pass/fail on the technical requirements and
+// awarded to the lowest calculated responsive bid. Only Consulting Services is
+// scored on a rubric.
+export const usesRatedEvaluation = (category) => category === 'consulting'

@@ -23,11 +23,13 @@ import {
   FileSignature,
   Inbox,
   Globe,
+  Mail,
   ScrollText,
   TrendingUp,
   Target,
   ListTree,
   Scale,
+  Eye,
 } from 'lucide-react'
 
 // One nav config per role from the system design doc, Section 2.1 / Section 11.
@@ -55,13 +57,9 @@ export const ROLE_NAV = {
   systemAdministrator: {
     brandTitle: 'System Console',
     brandSubtitle: 'Administration',
-    topLinks: [
-      { label: 'Overview', href: '/admin' },
-      { label: 'Audit', href: '/audit-log' },
-    ],
     searchPlaceholder: 'Search system logs...',
     sections: [
-      { items: [{ label: 'Oversight', href: '/admin', icon: LayoutDashboard }] },
+      { items: [{ label: 'Administrator Dashboard', href: '/admin', icon: LayoutDashboard }] },
       {
         heading: 'Administration',
         items: [
@@ -81,6 +79,7 @@ export const ROLE_NAV = {
         heading: 'Oversight',
         items: [
           { label: 'Audit Trail', href: '/audit-log', icon: FileClock },
+          { label: 'Public Messages', href: '/messages', icon: Mail },
           { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe },
         ],
       },
@@ -90,20 +89,16 @@ export const ROLE_NAV = {
   hope: {
     brandTitle: 'Executive Office',
     brandSubtitle: 'Office of the Mayor',
-    topLinks: [
-      { label: 'Insights', href: '/executive' },
-      { label: 'Approvals', href: '/purchase-requisitions' },
-    ],
     searchPlaceholder: 'Search PR # or Dept...',
     sections: [
-      { items: [{ label: 'Executive Insights', href: '/executive', icon: TrendingUp }] },
+      { items: [{ label: 'Executive Dashboard', href: '/executive', icon: TrendingUp }] },
       {
         // The Mayor's own acts sit at the top of the chain, before anything is
         // procured: naming the year's priorities against the development plan,
         // endorsing the investment program, and approving the executive budget.
         heading: 'Planning & Budget',
         items: [
-          { label: "Priorities & Investment Program", href: '/planning', icon: Target },
+          { label: 'Development Plan & AIP', href: '/planning', icon: Target },
           { label: 'Executive Budget', href: '/budget/preparation', icon: Landmark },
         ],
       },
@@ -120,8 +115,16 @@ export const ROLE_NAV = {
         items: [
           { label: 'Decision Support', href: '/dss', icon: BarChart3 },
           { label: 'Budget Utilisation', href: '/budget/unexpended', icon: PiggyBank },
+          // Complaints about a procurement route to the HoPE.
+          { label: 'Public Messages', href: '/messages', icon: Mail },
           { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe },
         ],
+      },
+      {
+        // Sec. 84 — "With respect to LGUs, the decision of the local chief
+        // executive shall be final."
+        heading: 'Remedies',
+        items: [{ label: 'Protests', href: '/protests', icon: Scale }],
       },
     ],
   },
@@ -129,13 +132,16 @@ export const ROLE_NAV = {
   bacChairperson: {
     brandTitle: 'BAC Chair',
     brandSubtitle: 'Bids & Awards Committee',
-    topLinks: [
-      { label: 'Workspace', href: '/bac-chair' },
-      { label: 'Evaluation', href: '/evaluation' },
-    ],
     searchPlaceholder: 'Search bids or PR #...',
     sections: [
-      { items: [{ label: 'Workspace', href: '/bac-chair', icon: LayoutDashboard }] },
+      { items: [{ label: 'BAC Chair Dashboard', href: '/bac-chair', icon: LayoutDashboard }] },
+      {
+        // GPM, "Responsibilities of the BAC" item iv: determining the
+        // eligibility of prospective bidders is the committee's act. The
+        // Secretariat assembles and checks the file; the Chair rules on it.
+        heading: 'Eligibility',
+        items: [{ label: 'Bidder Eligibility', href: '/secretariat/vendors', icon: Users }],
+      },
       {
         // Bid opening, scoring, post-qualification and the award recommendation
         // are all acts performed in the Evaluation workspace — they are stages
@@ -143,8 +149,46 @@ export const ROLE_NAV = {
         heading: 'Bidding',
         items: [
           { label: 'Evaluation & Award', href: '/evaluation', icon: Gavel },
+          { label: 'Observers', href: '/observers', icon: Eye },
+          { label: 'Protests', href: '/protests', icon: Scale },
           { label: 'Live Conference', href: '/conferences', icon: CalendarClock },
         ],
+      },
+      {
+        heading: 'Contracts',
+        items: [{ label: 'Contracts', href: '/contracts', icon: FileSignature }],
+      },
+    ],
+  },
+
+  // ── BAC Vice-Chairperson ──────────────────────────────────────────────────
+  // Same workspace as the Chairperson, because the office exists precisely so
+  // that the committee can sit when the Chairperson cannot: the quorum rule
+  // requires "the Chairperson or the Vice-Chairperson" present at every meeting
+  // and deliberation. A Vice-Chair with a narrower screen than the Chair could
+  // not preside, which would defeat the point of designating one.
+  bacViceChairperson: {
+    brandTitle: 'BAC Vice-Chair',
+    brandSubtitle: 'Bids & Awards Committee',
+    searchPlaceholder: 'Search bids or PR #...',
+    sections: [
+      { items: [{ label: 'BAC Vice-Chair Dashboard', href: '/bac-chair', icon: LayoutDashboard }] },
+      {
+        heading: 'Eligibility',
+        items: [{ label: 'Bidder Eligibility', href: '/secretariat/vendors', icon: Users }],
+      },
+      {
+        heading: 'Bidding',
+        items: [
+          { label: 'Evaluation & Award', href: '/evaluation', icon: Gavel },
+          { label: 'Observers', href: '/observers', icon: Eye },
+          { label: 'Protests', href: '/protests', icon: Scale },
+          { label: 'Live Conference', href: '/conferences', icon: CalendarClock },
+        ],
+      },
+      {
+        heading: 'Procurement',
+        items: [{ label: 'Requisitions', href: '/purchase-requisitions', icon: FileSignature }],
       },
       {
         heading: 'Contracts',
@@ -156,10 +200,9 @@ export const ROLE_NAV = {
   bacMember: {
     brandTitle: 'BAC Member',
     brandSubtitle: 'Bids & Awards Committee',
-    topLinks: [{ label: 'Workspace', href: '/bac-member' }],
     searchPlaceholder: 'Search assigned bids...',
     sections: [
-      { items: [{ label: 'Workspace', href: '/bac-member', icon: LayoutDashboard }] },
+      { items: [{ label: 'BAC Member Dashboard', href: '/bac-member', icon: LayoutDashboard }] },
       {
         heading: 'Evaluation',
         items: [
@@ -173,13 +216,9 @@ export const ROLE_NAV = {
   bacSecretariat: {
     brandTitle: 'BAC Secretariat',
     brandSubtitle: 'Procurement Operations',
-    topLinks: [
-      { label: 'Workspace', href: '/secretariat' },
-      { label: 'Vendors', href: '/secretariat/vendors' },
-    ],
     searchPlaceholder: 'Search PR # or RFQ...',
     sections: [
-      { items: [{ label: 'Workspace', href: '/secretariat', icon: LayoutDashboard }] },
+      { items: [{ label: 'Secretariat Dashboard', href: '/secretariat', icon: LayoutDashboard }] },
       {
         heading: 'Planning',
         items: [
@@ -195,9 +234,20 @@ export const ROLE_NAV = {
           // posted first, and the applications it attracts are what the next
           // screen reviews.
           { label: 'Announcements', href: '/announcements/manage', icon: Megaphone },
-          { label: 'Vendor Verification', href: '/secretariat/vendors', icon: Users },
+          // Renamed: this office records the submission and checks the
+          // requirements. Whether the bidder is *eligible* is the BAC's call.
+          { label: 'Bidder Registrations', href: '/secretariat/vendors', icon: Users },
+          // Project, contract and bidder enquiries from the public portal.
+          { label: 'Public Messages', href: '/messages', icon: Mail },
           { label: 'Live Conference', href: '/conferences', icon: CalendarClock },
         ],
+      },
+      {
+        // RA 12009 Sec. 43 — the Secretariat keeps the observer roster and
+        // issues the invitations, as part of making the arrangements for the
+        // committee's meetings.
+        heading: 'Transparency',
+        items: [{ label: 'Observers', href: '/observers', icon: Eye }],
       },
       {
         heading: 'Contracts',
@@ -212,10 +262,9 @@ export const ROLE_NAV = {
   twgMember: {
     brandTitle: 'Technical WG',
     brandSubtitle: 'Technical Working Group',
-    topLinks: [{ label: 'Workspace', href: '/twg' }],
     searchPlaceholder: 'Search assigned bids...',
     sections: [
-      { items: [{ label: 'Workspace', href: '/twg', icon: LayoutDashboard }] },
+      { items: [{ label: 'TWG Dashboard', href: '/twg', icon: LayoutDashboard }] },
       {
         heading: 'Evaluation',
         items: [
@@ -234,13 +283,9 @@ export const ROLE_NAV = {
   planningOfficer: {
     brandTitle: 'Planning Office',
     brandSubtitle: 'Development & Investment Programming',
-    topLinks: [
-      { label: 'Development Plan', href: '/planning' },
-      { label: 'Budget', href: '/budget/preparation' },
-    ],
     searchPlaceholder: 'Search projects or goals...',
     sections: [
-      { items: [{ label: 'Workspace', href: '/planning-office', icon: LayoutDashboard }] },
+      { items: [{ label: 'Planning Dashboard', href: '/planning-office', icon: LayoutDashboard }] },
       {
         heading: 'Planning',
         items: [
@@ -265,18 +310,14 @@ export const ROLE_NAV = {
   sanggunianSecretary: {
     brandTitle: 'Sangguniang Bayan',
     brandSubtitle: 'Ordinances & Resolutions',
-    topLinks: [
-      { label: 'Budget', href: '/budget/preparation' },
-      { label: 'Plans', href: '/planning' },
-    ],
     searchPlaceholder: 'Search ordinance or resolution...',
     sections: [
-      { items: [{ label: 'Workspace', href: '/sanggunian', icon: LayoutDashboard }] },
+      { items: [{ label: 'Sanggunian Dashboard', href: '/sanggunian', icon: LayoutDashboard }] },
       {
         heading: 'Legislation',
         items: [
           { label: 'Appropriation Ordinance', href: '/budget/preparation', icon: Scale },
-          { label: 'Plan & AIP Adoption', href: '/planning', icon: Target },
+          { label: 'Development Plan & AIP', href: '/planning', icon: Target },
         ],
       },
       {
@@ -289,24 +330,49 @@ export const ROLE_NAV = {
     ],
   },
 
-  departmentRequester: {
+  // ── Head of Office ────────────────────────────────────────────────────────
+  // Same workspace as their staff: the office prepares its budget proposal, its
+  // PPMP lines and its requisitions together. What the head adds is the
+  // endorsement — step 15 — which staff cannot perform on their own request.
+  headOfOffice: {
     brandTitle: 'Procurement Flow',
     brandSubtitle: 'Workflow Management',
-    topLinks: [
-      { label: 'Dashboard', href: '/dashboard' },
-      { label: 'Requisitions', href: '/purchase-requisitions' },
-      { label: 'Deliveries', href: '/deliveries' },
-    ],
     searchPlaceholder: 'Search PR # or Dept...',
     sections: [
-      { items: [{ label: 'Workspace', href: '/dashboard', icon: LayoutDashboard }] },
+      { items: [{ label: 'Office Head Dashboard', href: '/dashboard', icon: LayoutDashboard }] },
       {
         heading: 'Planning',
         items: [
           // An office's year starts here, not at the APP: it asks for money
           // first, and only plans procurement against what it was granted.
           { label: 'Budget Proposal', href: '/budget/preparation', icon: Landmark },
-          { label: 'Investment Program', href: '/planning', icon: ListTree },
+          { label: 'Development Plan & AIP', href: '/planning', icon: ListTree },
+          { label: 'APP Entries', href: '/app-entries', icon: ClipboardList },
+          { label: 'Purchase Requisitions', href: '/purchase-requisitions', icon: FileText },
+        ],
+      },
+      {
+        heading: 'Implementation',
+        items: [
+          { label: 'Deliveries', href: '/deliveries', icon: Truck },
+          { label: 'Pending Items', href: '/pending-items', icon: Package },
+        ],
+      },
+    ],
+  },
+  departmentRequester: {
+    brandTitle: 'Procurement Flow',
+    brandSubtitle: 'Workflow Management',
+    searchPlaceholder: 'Search PR # or Dept...',
+    sections: [
+      { items: [{ label: 'Department Dashboard', href: '/dashboard', icon: LayoutDashboard }] },
+      {
+        heading: 'Planning',
+        items: [
+          // An office's year starts here, not at the APP: it asks for money
+          // first, and only plans procurement against what it was granted.
+          { label: 'Budget Proposal', href: '/budget/preparation', icon: Landmark },
+          { label: 'Development Plan & AIP', href: '/planning', icon: ListTree },
           { label: 'APP Entries', href: '/app-entries', icon: ClipboardList },
           { label: 'Purchase Requisitions', href: '/purchase-requisitions', icon: FileText },
         ],
@@ -324,13 +390,9 @@ export const ROLE_NAV = {
   budgetOfficer: {
     brandTitle: 'Budget Office',
     brandSubtitle: 'Appropriation & Certification',
-    topLinks: [
-      { label: 'Monitor', href: '/budget' },
-      { label: 'Appropriations', href: '/budget/appropriations' },
-    ],
     searchPlaceholder: 'Search PR # or account code...',
     sections: [
-      { items: [{ label: 'Budget Monitor', href: '/budget', icon: PiggyBank }] },
+      { items: [{ label: 'Budget Dashboard', href: '/budget', icon: PiggyBank }] },
       {
         // Listed before the register because it comes before it in the year:
         // the register holds what the ordinance granted, and this is where the
@@ -338,7 +400,7 @@ export const ROLE_NAV = {
         heading: 'Preparation',
         items: [
           { label: 'Budget Preparation', href: '/budget/preparation', icon: Landmark },
-          { label: 'Investment Program', href: '/planning', icon: ListTree },
+          { label: 'Development Plan & AIP', href: '/planning', icon: ListTree },
         ],
       },
       {
@@ -368,13 +430,18 @@ export const ROLE_NAV = {
   municipalAccountant: {
     brandTitle: 'Accounting Office',
     brandSubtitle: 'Claim Certification',
-    topLinks: [
-      { label: 'Processing', href: '/finance' },
-      { label: 'Invoices', href: '/invoices' },
-    ],
     searchPlaceholder: 'Search invoice or PO #...',
     sections: [
-      { items: [{ label: 'Payment Hub', href: '/finance', icon: Banknote }] },
+      { items: [{ label: 'Accounting Dashboard', href: '/finance', icon: Banknote }] },
+      {
+        // LGC Sec. 344 — the Accountant obligates the appropriation on a
+        // requisition before it may be procured. This is the third of the
+        // section's three officers, and the Accountant previously had no
+        // requisition work at all: the Budget Officer both certified and
+        // obligated.
+        heading: 'Obligation',
+        items: [{ label: 'Requisitions to obligate', href: '/purchase-requisitions', icon: Receipt }],
+      },
       {
         heading: 'Disbursement',
         items: [{ label: 'Invoices & Vouchers', href: '/invoices', icon: Receipt }],
@@ -392,13 +459,9 @@ export const ROLE_NAV = {
   municipalTreasurer: {
     brandTitle: "Treasurer's Office",
     brandSubtitle: 'Disbursement & Release',
-    topLinks: [
-      { label: 'Releases', href: '/finance' },
-      { label: 'Vouchers', href: '/invoices' },
-    ],
     searchPlaceholder: 'Search voucher or DV #...',
     sections: [
-      { items: [{ label: 'Payment Hub', href: '/finance', icon: Banknote }] },
+      { items: [{ label: 'Treasury Dashboard', href: '/finance', icon: Banknote }] },
       {
         // LGC Sec. 344's cash certification happens here, before procurement
         // starts — not at disbursement. It is listed first because it is the
@@ -432,13 +495,9 @@ export const ROLE_NAV = {
   vendor: {
     brandTitle: 'Supplier Portal',
     brandSubtitle: 'Vendor Workspace',
-    topLinks: [
-      { label: 'Opportunities', href: '/supplier/opportunities' },
-      { label: 'Contracts', href: '/contracts' },
-    ],
     searchPlaceholder: 'Search opportunities...',
     sections: [
-      { items: [{ label: 'Supplier Home', href: '/supplier', icon: LayoutDashboard }] },
+      { items: [{ label: 'Supplier Dashboard', href: '/supplier', icon: LayoutDashboard }] },
       {
         heading: 'Bidding',
         items: [
@@ -457,16 +516,21 @@ export const ROLE_NAV = {
       // Registration". Accreditation is submitted on paper at the BAC office, so
       // that page no longer exists and the group has nothing else in it — an
       // empty heading is worse than no heading.
+      {
+        // RA 12009 Sec. 83–85 — the bidder's remedy against a decision of the
+        // BAC, and under Sec. 85 a precondition to any court action.
+        heading: 'Remedies',
+        items: [{ label: 'Protests', href: '/protests', icon: Scale }],
+      },
     ],
   },
 
   observer: {
     brandTitle: 'Transparency Portal',
     brandSubtitle: 'Public Records',
-    topLinks: [{ label: 'Published Records', href: '/transparency-portal' }],
     searchPlaceholder: 'Search published records...',
     sections: [
-      { items: [{ label: 'Overview', href: '/transparency', icon: LayoutDashboard }] },
+      { items: [{ label: 'Observer Dashboard', href: '/transparency', icon: LayoutDashboard }] },
       {
         heading: 'Published Records',
         items: [
@@ -475,19 +539,22 @@ export const ROLE_NAV = {
           { label: 'Contracts', href: '/contracts', icon: FileSignature },
         ],
       },
+      {
+        // Sec. 43 — the six stages the BAC must open to observation, the
+        // attendance record, and the observation report the IRR obliges an
+        // observer to file.
+        heading: 'Proceedings',
+        items: [{ label: 'Observed proceedings', href: '/observers', icon: Eye }],
+      },
     ],
   },
 
   internalAuditor: {
     brandTitle: 'Internal Audit',
     brandSubtitle: 'Compliance & Review',
-    topLinks: [
-      { label: 'Audit Log', href: '/audit-log' },
-      { label: 'Records', href: '/transparency-portal' },
-    ],
     searchPlaceholder: 'Search any record or actor...',
     sections: [
-      { items: [{ label: 'Audit Home', href: '/audit', icon: LayoutDashboard }] },
+      { items: [{ label: 'Audit Dashboard', href: '/audit', icon: LayoutDashboard }] },
       {
         heading: 'Audit',
         items: [
@@ -499,6 +566,8 @@ export const ROLE_NAV = {
         heading: 'Records',
         items: [
           { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe },
+          // Reports that something published looks wrong come here.
+          { label: 'Public Messages', href: '/messages', icon: Mail },
           // The auditor's questions start above procurement: was the LGU ever
           // authorised to buy this, and by whom.
           { label: 'Development Plan & AIP', href: '/planning', icon: Target },

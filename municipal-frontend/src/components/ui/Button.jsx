@@ -8,10 +8,13 @@ const VARIANTS = {
   danger: 'border border-danger/25 bg-danger/10 text-danger hover:bg-danger/15',
 }
 
+// One notch up across the board. At h-8/12px a primary action was smaller than
+// the text beside it, and on touch it was under the 44px comfortable target by
+// a long way.
 const SIZES = {
-  sm: 'h-7 gap-1.5 px-2.5 text-[11px]',
-  md: 'h-8 gap-2 px-3 text-[12px]',
-  lg: 'h-9 gap-2 px-4 text-[13px]',
+  sm: 'h-8 gap-1.5 px-3 text-[12px]',
+  md: 'h-9.5 gap-2 px-4 text-[13px]',
+  lg: 'h-11 gap-2 px-5 text-[14px]',
 }
 
 export default function Button({

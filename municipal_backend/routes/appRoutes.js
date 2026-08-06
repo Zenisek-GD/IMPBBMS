@@ -5,6 +5,8 @@ import {
   updateAppEntry,
   transitionAppEntry,
   getModeSuggestion,
+  recordGppbSubmission,
+  contingencyStatus,
 } from "../controllers/appEntryController.js";
 import { requirePermission, requireAnyPermission } from "../middleware/permissionMiddleware.js";
 
@@ -35,5 +37,10 @@ router.post(
   ),
   transitionAppEntry
 );
+
+// IRR Sec. 7.7 — the 4% MOOE lump sum for foreseeable emergencies, and the
+// submission of the approved APP to the GPPB by the end of January.
+router.get("/contingency", requireAnyPermission("app.view", "app.consolidate"), contingencyStatus);
+router.post("/gppb-submission", requirePermission("app.consolidate"), recordGppbSubmission);
 
 export default router;

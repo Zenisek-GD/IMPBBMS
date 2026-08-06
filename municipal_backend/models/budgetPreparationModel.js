@@ -103,6 +103,20 @@ export const ExecutiveBudget = sequelize.define(
     estimatedIncome: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
     expenditureCeiling: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
 
+    // ── The figures the LGC general limitations are measured against ─────────
+    // Sec. 325(a) caps Personal Services against the NEXT PRECEDING year's
+    // income from regular sources — not this year's estimate — so it is a
+    // separate figure the Finance Committee records. Sec. 324(b) measures the
+    // 20% Development Fund against the National Tax Allotment (formerly the
+    // IRA). Without these two the caps cannot be computed at all.
+    regularIncomePriorYear: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
+    nationalTaxAllotment: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
+
+    // Findings raised at finalisation against Sec. 324(b), 324(d) and 325(a).
+    // Carried on the budget so the Mayor and the Sanggunian see them before
+    // they act, rather than discovering them in a COA report next year.
+    limitationFindings: { type: DataTypes.JSON, allowNull: true },
+
     // The growth cap the committee applies to each office's previous
     // appropriation. The municipality's practice is "in some cases only a 5%
     // increase", so this is a stored per-budget figure rather than a constant,
@@ -190,6 +204,12 @@ Department.hasMany(BudgetProposal, { foreignKey: "departmentId" });
 BudgetProposal.belongsTo(User, { as: "preparedBy", foreignKey: "preparedById" });
 
 export const BudgetProposalLine = sequelize.define("BudgetProposalLine", {
+    // LGC Sec. 324(b) and 324(d) — the two statutory earmarks. Flagged on the
+    // line rather than inferred from the title, because "Development Fund" in
+    // a description is prose and this has to be arithmetic.
+    isDevelopmentFund: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    isLdrrmf: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+
   title: { type: DataTypes.STRING, allowNull: false },
   expenseClass: { type: DataTypes.ENUM(...EXPENSE_CLASSES), allowNull: false, defaultValue: "mooe" },
   fund: { type: DataTypes.ENUM(...FUNDS), allowNull: false, defaultValue: "generalFund" },

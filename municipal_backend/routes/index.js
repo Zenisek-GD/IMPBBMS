@@ -31,11 +31,14 @@ import userRoutes from "./userRoutes.js";
 import departmentRoutes from "./departmentRoutes.js";
 import planningRoutes from "./planningRoutes.js";
 import budgetPreparationRoutes from "./budgetPreparationRoutes.js";
+import messageRoutes from "./messageRoutes.js";
 import appRoutes from "./appRoutes.js";
 import prRoutes from "./prRoutes.js";
 import settingsRoutes from "./settingsRoutes.js";
 import vendorRoutes from "./vendorRoutes.js";
 import biddingRoutes from "./biddingRoutes.js";
+import observerRoutes from "./observerRoutes.js";
+import protestRoutes from "./protestRoutes.js";
 import notificationRoutes from "./notificationRoutes.js";
 import contractRoutes from "./contractRoutes.js";
 import conferenceRoutes from "./conferenceRoutes.js";
@@ -73,12 +76,21 @@ router.use("/api/departments", departmentRoutes);
 // APP authorises the requisition.
 router.use("/api/planning", planningRoutes);
 router.use("/api/budget-preparation", budgetPreparationRoutes);
+// Messages the public sent in. Not under /api/public — reading and answering
+// them is an officer's job, and the write half lives on the public router.
+router.use("/api/messages", messageRoutes);
 
 router.use("/api/app-entries", appRoutes);
 router.use("/api/purchase-requisitions", prRoutes);
 router.use("/api/settings", settingsRoutes);
 router.use("/api/vendors", vendorRoutes);
 router.use("/api/bidding", biddingRoutes);
+
+// The two transparency and remedy mechanisms RA 12009 attaches to bidding:
+// observers who sit in on the proceedings (Sec. 43), and the protest route a
+// losing bidder must exhaust before any court will hear them (Sec. 83–85).
+router.use("/api/observers", observerRoutes);
+router.use("/api/protests", protestRoutes);
 router.use("/api/notifications", notificationRoutes);
 router.use("/api/contracts", contractRoutes);
 router.use("/api/conferences", conferenceRoutes);

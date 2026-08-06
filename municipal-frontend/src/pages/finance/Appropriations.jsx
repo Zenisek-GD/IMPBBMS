@@ -12,7 +12,9 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 // The appropriation register — the Appropriation Ordinance as the system holds
 // it. Everything else in the budget module is measured against these rows, so
@@ -218,10 +220,37 @@ export default function Appropriations() {
     { amount: 0, programmed: 0, obligated: 0, available: 0 }
   )
 
-  // Two independent tables on one page, so each keeps its own page position —
-  // paging the ordinance lines must not scroll the obligation register.
-  const { pageRows: linePage, paginationProps: lineProps } = usePagination(rows)
-  const { pageRows: obligationPage, paginationProps: obligationProps } = usePagination(obligations)
+  // Two independent tables on one page, so each keeps its own controls and its
+  // own page position — searching the ordinance lines must not disturb the
+  // obligation register, and paging one must not scroll the other. Every money
+  // column sorts on the raw number rather than the formatted peso string.
+  const lineTable = useTableControls(rows, {
+    searchKeys: ['ordinanceNo', 'title', 'papCode', 'departmentName', 'fundLabel', 'expenseClassLabel'],
+    filters: [
+      { key: 'fundLabel', label: 'All funds' },
+      { key: 'expenseClassLabel', label: 'All expense classes' },
+      { key: 'departmentName', label: 'All offices' },
+      { key: 'status', label: 'All statuses' },
+    ],
+    accessors: {
+      amount: (row) => Number(row.amount ?? 0),
+      programmed: (row) => Number(row.programmed ?? 0),
+      obligated: (row) => Number(row.obligated ?? 0),
+      available: (row) => Number(row.available ?? 0),
+    },
+  })
+
+  const obligationTable = useTableControls(obligations, {
+    searchKeys: ['obligationNo', 'prNumber', 'appropriationTitle', 'ordinanceNo', 'certifiedByName'],
+    filters: [
+      { key: 'status', label: 'All statuses' },
+      { key: 'certifiedByName', label: 'All certifying officers' },
+    ],
+    accessors: { amount: (row) => Number(row.amount ?? 0) },
+  })
+
+  const { pageRows: linePage, paginationProps: lineProps } = lineTable
+  const { pageRows: obligationPage, paginationProps: obligationProps } = obligationTable
 
   return (
     <DashboardPage>
@@ -273,25 +302,31 @@ export default function Appropriations() {
 
       {tab === 'appropriations' ? (
         <Card title="Appropriation Lines" icon={Landmark} bodyClassName="">
-          {rows.length === 0 ? (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar
+              {...lineTable.toolbarProps}
+              searchPlaceholder="Search ordinance, title, PAP code or office…"
+            />
+          </div>
+          {lineTable.rows.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-              No appropriation lines recorded yet.
+              {lineTable.totalBeforeFilters === 0
+                ? 'No appropriation lines recorded yet.'
+                : 'No appropriation lines match your search or filters.'}
             </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-sidebar">
                   <tr>
-                    {['Line', 'Fund / Class', 'Office', 'Appropriated', 'Programmed', 'Obligated', 'Available', 'Status'].map(
-                      (head) => (
-                        <th
-                          key={head}
-                          className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                        >
-                          {head}
-                        </th>
-                      )
-                    )}
+                    <SortableTh {...lineTable.sortProps('ordinanceNo')}>Line</SortableTh>
+                    <SortableTh {...lineTable.sortProps('fundLabel')}>Fund / Class</SortableTh>
+                    <SortableTh {...lineTable.sortProps('departmentName')}>Office</SortableTh>
+                    <SortableTh {...lineTable.sortProps('amount')}>Appropriated</SortableTh>
+                    <SortableTh {...lineTable.sortProps('programmed')}>Programmed</SortableTh>
+                    <SortableTh {...lineTable.sortProps('obligated')}>Obligated</SortableTh>
+                    <SortableTh {...lineTable.sortProps('available')}>Available</SortableTh>
+                    <SortableTh {...lineTable.sortProps('status')}>Status</SortableTh>
                   </tr>
                 </thead>
                 <tbody>
@@ -330,24 +365,30 @@ export default function Appropriations() {
         </Card>
       ) : (
         <Card title="Obligation Register" icon={Scale} bodyClassName="">
-          {obligations.length === 0 ? (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar
+              {...obligationTable.toolbarProps}
+              searchPlaceholder="Search ORS, requisition or appropriation…"
+            />
+          </div>
+          {obligationTable.rows.length === 0 ? (
             <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-              No obligations raised yet. An Obligation Request is created when the Budget Officer certifies a
-              requisition.
+              {obligationTable.totalBeforeFilters === 0
+                ? 'No obligations raised yet. An Obligation Request is created when the Budget Officer certifies a requisition.'
+                : 'No obligations match your search or filters.'}
             </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-sidebar">
                   <tr>
-                    {['ORS No.', 'Requisition', 'Charged to', 'Amount', 'Certified by', 'Date', 'Status'].map((head) => (
-                      <th
-                        key={head}
-                        className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                      >
-                        {head}
-                      </th>
-                    ))}
+                    <SortableTh {...obligationTable.sortProps('obligationNo')}>ORS No.</SortableTh>
+                    <SortableTh {...obligationTable.sortProps('prNumber')}>Requisition</SortableTh>
+                    <SortableTh {...obligationTable.sortProps('appropriationTitle')}>Charged to</SortableTh>
+                    <SortableTh {...obligationTable.sortProps('amount')}>Amount</SortableTh>
+                    <SortableTh {...obligationTable.sortProps('certifiedByName')}>Certified by</SortableTh>
+                    <SortableTh {...obligationTable.sortProps('certifiedAt')}>Date</SortableTh>
+                    <SortableTh {...obligationTable.sortProps('status')}>Status</SortableTh>
                   </tr>
                 </thead>
                 <tbody>

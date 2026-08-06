@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+@import "tailwindcss";
 
 /* Dark mode is driven by a class on <html>, not by the OS query alone — the
    theme belongs to the signed-in account, so the app has to be able to force it
@@ -63,6 +63,11 @@
   --color-chip: #1d2620;
   --color-track: #29312c;
 
+  /* Lifted for the same reason as the status colours below — the light-mode
+     slate blue disappears against a near-black surface. */
+  --color-info: #58b6e0;
+  --color-info-soft: #10303f;
+
   /* Lifted, not darkened: the status colours have to carry on a dark surface,
      and the light-mode versions fail contrast against it. */
   --color-success: #4ade80;
@@ -101,15 +106,27 @@
   --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
 
-  /* WHITE, not grey. The page and the cards sit on the same white and are
-     separated by hairline borders instead of a tonal step — which is why
-     `border-border-muted` is not optional on a card any more. The two places
-     that still need a fill (table headers, hover rows) use `sidebar`, which is
-     barely off-white rather than grey. */
-  --color-canvas: #ffffff;
+  /* ── A TINTED PAGE, WHITE CARDS ─────────────────────────────────────────
+     The page and the cards used to share one white, separated only by a
+     hairline. That is what made the interface read as "mostly white": with no
+     tonal step, a card was not an object sitting on a page, it was a rectangle
+     drawn on the same sheet.
+
+     Every reference does the opposite — a soft page with white cards floating
+     on it — and it is the single change that does most of the work.
+
+     Kept deliberately faint. The interface should still read as white and
+     clean; this is only enough of a step for a card to have an edge without a
+     drawn border doing all of it. A stronger tint was tried and made the app
+     look grey rather than minimal.
+
+     `sidebar` stays as the secondary fill for table header bands and hover
+     rows, and sits between the two so it still reads as a band inside a white
+     card. */
+  --color-canvas: #f4f6f5;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
-  --color-sidebar: #f6f8f7;
+  --color-sidebar: #f7f9f8;
 
   /* Firmer than they would be on a tinted page. With canvas and surface sharing
      one white, the hairline IS the edge of a card — at the old #e4e8e6 it fell to
@@ -159,24 +176,49 @@
   --color-header-muted: #eaf7ef;
 
   --color-chip: #dcfce7;
-  --color-track: #e8ecea;
+  --color-track: #e0e6e3;
   --color-success: #15803d;
   --color-warning: #b45309;
   --color-danger: #b42318;
 
-  /* Softer, more generous corners than the original — the single biggest
-     contributor to the reference's feel. */
-  --radius-sm: 0.375rem;
-  --radius-DEFAULT: 0.625rem;
-  --radius-md: 0.625rem;
-  --radius-lg: 0.875rem;
-  --radius-xl: 1.125rem;
+  /* ── THE SECOND COLOUR ──────────────────────────────────────────────────
+     Green is the LGU's, and it stays the brand: primary buttons, the public
+     header, success. But when one hue carries the brand AND every state, an
+     interface has nothing left to point with — which is why this one drained
+     towards white and grey.
 
-  --shadow-sm: 0 1px 2px rgba(16, 20, 28, 0.04);
-  --shadow-DEFAULT: 0 1px 2px rgba(16, 20, 28, 0.04), 0 6px 16px -6px rgba(16, 20, 28, 0.1);
-  --shadow-md: 0 1px 2px rgba(16, 20, 28, 0.04), 0 6px 16px -6px rgba(16, 20, 28, 0.1);
-  --shadow-lg: 0 2px 4px rgba(16, 20, 28, 0.05), 0 18px 40px -12px rgba(16, 20, 28, 0.18);
-  --shadow-xl: 0 2px 4px rgba(16, 20, 28, 0.05), 0 18px 40px -12px rgba(16, 20, 28, 0.18);
+     This slate blue is the counterweight, and it is deliberately quiet. It is
+     for *detail* and it is rationed: informational notes, a secondary series on
+     a chart, the occasional marker. It is never a primary action — that stays
+     green — and it never signals success, warning or danger, which already have
+     their own colours.
+
+     Rationed means rationed. It does not belong on every card heading or every
+     icon; an accent that appears everywhere is not an accent, and the point of
+     this interface is that it stays white, clean and quiet.
+
+     #0e6d9c holds 4.9:1 on white, so it is safe for the small text it will
+     mostly appear on. `-soft` is its tint for filled chips and icon wells. */
+  --color-info: #0e6d9c;
+  --color-info-soft: #e2f1f9;
+
+  /* Softer, more generous corners — with the page now tinted, a card is an
+     object rather than a drawn rectangle, and objects in the references are
+     rounded more than this was. Every step goes up roughly one notch. */
+  --radius-sm: 0.5rem;
+  --radius-DEFAULT: 0.75rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  /* Diffuse rather than tight. On a tinted page a card is lifted by the spread
+     of its shadow, not by the darkness of its edge — a hard shadow against a
+     soft background reads as a sticker. */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 20, 0.04), 0 2px 8px -4px rgba(16, 24, 20, 0.06);
+  --shadow-DEFAULT: 0 1px 2px rgba(16, 24, 20, 0.04), 0 8px 24px -10px rgba(16, 24, 20, 0.12);
+  --shadow-md: 0 1px 2px rgba(16, 24, 20, 0.04), 0 8px 24px -10px rgba(16, 24, 20, 0.12);
+  --shadow-lg: 0 2px 4px rgba(16, 24, 20, 0.05), 0 24px 48px -16px rgba(16, 24, 20, 0.18);
+  --shadow-xl: 0 2px 4px rgba(16, 24, 20, 0.05), 0 32px 64px -20px rgba(16, 24, 20, 0.22);
 }
 
 /* The page background is painted on <html>, not <body>.
@@ -199,11 +241,13 @@ html {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  /* 13px base. The interface is dense by design — a procurement officer scans
-     tables all day, and the previous 14–16px scale pushed half of every table
-     off-screen. */
-  font-size: 13px;
-  line-height: 1.5;
+  /* 14px base. This was 13px on the argument that an officer scanning tables
+     all day wants density — which is true of the tables and was applied to the
+     whole application, including the headings, the cards and the dialogs. The
+     result read as cramped rather than efficient.
+     Tables keep their own smaller sizes; everything else breathes. */
+  font-size: 14px;
+  line-height: 1.55;
   color: inherit;
   background: transparent;
   -webkit-font-smoothing: antialiased;
@@ -280,6 +324,44 @@ select option {
 
    All of it sits on the brand colour, which stays dark in both themes, so none
    of it needs a light and dark variant. */
+
+/* ── The public portal's page texture ────────────────────────────────────────
+   A faint dot field behind the landing page. It does the same job the tinted
+   canvas does inside the application — stops a very light page reading as an
+   empty sheet — but at a scale that survives being seen at arm's length on a
+   phone. Deliberately weak: at any strength you can actually *notice* it starts
+   competing with the cards sitting on it.
+
+   It sits on the canvas colour rather than replacing it, so the light and dark
+   themes both work from one definition. */
+.pattern-dots {
+  background-image: radial-gradient(var(--color-border-muted) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+
+/* ── Glass ───────────────────────────────────────────────────────────────────
+   The floating header and its nav pill. Translucency plus a blur, so the page
+   scrolling underneath is felt rather than seen — the effect only reads as glass
+   if there is something behind it to diffuse, which is what the dot field above
+   provides.
+
+   `saturate` matters more than it looks: a plain blur over a near-white page
+   leaves the glass looking grey and dead, and lifting saturation puts the colour
+   back into whatever is showing through. */
+.glass {
+  background-color: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+}
+
+/* Safari and Firefox without backdrop-filter would render the bar as a
+   half-transparent white slab with text sliding under it. Fall back to opaque. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background-color: var(--color-surface);
+  }
+}
 
 /* A fine engineering grid. Barely visible on its own; what it does is stop a
    large dark panel reading as an empty rectangle. */

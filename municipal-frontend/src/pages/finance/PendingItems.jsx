@@ -10,7 +10,9 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) =>
   value === null ? '—' : `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
@@ -103,9 +105,28 @@ export default function PendingItems() {
 
   const canResolve = permissions.hasAny('pr.review', 'bidding.publish')
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(items)
+  // Aging sorts numerically, so "what has been sitting here longest" is one
+  // click — which is the whole reason this queue exists.
+  const table = useTableControls(items, {
+    searchKeys: ['description', 'prNumber', 'departmentCode', 'notes'],
+    filters: [
+      {
+        key: 'reason',
+        label: 'All reasons',
+        options: Object.entries(PENDING_REASON_LABELS).map(([value, label]) => ({ value, label })),
+      },
+      { key: 'priority', label: 'All priorities' },
+      { key: 'departmentCode', label: 'All offices' },
+    ],
+    accessors: {
+      quantity: (item) => (item.quantity == null ? null : Number(item.quantity)),
+      estimatedCost: (item) => Number(item.estimatedCost ?? 0),
+      agingDays: (item) => Number(item.agingDays ?? 0),
+      reason: (item) => PENDING_REASON_LABELS[item.reason] ?? item.reason,
+    },
+    initialSort: { key: 'agingDays', direction: 'desc' },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -134,25 +155,33 @@ export default function PendingItems() {
       </Card>
 
       <Card title={showResolved ? 'Resolved' : 'Outstanding'} icon={Package} bodyClassName="">
-        {items.length === 0 ? (
+        {items.length > 0 && (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar {...table.toolbarProps} searchPlaceholder="Search item, PR number or office…" />
+          </div>
+        )}
+        {table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {showResolved ? 'Nothing resolved yet.' : 'Nothing outstanding — the queue is clear.'}
+            {table.totalBeforeFilters === 0
+              ? showResolved
+                ? 'Nothing resolved yet.'
+                : 'Nothing outstanding — the queue is clear.'
+              : 'No items match your search or filters.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Item', 'PR', 'Unit', 'Qty', 'Est. Cost', 'Reason', 'Aging', 'Priority', 'Actions'].map(
-                    (head) => (
-                      <th
-                        key={head}
-                        className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                      >
-                        {head}
-                      </th>
-                    )
-                  )}
+                  <SortableTh {...table.sortProps('description')}>Item</SortableTh>
+                  <SortableTh {...table.sortProps('prNumber')}>PR</SortableTh>
+                  <SortableTh {...table.sortProps('departmentCode')}>Unit</SortableTh>
+                  <SortableTh {...table.sortProps('quantity')}>Qty</SortableTh>
+                  <SortableTh {...table.sortProps('estimatedCost')}>Est. Cost</SortableTh>
+                  <SortableTh {...table.sortProps('reason')}>Reason</SortableTh>
+                  <SortableTh {...table.sortProps('agingDays')}>Aging</SortableTh>
+                  <SortableTh {...table.sortProps('priority')}>Priority</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>

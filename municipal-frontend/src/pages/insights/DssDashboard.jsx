@@ -8,6 +8,10 @@ import Card from '../../components/ui/Card'
 import StatCard from '../../components/ui/StatCard'
 import Badge from '../../components/ui/Badge'
 import ProgressRow from '../../components/ui/ProgressRow'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { maximumFractionDigits: 0 })}`
 
@@ -26,6 +30,26 @@ export default function DssDashboard() {
       cancelled = true
     }
   }, [])
+
+  // Called before the loading return below, because hooks cannot sit after an
+  // early exit. `data?.departmentFlags` is undefined until the fetch lands,
+  // which the hook treats as an empty set.
+  const flagTable = useTableControls(data?.departmentFlags, {
+    searchKeys: ['code', 'name'],
+    filters: [
+      {
+        key: 'flag',
+        label: 'All flags',
+        options: Object.entries(FLAG_LABELS).map(([value, label]) => ({ value, label })),
+      },
+    ],
+    accessors: {
+      allocated: (row) => Number(row.allocated ?? 0),
+      committed: (row) => Number(row.committed ?? 0),
+      utilisationRatio: (row) => Number(row.utilisationRatio ?? 0),
+      flag: (row) => FLAG_LABELS[row.flag] ?? row.flag,
+    },
+  })
 
   if (!data) {
     return (
@@ -112,27 +136,31 @@ export default function DssDashboard() {
       </div>
 
       <Card title="Department Allocation Flags" icon={AlertTriangle} bodyClassName="">
-        {data.departmentFlags.length === 0 ? (
+        {data.departmentFlags.length > 0 && (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar {...flagTable.toolbarProps} searchPlaceholder="Search department…" />
+          </div>
+        )}
+        {flagTable.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            No approved APP entries this fiscal year.
+            {flagTable.totalBeforeFilters === 0
+              ? 'No approved APP entries this fiscal year.'
+              : 'No departments match your search or filters.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Department', 'Allocated', 'Committed', 'Utilisation', 'Flag'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...flagTable.sortProps('code')}>Department</SortableTh>
+                  <SortableTh {...flagTable.sortProps('allocated')}>Allocated</SortableTh>
+                  <SortableTh {...flagTable.sortProps('committed')}>Committed</SortableTh>
+                  <SortableTh {...flagTable.sortProps('utilisationRatio')}>Utilisation</SortableTh>
+                  <SortableTh {...flagTable.sortProps('flag')}>Flag</SortableTh>
                 </tr>
               </thead>
               <tbody>
-                {data.departmentFlags.map((row) => (
+                {flagTable.pageRows.map((row) => (
                   <tr key={row.departmentId} className="border-t border-border-muted">
                     <td className="px-4 py-3 text-[13px]">
                       <span className="font-mono text-xs text-navy">{row.code}</span>
@@ -149,6 +177,9 @@ export default function DssDashboard() {
               </tbody>
             </table>
           </div>
+        )}
+        {flagTable.rows.length > 0 && (
+          <Pagination {...flagTable.paginationProps} label="departments" />
         )}
       </Card>
 

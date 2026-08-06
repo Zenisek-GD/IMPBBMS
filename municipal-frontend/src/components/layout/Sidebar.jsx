@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, User, LogOut, UserCircle } from 'lucide-react'
+import { useAuth } from '../../context/useAuth'
 
 // Shared sidebar shell used by every role. Content (title, nav sections) is
 // passed in per role from src/config/navigation.js so the chrome stays
@@ -9,11 +10,36 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 // entirely: navigation stays one click away and the muscle memory of item
 // position survives. The collapsed state is stored on the account, so it
 // follows the user rather than the browser.
-export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle }) {
+//
+// ── THE ACCOUNT FOOTER ──────────────────────────────────────────────────────
+// Profile and sign-out used to live in a dropdown in the top bar, which made
+// them the only two destinations in the application that were not in the rail.
+// They are navigation like everything else, so they are here, pinned to the
+// bottom where an account block is conventionally looked for.
+
+const initialsOf = (name = '') =>
+  name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('')
+
+const itemClass = (collapsed, isActive) =>
+  `flex items-center gap-3 rounded-md text-[13px] font-medium transition-colors ${
+    collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
+  } ${isActive ? 'bg-navy-tint text-navy' : 'text-text-secondary hover:bg-navy-tint/60 hover:text-navy'}`
+
+export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle, onLogout }) {
+  const { user } = useAuth()
+
   return (
     <aside
-      className={`flex h-full shrink-0 flex-col border-r border-border-muted bg-sidebar transition-[width] duration-200 ${
-        collapsed ? 'w-14' : 'w-56'
+      // White, now that the page behind the content is faintly tinted — the rail
+      // reads as its own panel rather than as a slightly different grey next to
+      // another grey.
+      className={`flex h-full shrink-0 flex-col border-r border-border-muted bg-surface transition-[width] duration-200 ${
+        collapsed ? 'w-15' : 'w-60'
       }`}
     >
       <div
@@ -23,8 +49,8 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
       >
         {!collapsed && (
           <div className="min-w-0">
-            <h1 className="truncate text-[13px] font-semibold text-navy">{brandTitle}</h1>
-            <p className="truncate text-[11px] text-text-faint">{brandSubtitle}</p>
+            <h1 className="truncate text-[14px] font-semibold text-navy">{brandTitle}</h1>
+            <p className="truncate text-[11.5px] text-text-faint">{brandSubtitle}</p>
           </div>
         )}
         <button
@@ -59,15 +85,7 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
                   // screen — without it a collapsed rail is a column of
                   // unlabelled icons.
                   title={collapsed ? item.label : undefined}
-                  className={({ isActive }) =>
-                    `flex items-center gap-2.5 rounded-md text-[12px] font-medium transition-colors ${
-                      collapsed ? 'justify-center px-0 py-2' : 'px-2.5 py-2'
-                    } ${
-                      isActive
-                        ? 'bg-navy-tint text-navy'
-                        : 'text-text-secondary hover:bg-navy-tint/60 hover:text-navy'
-                    }`
-                  }
+                  className={({ isActive }) => itemClass(collapsed, isActive)}
                 >
                   <item.icon size={15} strokeWidth={2} className="shrink-0" />
                   {!collapsed && <span className="truncate">{item.label}</span>}
@@ -77,6 +95,43 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
           </div>
         ))}
       </nav>
+
+      <div className="shrink-0 border-t border-border-muted p-2">
+        {!collapsed && (
+          <div className="mb-1.5 flex items-center gap-2.5 px-1.5 py-1.5">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-accent-fg">
+              {initialsOf(user?.name) || <UserCircle size={16} />}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-[12px] font-semibold text-navy">{user?.name}</p>
+              <p className="truncate text-[11px] text-text-faint">{user?.roleName}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-0.5">
+          <NavLink
+            to="/profile"
+            title={collapsed ? 'My Profile' : undefined}
+            className={({ isActive }) => itemClass(collapsed, isActive)}
+          >
+            <User size={15} strokeWidth={2} className="shrink-0" />
+            {!collapsed && <span className="truncate">My Profile</span>}
+          </NavLink>
+
+          <button
+            type="button"
+            onClick={onLogout}
+            title={collapsed ? 'Log out' : undefined}
+            className={`flex items-center gap-2.5 rounded-md text-[12px] font-medium text-danger transition-colors hover:bg-danger/10 ${
+              collapsed ? 'justify-center px-0 py-2' : 'px-2.5 py-2'
+            }`}
+          >
+            <LogOut size={15} strokeWidth={2} className="shrink-0" />
+            {!collapsed && <span className="truncate">Log out</span>}
+          </button>
+        </div>
+      </div>
     </aside>
   )
 }

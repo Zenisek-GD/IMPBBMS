@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
+import { LogOut } from 'lucide-react'
 import Sidebar from '../components/layout/Sidebar'
 import TopNavBar from '../components/layout/TopNavBar'
-import { ProfileModal, ChangePasswordModal } from '../components/layout/ProfileModals'
+import Modal from '../components/ui/Modal'
+import Button from '../components/ui/Button'
 import { ROLE_NAV } from '../config/navigation'
 import { useAuth } from '../context/useAuth'
 import { fetchSettings } from '../api/settings'
@@ -16,8 +18,26 @@ export default function AppShell() {
   const nav = ROLE_NAV[user?.role] ?? ROLE_NAV.departmentRequester
 
   const [lguName, setLguName] = useState('')
-  const [showProfile, setShowProfile] = useState(false)
-  const [showChangePassword, setShowChangePassword] = useState(false)
+  const [confirmingLogout, setConfirmingLogout] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+
+  // `logout` clears the local session whether or not the server answers, so this
+  // always ends with the shell unmounting — which is the behaviour that was
+  // missing. If the server could not be reached the session cookie is httpOnly
+  // and cannot be cleared here, so the sign-in screen is told to say so rather
+  // than let the officer believe the session was ended everywhere.
+  const signOut = useCallback(async () => {
+    setSigningOut(true)
+    const serverConfirmed = await logout()
+    if (!serverConfirmed) {
+      try {
+        sessionStorage.setItem('logout.serverUnreachable', '1')
+      } catch {
+        // Private-mode browsers refuse sessionStorage; the sign-out itself has
+        // already happened, so losing the notice is not worth failing over.
+      }
+    }
+  }, [logout])
 
   // Seeded from the account, so the rail opens the way this user last left it
   // — on whatever machine they sign in from.
@@ -53,14 +73,7 @@ export default function AppShell() {
 
   return (
     <div className="flex h-screen flex-col bg-canvas">
-      <TopNavBar
-        links={nav.topLinks}
-        searchPlaceholder={nav.searchPlaceholder}
-        onLogout={logout}
-        onOpenProfile={() => setShowProfile(true)}
-        onOpenChangePassword={() => setShowChangePassword(true)}
-        lguName={lguName}
-      />
+      <TopNavBar searchPlaceholder={nav.searchPlaceholder} lguName={lguName} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           brandTitle={nav.brandTitle}
@@ -68,14 +81,45 @@ export default function AppShell() {
           sections={nav.sections}
           collapsed={collapsed}
           onToggle={toggleSidebar}
+          onLogout={() => setConfirmingLogout(true)}
         />
         <main className="flex-1 overflow-y-auto bg-canvas">
           <Outlet />
         </main>
       </div>
 
-      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
+      {/* Signing out used to happen on the first click, which in a system where
+          half the screens hold half-finished work is a keystroke away from
+          losing it. */}
+      {confirmingLogout && (
+        <Modal
+          title="Sign out"
+          size="sm"
+          // Not dismissable mid-request: closing the dialog while the call is in
+          // flight would leave the officer looking at a signed-in shell that is
+          // about to sign itself out from under them.
+          onClose={() => !signingOut && setConfirmingLogout(false)}
+        >
+          <div className="flex flex-col gap-4">
+            <p className="text-[13px] leading-relaxed text-text-secondary">
+              You will be signed out of this session. Anything you have typed but not saved will be
+              lost.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                disabled={signingOut}
+                onClick={() => setConfirmingLogout(false)}
+              >
+                Stay signed in
+              </Button>
+              <Button variant="danger" icon={LogOut} disabled={signingOut} onClick={signOut}>
+                {signingOut ? 'Signing out…' : 'Sign out'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

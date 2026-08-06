@@ -13,7 +13,9 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 // Where the BAC Secretariat (and the administrator, for system notices) writes
 // what appears on the public portal.
@@ -61,6 +63,110 @@ const formatDateTime = (value) =>
       })
     : '—'
 
+// ── SETTING A DEADLINE WITHOUT TYPING ONE ────────────────────────────────────
+// A bare <input type="datetime-local"> was the whole control. It is precise and
+// it is miserable: an officer posting a call that closes in a fortnight had to
+// work out the date, then tab through four segments to enter it, then trust that
+// what they typed meant what they thought.
+//
+// The presets are how the deadline actually gets chosen — "two weeks from now,
+// end of the working day" — and the echo underneath says, in words, what the
+// machine understood. The raw input stays for the cases the presets miss.
+
+// 5pm local. A registration deadline at 00:00 closes the day *before* the one
+// the officer means, which is exactly the off-by-one a call for bidders cannot
+// afford.
+const inDays = (days) => {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  date.setHours(17, 0, 0, 0)
+  return toLocalInput(date)
+}
+
+const DEADLINE_PRESETS = [
+  { label: '7 days', days: 7 },
+  { label: '14 days', days: 14 },
+  { label: '30 days', days: 30 },
+]
+
+// "Friday, 27 Feb 2026 at 5:00 PM · 12 days from now"
+//
+// Counted in whole calendar days, not elapsed hours. Rounding the difference in
+// milliseconds made the "14 days" preset read back as "15 days from now" — the
+// preset lands at 5pm, so from an early-morning now it is 14.6 elapsed days, and
+// a button whose label disagrees with the sentence under it is worse than no
+// sentence at all.
+const describeDeadline = (localValue) => {
+  if (!localValue) return null
+  const date = new Date(localValue)
+  if (Number.isNaN(date.getTime())) return null
+
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((midnight(date) - midnight(new Date())) / 86400000)
+  const when = date.toLocaleString('en-PH', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+  const relative =
+    days < 0 ? 'in the past' : days === 0 ? 'today' : `${days} day${days === 1 ? '' : 's'} from now`
+  return { when, relative, past: days < 0 }
+}
+
+function DeadlineField({ label, value, onChange, error, hint, name }) {
+  const described = describeDeadline(value)
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-[12.5px] font-medium text-text-secondary">{label}</label>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="datetime-local"
+          name={name}
+          value={value ?? ''}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-9.5 min-w-52 flex-1 rounded-md border border-border-muted bg-surface px-3 text-[13px] text-navy focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none"
+        />
+        {DEADLINE_PRESETS.map((preset) => (
+          <button
+            key={preset.days}
+            type="button"
+            onClick={() => onChange(inDays(preset.days))}
+            className="h-9.5 rounded-md border border-border-muted px-3 text-[12.5px] font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-navy"
+          >
+            {preset.label}
+          </button>
+        ))}
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="h-9.5 rounded-md px-2.5 text-[12.5px] text-text-faint transition-colors hover:text-danger"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {described && (
+        <p
+          className={`mt-2 text-[12.5px] ${described.past ? 'text-danger' : 'text-text-secondary'}`}
+        >
+          {described.when} <span className="text-text-faint">· {described.relative}</span>
+        </p>
+      )}
+      {error && <p className="mt-1 text-[12px] text-danger">{error}</p>}
+      {!described && hint && (
+        <p className="mt-1.5 text-[12px] leading-relaxed text-text-faint">{hint}</p>
+      )}
+    </div>
+  )
+}
+
 const announcementSchema = z
   .object({
     title: z.string().trim().min(1, 'A title is required').max(200, 'Title is too long'),
@@ -94,18 +200,36 @@ const announcementSchema = z
     }
   })
 
+// Module scope: a component declared inside a render is a new type every pass,
+// which remounts its whole subtree instead of updating it — and in a form that
+// means every field loses focus as you type.
+const Section = ({ heading, note, children }) => (
+  <section className="border-t border-border-muted pt-5 first:border-0 first:pt-0">
+    <p className="text-[11.5px] font-medium tracking-[0.05em] text-text-faint uppercase">{heading}</p>
+    {note && <p className="mt-1 text-[12.5px] leading-relaxed text-text-faint">{note}</p>}
+    <div className="mt-3.5 flex flex-col gap-4">{children}</div>
+  </section>
+)
+
 function AnnouncementFormModal({ title, defaultValues, onSubmit, onClose }) {
   const [serverError, setServerError] = useState('')
   const {
     register,
     handleSubmit,
     control,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({ resolver: zodResolver(announcementSchema), defaultValues, mode: 'onBlur' })
 
   // `useWatch` rather than the form's own `watch()`: the latter returns a fresh
   // function each render, which the React Compiler cannot memoize safely.
   const deadline = useWatch({ control, name: 'registrationDeadline' })
+  const expiresAt = useWatch({ control, name: 'expiresAt' })
+
+  // The two date fields are driven rather than registered, because the preset
+  // buttons write to them from outside the input.
+  const setDate = (field) => (next) =>
+    setValue(field, next, { shouldValidate: true, shouldDirty: true })
 
   const submit = async (values) => {
     setServerError('')
@@ -127,100 +251,96 @@ function AnnouncementFormModal({ title, defaultValues, onSubmit, onClose }) {
     'w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none'
 
   return (
-    <Modal title={title} onClose={onClose}>
-      <form onSubmit={handleSubmit(submit)} noValidate className="flex flex-col gap-4">
-        <FormField label="Title" error={errors.title?.message} registration={register('title')} />
+    // Two columns at `lg`, so the form is about half as tall as it was. It was
+    // one column of seven stacked fields, which is what made it "too long".
+    <Modal title={title} size="lg" onClose={onClose}>
+      <form onSubmit={handleSubmit(submit)} noValidate className="flex flex-col gap-6">
+        <Section heading="The notice">
+          <FormField label="Title" error={errors.title?.message} registration={register('title')} />
 
-        <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-            Announcement
-          </label>
-          <textarea
-            rows={6}
-            {...register('body')}
-            className={`${inputClass} resize-y`}
-            placeholder="What the public needs to know. Line breaks are preserved."
-          />
-          {errors.body?.message && (
-            <p className="mt-1 text-xs text-danger">{errors.body.message}</p>
-          )}
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-              Category
+            <label className="mb-1.5 block text-[12.5px] font-medium text-text-secondary">
+              Announcement
             </label>
-            <select className={inputClass} {...register('category')}>
-              {CATEGORY_OPTIONS.map((option) => (
-                <option key={option.key} value={option.key}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <textarea
+              rows={5}
+              {...register('body')}
+              className={`${inputClass} resize-y`}
+              placeholder="What the public needs to know. Line breaks are preserved."
+            />
+            {errors.body?.message && <p className="mt-1 text-[12px] text-danger">{errors.body.message}</p>}
           </div>
 
-          <FormField
-            label="Reference no. (optional)"
-            error={errors.referenceNo?.message}
-            registration={register('referenceNo')}
-            placeholder="e.g. ITB-2026-014"
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-[12.5px] font-medium text-text-secondary">
+                Category
+              </label>
+              <select className={inputClass} {...register('category')}>
+                {CATEGORY_OPTIONS.map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <FormField
+              label="Reference no. (optional)"
+              error={errors.referenceNo?.message}
+              registration={register('referenceNo')}
+              placeholder="e.g. ITB-2026-014"
+            />
+          </div>
+        </Section>
+
+        <Section
+          heading="Dates"
+          note="Setting a registration deadline is what turns a notice into a call for bidders — there is no separate switch, because two controls expressing one fact are two controls that can disagree."
+        >
+          <DeadlineField
+            label="Bidder registration deadline (optional)"
+            name="registrationDeadline"
+            value={deadline}
+            onChange={setDate('registrationDeadline')}
+            error={errors.registrationDeadline?.message}
+            hint="Leave blank for a notice that is not calling for bidders. Set a date and the public registration form accepts applications against this call until then."
           />
-        </div>
 
-        {/* ── The deadline ─────────────────────────────────────────────────
-            Setting this is what turns a notice into a call for bidders. There
-            is no separate switch, because two controls expressing one fact are
-            two controls that can disagree. */}
-        <div className="rounded border border-border-muted bg-sidebar p-3">
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-            Bidder registration deadline (optional)
+          <DeadlineField
+            label="Take down automatically on (optional)"
+            name="expiresAt"
+            value={expiresAt}
+            onChange={setDate('expiresAt')}
+            error={errors.expiresAt?.message}
+            hint="Leave blank to keep the notice up until it is withdrawn by hand."
+          />
+
+          <label className="flex items-center gap-2.5 text-[13px] text-text-secondary">
+            <input type="checkbox" {...register('pinned')} className="size-4" />
+            Pin to the top of the public announcements list
           </label>
-          <input type="datetime-local" className={inputClass} {...register('registrationDeadline')} />
-          {errors.registrationDeadline?.message && (
-            <p className="mt-1 text-xs text-danger">{errors.registrationDeadline.message}</p>
-          )}
-          <p className="mt-1.5 text-xs leading-relaxed text-text-faint">
-            {deadline
-              ? 'This notice will accept bidder registrations until the date above. Applications submitted afterwards are refused for this procurement.'
-              : 'Leave blank for a notice that is not calling for bidders. Set a date and the public registration form will accept applications against this call until then.'}
-          </p>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-            Take down automatically on (optional)
-          </label>
-          <input type="datetime-local" className={inputClass} {...register('expiresAt')} />
-          {errors.expiresAt?.message && (
-            <p className="mt-1 text-xs text-danger">{errors.expiresAt.message}</p>
-          )}
-        </div>
-
-        <label className="flex items-center gap-2 text-[13px] text-text-secondary">
-          <input type="checkbox" {...register('pinned')} className="h-4 w-4" />
-          Pin to the top of the public announcements list
-        </label>
+        </Section>
 
         {serverError && (
           <p
             role="alert"
-            className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger"
+            className="rounded-md border border-danger/25 bg-danger/10 px-3.5 py-2.5 text-[13px] text-danger"
           >
             {serverError}
           </p>
         )}
 
-        <div className="mt-2 flex justify-end gap-2">
+        <div className="flex justify-end gap-2 border-t border-border-muted pt-5">
           <Button variant="secondary" onClick={onClose}>
-            CANCEL
+            Cancel
           </Button>
           <button
             type="submit"
             disabled={isSubmitting}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
+            className="rounded-md bg-accent px-4 py-2.5 text-[13px] font-medium text-accent-fg disabled:opacity-60"
           >
-            {isSubmitting ? 'SAVING...' : 'SAVE DRAFT'}
+            {isSubmitting ? 'Saving…' : 'Save draft'}
           </button>
         </div>
       </form>
@@ -335,7 +455,33 @@ export default function AnnouncementsAdmin() {
   const published = announcements.filter((a) => a.status === 'published')
   const openCalls = announcements.filter((a) => a.acceptingRegistrations)
 
-  const { pageRows, paginationProps } = usePagination(announcements)
+  // "Which calls are still open?" is the question that decides whether a
+  // late submission can be accepted, so it gets a filter rather than a scan
+  // down the deadline column.
+  const table = useTableControls(announcements, {
+    searchKeys: ['title', 'referenceNo', 'body'],
+    filters: [
+      {
+        key: 'category',
+        label: 'All categories',
+        options: Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label })),
+      },
+      { key: 'status', label: 'All statuses' },
+      {
+        key: 'acceptingRegistrations',
+        label: 'Registration',
+        options: [
+          { value: 'true', label: 'Still accepting' },
+          { value: 'false', label: 'Closed or none' },
+        ],
+        accessor: (row) => String(Boolean(row.acceptingRegistrations)),
+      },
+    ],
+    accessors: {
+      category: (row) => CATEGORY_LABELS[row.category] ?? row.category,
+    },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -387,25 +533,32 @@ export default function AnnouncementsAdmin() {
       <Card bodyClassName="">
         {!loaded ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading announcements...</p>
-        ) : announcements.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            Nothing here yet. Post a notice to tell the public what is coming.
-          </p>
+        ) : table.rows.length === 0 ? (
+          <>
+            <div className="border-b border-border-muted p-4">
+              <TableToolbar {...table.toolbarProps} searchPlaceholder="Search title, reference or text…" />
+            </div>
+            <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+              {table.totalBeforeFilters === 0
+                ? 'Nothing here yet. Post a notice to tell the public what is coming.'
+                : 'No announcements match your search or filters.'}
+            </p>
+          </>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="border-b border-border-muted p-4">
+              <TableToolbar {...table.toolbarProps} searchPlaceholder="Search title, reference or text…" />
+            </div>
+            <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Title', 'Category', 'Status', 'Registration closes', 'Published', 'Actions'].map(
-                    (head) => (
-                      <th
-                        key={head}
-                        className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                      >
-                        {head}
-                      </th>
-                    )
-                  )}
+                  <SortableTh {...table.sortProps('title')}>Title</SortableTh>
+                  <SortableTh {...table.sortProps('category')}>Category</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <SortableTh {...table.sortProps('registrationDeadline')}>Registration closes</SortableTh>
+                  <SortableTh {...table.sortProps('publishedAt')}>Published</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
@@ -478,7 +631,8 @@ export default function AnnouncementsAdmin() {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
         <Pagination {...paginationProps} label="announcements" />
       </Card>

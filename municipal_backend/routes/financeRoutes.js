@@ -14,6 +14,7 @@ import {
   getAppropriationBalance,
   getAppropriationOptions,
   listObligations,
+  reenactPriorYear,
 } from "../controllers/appropriationController.js";
 import {
   listPendingItems,
@@ -44,6 +45,16 @@ router.get("/appropriations/options", requirePermission("budget.view"), getAppro
 router.get("/appropriations/:id/balance", requirePermission("budget.view"), getAppropriationBalance);
 router.post("/appropriations", requirePermission("budget.manageAppropriations"), createAppropriation);
 router.patch("/appropriations/:id", requirePermission("budget.manageAppropriations"), updateAppropriation);
+
+// LGC Sec. 323 — reenact the preceding year's appropriations where the
+// Sanggunian has not passed the annual budget. Recorded by the Budget Officer,
+// who keeps the appropriation register; the reenactment itself happens by
+// operation of law rather than by anyone's decision.
+router.post(
+  "/appropriations/reenact",
+  requirePermission("budget.manageAppropriations"),
+  reenactPriorYear
+);
 
 // The obligation register — every ORS raised against an appropriation.
 router.get("/obligations", requirePermission("budget.view"), listObligations);

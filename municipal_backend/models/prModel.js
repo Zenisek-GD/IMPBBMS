@@ -17,9 +17,14 @@ export const PR_STATES = [
   "pendingCashCertification",
   // The Mayor approves the request (step 17).
   "pendingMayorApproval",
-  // The Budget Office certifies the appropriation, names the funding source,
-  // and issues the Obligation Request (step 18).
+  // The Budget Office certifies the appropriation and names the funding
+  // source (step 18).
   "pendingBudgetCertification",
+  // The Accountant obligates that appropriation and raises the ORS (step 18b).
+  // LGC Sec. 344 names three officers on a disbursement — budget officer,
+  // accountant, treasurer — and the accountant's obligation was previously
+  // folded into the budget officer's certification.
+  "pendingAccountantObligation",
   // The BAC determines how it will be procured (step 19).
   "pendingModeDetermination",
   "returned",
@@ -47,8 +52,13 @@ export const PrHeader = sequelize.define(
     status: { type: DataTypes.ENUM(...PR_STATES), allowNull: false, defaultValue: "draft" },
     returnRemarks: { type: DataTypes.TEXT, allowNull: true },
 
-    // Section 5.2: the Budget Officer's certification creates a soft
-    // reservation against the APP entry's balance.
+    // The Budget Officer's certification that an appropriation exists and has
+    // room under it (step 18). Distinct from the obligation below: certifying
+    // is a statement about the ordinance, obligating is an entry in the books.
+    appropriationCertifiedAt: { type: DataTypes.DATE, allowNull: true },
+
+    // The moment the Accountant's obligation actually encumbers the money
+    // (step 18b). From here the amount is unavailable to anything else.
     fundsReservedAt: { type: DataTypes.DATE, allowNull: true },
 
     // The Treasurer's certification that the cash exists. Held separately from
@@ -160,6 +170,11 @@ PrHeader.belongsTo(Department, { as: "department", foreignKey: "departmentId" })
 PrHeader.belongsTo(User, { as: "cashCertifiedBy", foreignKey: "cashCertifiedById" });
 PrHeader.belongsTo(User, { as: "mayorApprovedBy", foreignKey: "mayorApprovedById" });
 PrHeader.belongsTo(User, { as: "modeDeterminedBy", foreignKey: "modeDeterminedById" });
+// LGC Sec. 344's three officers, each recorded personally: the statement that
+// an appropriation exists, the entry that obligates it, and the certification
+// that the cash is there are three accountabilities, not one.
+PrHeader.belongsTo(User, { as: "appropriationCertifiedBy", foreignKey: "appropriationCertifiedById" });
+PrHeader.belongsTo(User, { as: "obligatedBy", foreignKey: "obligatedById" });
 
 // The mode the BAC determined. Held on the requisition rather than only on the
 // RFQ, because the determination happens before any solicitation exists and

@@ -84,3 +84,31 @@ export const suggestProcurementMode = (abc, lgu) => {
 };
 
 export const requiresPrebidConference = (abc) => abc >= MANDATORY_PREBID_CONFERENCE_FLOOR;
+
+// ── How long an opportunity must stay open ───────────────────────────────────
+// Sec. 50.3.1 — Competitive Bidding, Competitive Dialogue and Unsolicited Offer
+// with Bid Matching are posted for seven (7) calendar days, on the PhilGEPS and
+// the Procuring Entity's premises, starting on the date of advertisement.
+//
+// Sec. 50.3.2 — Limited Source Bidding is posted for at least three (3)
+// calendar days.
+//
+// Sec. 34.3(b) — Small Value Procurement above ₱200,000 is posted for three (3)
+// calendar days; at or below that amount it need not be posted at all.
+//
+// The single-source and direct modes have nothing to advertise, so they carry
+// no period. Returning 0 for them means "no posting window to enforce", not
+// "post for zero days".
+const POSTING_DAYS_BY_MODE = {
+  competitiveBidding: 7,
+  competitiveDialogue: 7,
+  unsolicitedOffer: 7,
+  limitedSourceBidding: 3,
+  smallValueProcurement: 3,
+};
+
+export const minimumPostingDays = (rfq) => {
+  if (!rfq?.postingRequired) return 0;
+  const modeKey = rfq.mode?.key ?? rfq.modeKey ?? null;
+  return POSTING_DAYS_BY_MODE[modeKey] ?? 0;
+};

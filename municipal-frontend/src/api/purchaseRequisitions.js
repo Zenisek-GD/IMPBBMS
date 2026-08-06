@@ -29,14 +29,22 @@ export const fetchModeSuggestion = (id) =>
 // ── The signature chain, in the order it is collected ────────────────────────
 // This is the order the boxes appear on the municipality's Purchase Request
 // form: the office requests, the Treasurer certifies the funds are available,
-// the Mayor approves, the Budget Office certifies the appropriation and issues
-// the obligation, and the BAC determines how it will be procured.
+// the Mayor approves, the Budget Office certifies the appropriation, the
+// Accountant obligates it, and the BAC determines how it will be procured.
+//
+// The Budget Office's certification and the Accountant's obligation are two
+// stages, not one. LGC Sec. 344 names three officers on a disbursement — "the
+// local budget officer certifies to the existence of appropriation..., the
+// local accountant has obligated said appropriation, and the local treasurer
+// certifies to the availability of funds" — and the system used to fold the
+// obligation into the certification, leaving the Accountant out of the chain.
 export const PR_STATUS_LABELS = {
   draft: 'Draft',
   pendingDepartmentHeadEndorsement: 'Pending Head of Office endorsement',
   pendingCashCertification: 'Pending Treasurer — availability of funds',
   pendingMayorApproval: "Pending Mayor's approval",
   pendingBudgetCertification: 'Pending Budget Office — appropriation',
+  pendingAccountantObligation: 'Pending Accountant — obligation (ORS)',
   pendingModeDetermination: 'Pending BAC — mode of procurement',
   returned: 'Returned',
   approved: 'Cleared for procurement',
@@ -48,6 +56,7 @@ export const PR_STATUS_TONES = {
   pendingCashCertification: 'warning',
   pendingMayorApproval: 'warning',
   pendingBudgetCertification: 'warning',
+  pendingAccountantObligation: 'warning',
   pendingModeDetermination: 'warning',
   returned: 'danger',
   approved: 'success',
@@ -61,6 +70,7 @@ export const PR_STAGE_SEQUENCE = [
   'pendingCashCertification',
   'pendingMayorApproval',
   'pendingBudgetCertification',
+  'pendingAccountantObligation',
   'pendingModeDetermination',
   'approved',
 ]
@@ -83,6 +93,11 @@ export const PR_TRANSITION_FOR_STATUS = {
     label: 'CERTIFY APPROPRIATION',
     permission: 'pr.certify',
   },
+  pendingAccountantObligation: {
+    action: 'obligate',
+    label: 'OBLIGATE (ORS)',
+    permission: 'pr.obligate',
+  },
   // Opens the determination form rather than firing straight away — the
   // committee has to see what the thresholds indicate before it chooses.
   pendingModeDetermination: {
@@ -98,6 +113,7 @@ export const PR_RETURN_PERMISSION_FOR_STATUS = {
   pendingCashCertification: 'pr.certifyCash',
   pendingMayorApproval: 'pr.approve',
   pendingBudgetCertification: 'pr.certify',
+  pendingAccountantObligation: 'pr.obligate',
   pendingModeDetermination: 'pr.determineMode',
 }
 

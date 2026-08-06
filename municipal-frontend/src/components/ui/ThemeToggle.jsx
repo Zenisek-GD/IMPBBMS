@@ -27,9 +27,11 @@ export default function ThemeToggle({ tone = 'default', className = '' }) {
       // labelled with its present state reads backwards to a screen reader.
       aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
       title={isDark ? 'Light theme' : 'Dark theme'}
-      className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${tones[tone]} ${className}`}
+      // Sized to match the notification bell beside it on the top bar. These two
+      // sat at 15px and 20px, which read as a primary control and a lesser one.
+      className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${tones[tone]} ${className}`}
     >
-      {isDark ? <Sun size={15} /> : <Moon size={15} />}
+      {isDark ? <Sun size={19} /> : <Moon size={19} />}
     </button>
   )
 }

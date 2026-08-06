@@ -104,6 +104,15 @@ export const PERMISSIONS = [
   // exists to catch, and why one permission cannot stand for both.
   { key: "pr.certify", module: "pr", description: "Certify existence of appropriation on requisitions" },
   {
+    // The third officer Sec. 344 names, and the one this system was missing.
+    // The Budget Officer says the appropriation exists; the Accountant makes
+    // the entry that encumbers it. One office doing both is the check and the
+    // book-keeping in the same pair of hands.
+    key: "pr.obligate",
+    module: "pr",
+    description: "Obligate the appropriation and raise the ORS (LGC Sec. 344)",
+  },
+  {
     key: "pr.certifyCash",
     module: "pr",
     description: "Certify availability of funds in the treasury (LGC Sec. 344)",
@@ -134,7 +143,55 @@ export const PERMISSIONS = [
   { key: "bidding.technicalInput", module: "bidding", description: "Provide TWG technical evaluation input" },
   { key: "bidding.chairEvaluation", module: "bidding", description: "Chair evaluation and resolve award" },
   { key: "bidding.approveAlternativeMode", module: "bidding", description: "Approve alternative procurement modes" },
-  { key: "bidding.award", module: "bidding", description: "Approve and issue the award" },
+  { key: "bidding.award", module: "bidding", description: "Approve, disapprove and issue the award" },
+
+  // ── Eligibility of prospective bidders ─────────────────────────────────────
+  // GPM Volume 1, "Responsibilities of the BAC", item iv: "Determine the
+  // eligibility of prospective bidders." That is the committee's act.
+  //
+  // The Secretariat's separate duty is "create, maintain and update the registry
+  // of suppliers, contractors, and consultants" — record-keeping, not
+  // adjudication. It receives the counter submission, checks each document
+  // against the requirement it answers, and takes custody of the file; all of
+  // that stays on `bidding.publish`.
+  //
+  // Until now `bidding.publish` also carried the registration-level decision,
+  // which meant a support office was making a committee determination on its own
+  // signature, with no BAC involvement at all. That is the same defect already
+  // corrected for `pr.determineMode`, which moved from the Secretariat to the
+  // Chair and Vice-Chair for exactly this reason — the fix simply never reached
+  // vendor eligibility.
+  {
+    key: "vendor.determineEligibility",
+    module: "bidding",
+    description: "Determine the eligibility of a prospective bidder as the BAC",
+  },
+
+  // ── Observers (RA 12009 Sec. 43) ───────────────────────────────────────────
+  // Two sides of the same mechanism. The BAC Secretariat maintains the roster
+  // and issues the invitations; the observer attends and files the report.
+  // Kept apart because a Secretariat that could file the observers' reports
+  // would be marking its own committee's homework, which is the exact thing
+  // the observer requirement exists to prevent.
+  {
+    key: "observer.manage",
+    module: "bidding",
+    description: "Maintain the observer roster and invite observers to BAC proceedings",
+  },
+  {
+    key: "observer.participate",
+    module: "bidding",
+    description: "Attend BAC proceedings as an invited observer and file observation reports",
+  },
+
+  // ── Protest mechanism (RA 12009 Sec. 83–85) ────────────────────────────────
+  // Three separate holders because the IRR routes the two stages to two
+  // different bodies: a request for reconsideration is decided by the BAC, and
+  // only a *denied* request opens a protest to the HoPE. One permission for
+  // both would let the committee decide the appeal against its own decision.
+  { key: "protest.file", module: "bidding", description: "File a request for reconsideration or protest as a bidder" },
+  { key: "protest.resolve", module: "bidding", description: "Decide requests for reconsideration as the BAC" },
+  { key: "protest.decide", module: "bidding", description: "Resolve protests as the Head of the Procuring Entity" },
 
   // Contract
   { key: "contract.view", module: "contract", description: "View contracts" },
@@ -259,8 +316,20 @@ export const ROLE_PERMISSIONS = {
     "planning.view", "planning.setPriorities",
     "budget.approveExecutive",
     "app.view", "app.approve",
+    // ── The LGU's signature on a contract is the Mayor's ──────────────────────
+    // LGC Sec. 22(c): "No contract may be entered into by the local chief
+    // executive in behalf of the local government unit without prior
+    // authorization by the sanggunian concerned." The signatory is the local
+    // chief executive — not the BAC Chairperson, who held this and should never
+    // have: the officer who chairs the committee recommending the award cannot
+    // also be the officer who binds the municipality to it.
+    "contract.view", "contract.sign",
     "pr.view", "pr.approve",
     "bidding.view", "bidding.approveAlternativeMode", "bidding.award",
+    // Sec. 84.1 — "With respect to LGUs, the decision of the local chief
+    // executive shall be final." The protest is decided by the HoPE, never by
+    // the committee whose decision is being challenged.
+    "protest.decide",
     "budget.view",
     "audit.viewAll",
   ],
@@ -309,7 +378,43 @@ export const ROLE_PERMISSIONS = {
     "app.view",
     "pr.view", "pr.determineMode",
     "bidding.view", "bidding.evaluate", "bidding.chairEvaluation",
-    "contract.view", "contract.sign",
+    // GPM: "Determine the eligibility of prospective bidders" is the BAC's, not
+    // the Secretariat's. The Secretariat still receives the submission and
+    // checks the papers; the committee decides whether the bidder is eligible.
+    "vendor.determineEligibility",
+    // GPM, "Responsibilities of the BAC" item xvi: "Invite the Observers
+    // required by law to be present during selected stages of the procurement
+    // process." Held by the Secretariat alone until now, which meant the
+    // Chairperson could open the observers screen and find no way to invite
+    // anybody. The Secretariat keeps it too — it makes the arrangements.
+    "observer.manage",
+    // Sec. 83.1 — the request for reconsideration is decided by the BAC. The
+    // protest that may follow is the HoPE's, and is deliberately not here.
+    "protest.resolve",
+    // The contract is signed for the LGU by the Local Chief Executive, not by
+    // the committee that recommended the award — see the note on `hope` below.
+    "contract.view",
+    "budget.view",
+    "audit.viewAll",
+  ],
+
+  // ── BAC Vice-Chairperson ───────────────────────────────────────────────────
+  // The quorum rule turns on this office: the majority of members constitutes a
+  // quorum "provided that the Chairperson or the Vice-Chairperson should be
+  // present in all meetings and deliberations". Without the role, a committee
+  // whose Chairperson was on leave could never lawfully sit — and the system
+  // had no way to express that, so it simply counted heads.
+  bacViceChairperson: [
+    "app.view",
+    "pr.view", "pr.determineMode",
+    "bidding.view", "bidding.evaluate", "bidding.chairEvaluation",
+    // The office exists so the committee can sit when the Chairperson cannot, so
+    // it holds the same two committee acts — otherwise a Vice-Chair presiding in
+    // the Chair's absence could neither rule on eligibility nor invite observers.
+    "vendor.determineEligibility",
+    "observer.manage",
+    "protest.resolve",
+    "contract.view",
     "budget.view",
     "audit.viewAll",
   ],
@@ -318,23 +423,34 @@ export const ROLE_PERMISSIONS = {
     "app.view",
     "pr.view",
     "bidding.view", "bidding.evaluate",
+    "protest.resolve",
     "budget.view",
   ],
 
-  // The Secretariat reviews bidder registrations and decides whether the
-  // requirements are complete and valid. It does NOT hold
-  // "bidders.createAccount": approving an accreditation and issuing the
-  // credential that follows from it are two acts by two offices, so a verified
-  // registration is handed to Admin/IT rather than turned into access here.
-  // `bidding.publish` is what admits them to this queue.
+  // The Secretariat receives bidder registrations at the counter, checks each
+  // document against the requirement it answers, and keeps the registry. It does
+  // NOT determine eligibility — that is `vendor.determineEligibility`, and it
+  // belongs to the committee this office supports.
+  //
+  // It also does NOT hold "bidders.createAccount": approving an accreditation and
+  // issuing the credential that follows from it are two acts by two offices, so a
+  // verified registration is handed to Admin/IT rather than turned into access
+  // here. `bidding.publish` is what admits them to this queue.
   bacSecretariat: [
     "planning.view",
     "app.view", "app.consolidate", "app.revise",
-    // Step 19: the Secretariat determines the mode against the ABC thresholds
-    // and documents it. The Chairperson holds the same permission, since the
-    // determination is the committee's.
-    "pr.view", "pr.review", "pr.determineMode",
+    // The Secretariat prepares and documents; it does not decide. The GPM is
+    // explicit that recommending the method of procurement is a responsibility
+    // of *the BAC*, and equally explicit that the Secretariat is its support
+    // unit. `pr.determineMode` was held here, which let a support office make a
+    // committee determination on its own signature — so it has moved to the
+    // Chairperson and Vice-Chairperson, who are the committee.
+    "pr.view", "pr.review",
     "bidding.view", "bidding.publish",
+    // Sec. 43 — the Secretariat keeps the observer roster and issues the
+    // invitations, as part of "organize and make all necessary arrangements for
+    // the BAC and the TWG meetings and conferences".
+    "observer.manage",
     // The office that advertises a procurement is the office that announces it,
     // and it is the same office that will review whoever answers the call.
     "announcements.manage",
@@ -347,6 +463,26 @@ export const ROLE_PERMISSIONS = {
     "pr.view",
     "bidding.view", "bidding.technicalInput",
     "budget.view",
+  ],
+
+  // ── Head of Office ─────────────────────────────────────────────────────────
+  // Step 15 of the municipal process: the requisition is *prepared* by staff and
+  // *endorsed* by the head of the office it comes from. Those are two people —
+  // the controller refuses a requester who tries to endorse their own request.
+  //
+  // Without this role nobody in the system held `pr.endorse` and no department
+  // had a head, so every requisition stopped dead at
+  // `pendingDepartmentHeadEndorsement` with no officer able to move it.
+  //
+  // Endorsement is normally decided by *headship* — `Department.headUserId` —
+  // rather than by permission; this role is what makes that designation
+  // meaningful out of the box, and gives an office head somewhere to work.
+  headOfOffice: [
+    "planning.view",
+    "budget.proposeBudget", "budget.view",
+    "app.view", "app.create", "app.submit", "app.revise",
+    "pr.view", "pr.create", "pr.endorse",
+    "delivery.report",
   ],
 
   departmentRequester: [
@@ -386,7 +522,17 @@ export const ROLE_PERMISSIONS = {
   // documents) and prepares the disbursement voucher. Deliberately NOT granted
   // "payment.release" — the officer who certifies a claim must not also be the
   // one who hands over the money.
-  municipalAccountant: ["payment.view", "payment.certify", "budget.view", "audit.viewAll"],
+  municipalAccountant: [
+    // LGC Sec. 344 — "the local accountant has obligated said appropriation".
+    // The Accountant previously had no part in the requisition chain at all,
+    // which left the Budget Officer certifying and obligating in one act.
+    "pr.view",
+    "pr.obligate",
+    "payment.view",
+    "payment.certify",
+    "budget.view",
+    "audit.viewAll",
+  ],
 
   // The Treasurer holds the funds and releases them against a certified
   // voucher. Deliberately NOT granted "payment.certify", for the same reason
@@ -411,11 +557,31 @@ export const ROLE_PERMISSIONS = {
     "audit.viewAll",
   ],
 
-  vendor: ["bidding.submitBid", "contract.sign", "delivery.submitInvoice"],
+  vendor: [
+    "bidding.submitBid",
+    "contract.sign",
+    "delivery.submitInvoice",
+    // Sec. 83 — the bidder's remedy against a decision of the BAC, and under
+    // Sec. 85 a precondition to any court action. A system that awards
+    // contracts and offers the losing bidder no route to object is not
+    // modelling the procurement law, only the happy path through it.
+    "protest.file",
+  ],
 
   // Section 2.2: observers see approved/published records only — never drafts,
   // internal remarks, or pre-award data.
-  observer: ["app.viewPublished", "bidding.viewPublished", "contract.viewPublished", "audit.viewPublished"],
+  //
+  // `observer.participate` is what makes this role the Sec. 43 observer rather
+  // than a member of the public with a login: it is the right to be invited to
+  // the six stages the BAC must open to observation, to attend them, and to
+  // file the observation report the IRR obliges an observer to file.
+  observer: [
+    "app.viewPublished",
+    "bidding.viewPublished",
+    "contract.viewPublished",
+    "audit.viewPublished",
+    "observer.participate",
+  ],
 
   // Section 2.2: full workflow history and logs across all modules, including
   // denied and returned actions.

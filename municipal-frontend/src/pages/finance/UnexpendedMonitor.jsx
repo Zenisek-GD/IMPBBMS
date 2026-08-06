@@ -10,6 +10,10 @@ import StatCard from '../../components/ui/StatCard'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import ProgressRow from '../../components/ui/ProgressRow'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 // Reads the appropriation ledger, not the procurement plan.
 //
@@ -53,6 +57,27 @@ export default function UnexpendedMonitor() {
   const canDispatch = permissions.has('budget.certify')
   const inAlertWindow = data && data.daysToYearEnd <= data.alertWindowDays
   const rows = data ? (view === 'offices' ? data.offices : data.lines) : []
+
+  // One set of controls serving both views. Switching between them keeps the
+  // search and filters, which is the behaviour a reader expects when the two
+  // are the same figures cut two ways. Sorting by unobligated balance is the
+  // one that matters here: it is the money at risk of lapsing.
+  const table = useTableControls(rows, {
+    searchKeys: ['departmentCode', 'departmentName', 'title', 'papCode', 'ordinanceNo'],
+    filters: [
+      { key: 'severity', label: 'All risk levels' },
+      { key: 'departmentCode', label: 'All offices' },
+    ],
+    accessors: {
+      appropriated: (row) => Number(row.appropriated ?? 0),
+      programmed: (row) => Number(row.programmed ?? 0),
+      obligated: (row) => Number(row.obligated ?? 0),
+      disbursed: (row) => Number(row.disbursed ?? 0),
+      unobligated: (row) => Number(row.unobligated ?? 0),
+      utilisationRate: (row) => Number(row.utilisationRate ?? 0),
+      label: (row) => (view === 'offices' ? row.departmentCode : (row.papCode ?? row.ordinanceNo)),
+    },
+  })
 
   return (
     <DashboardPage>
@@ -183,36 +208,36 @@ export default function UnexpendedMonitor() {
           </div>
 
           <Card title={view === 'offices' ? 'By Office' : 'By Ordinance Line'} icon={TrendingUp} bodyClassName="">
-            {rows.length === 0 ? (
+            {rows.length > 0 && (
+              <div className="border-b border-border-muted p-4">
+                <TableToolbar {...table.toolbarProps} searchPlaceholder="Search office or ordinance line…" />
+              </div>
+            )}
+            {table.rows.length === 0 ? (
               <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-                No enacted appropriations for this fiscal year. Record the Appropriation Ordinance first.
+                {table.totalBeforeFilters === 0
+                  ? 'No enacted appropriations for this fiscal year. Record the Appropriation Ordinance first.'
+                  : 'Nothing matches your search or filters.'}
               </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead className="bg-sidebar">
                     <tr>
-                      {[
-                        view === 'offices' ? 'Office' : 'Ordinance Line',
-                        'Appropriated',
-                        'Programmed',
-                        'Obligated',
-                        'Disbursed',
-                        'Unobligated',
-                        'Utilisation',
-                        'Risk',
-                      ].map((head) => (
-                        <th
-                          key={head}
-                          className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                        >
-                          {head}
-                        </th>
-                      ))}
+                      <SortableTh {...table.sortProps('label')}>
+                        {view === 'offices' ? 'Office' : 'Ordinance Line'}
+                      </SortableTh>
+                      <SortableTh {...table.sortProps('appropriated')}>Appropriated</SortableTh>
+                      <SortableTh {...table.sortProps('programmed')}>Programmed</SortableTh>
+                      <SortableTh {...table.sortProps('obligated')}>Obligated</SortableTh>
+                      <SortableTh {...table.sortProps('disbursed')}>Disbursed</SortableTh>
+                      <SortableTh {...table.sortProps('unobligated')}>Unobligated</SortableTh>
+                      <SortableTh {...table.sortProps('utilisationRate')}>Utilisation</SortableTh>
+                      <SortableTh {...table.sortProps('severity')}>Risk</SortableTh>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
+                    {table.pageRows.map((row) => (
                       <tr key={row.id ?? row.departmentId} className="border-t border-border-muted">
                         <td className="px-4 py-3 text-[13px] text-navy">
                           {view === 'offices' ? (
@@ -257,6 +282,9 @@ export default function UnexpendedMonitor() {
                   </tbody>
                 </table>
               </div>
+            )}
+            {table.rows.length > 0 && (
+              <Pagination {...table.paginationProps} label={view === 'offices' ? 'offices' : 'lines'} />
             )}
           </Card>
 

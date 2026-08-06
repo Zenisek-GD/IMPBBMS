@@ -86,11 +86,13 @@ export default function NotificationBell() {
         aria-label={`Notifications${data.unreadCount ? ` (${data.unreadCount} unread)` : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="relative text-white/80 hover:text-white"
+        // Same box and same icon size as the theme toggle beside it, so the two
+        // read as one pair of controls rather than a primary and a lesser one.
+        className="relative flex h-9 w-9 items-center justify-center rounded-md text-topnav-link transition-colors hover:bg-white/10 hover:text-topnav-link-alt"
       >
-        <Bell size={20} />
+        <Bell size={19} />
         {data.unreadCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
+          <span className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
             {data.unreadCount > 9 ? '9+' : data.unreadCount}
           </span>
         )}

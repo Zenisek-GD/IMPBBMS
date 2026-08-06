@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Target, Star, ListTree } from 'lucide-react'
+import { Plus, Target, Star, ListTree, Route, Check } from 'lucide-react'
 import * as planningApi from '../../api/planning'
 import {
   PLAN_STATUS_LABELS,
@@ -17,6 +17,10 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 // Steps 1 to 3 of the municipal process on one screen, because they are one
 // conversation: the development plan states what the municipality is for, the
@@ -416,6 +420,227 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
   )
 }
 
+// ── The projects inside one investment program ───────────────────────────────
+// Its own component so it can hold search, filters, sort and paging: hooks
+// cannot be called inside the `programs.map()` that renders one card per
+// program, and each program's project list needs controls of its own.
+//
+// The AIP is the longest list on this page — every project the municipality
+// intends to fund that year — and it was previously rendered whole, unsorted
+// and unsearchable, which is a large part of why this screen felt overwhelming.
+function AipEntriesTable({ entries }) {
+  const table = useTableControls(entries, {
+    searchKeys: ['title', 'goalTitle', 'implementingUnitCode'],
+    filters: [
+      { key: 'implementingUnitCode', label: 'All offices' },
+      {
+        key: 'expenseClass',
+        label: 'All classes',
+        options: [
+          { value: 'capitalOutlay', label: 'Capital Outlay' },
+          { value: 'mooe', label: 'MOOE' },
+          { value: 'ps', label: 'Personal Services' },
+        ],
+      },
+      {
+        key: 'isMayorPriority',
+        label: 'Priority',
+        options: [
+          { value: 'true', label: "Mayor's priorities only" },
+          { value: 'false', label: 'Not a priority' },
+        ],
+        accessor: (entry) => String(Boolean(entry.isMayorPriority)),
+      },
+      { key: 'status', label: 'All statuses' },
+    ],
+    accessors: { estimatedCost: (entry) => Number(entry.estimatedCost ?? 0) },
+  })
+
+  if (entries.length === 0) {
+    return <p className="text-[13px] text-text-faint">No projects yet.</p>
+  }
+
+  return (
+    <div>
+      <div className="mb-3">
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search project, goal or office…" />
+      </div>
+
+      {table.rows.length === 0 ? (
+        <p className="text-[13px] text-text-faint">No projects match your search or filters.</p>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-sidebar">
+                <tr>
+                  <SortableTh {...table.sortProps('title')}>Project</SortableTh>
+                  <SortableTh {...table.sortProps('goalTitle')}>Goal</SortableTh>
+                  <SortableTh {...table.sortProps('implementingUnitCode')}>Office</SortableTh>
+                  <SortableTh {...table.sortProps('expenseClass')}>Class</SortableTh>
+                  <SortableTh {...table.sortProps('estimatedCost')}>Cost</SortableTh>
+                  <SortableTh {...table.sortProps('startQuarter')}>Schedule</SortableTh>
+                </tr>
+              </thead>
+              <tbody>
+                {table.pageRows.map((entry) => (
+                  <tr key={entry.id} className="border-t border-border-muted">
+                    <td className="px-3 py-2 text-[13px] text-navy">
+                      {entry.title}
+                      {entry.status === 'dropped' && (
+                        <span className="ml-2">
+                          <Badge tone="danger">DROPPED</Badge>
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-[13px] text-text-secondary">
+                      {entry.isMayorPriority && (
+                        <Star size={11} className="mr-1 inline text-warning" fill="currentColor" />
+                      )}
+                      {entry.goalTitle ?? '—'}
+                    </td>
+                    <td className="px-3 py-2 text-[13px] text-text-secondary">
+                      {entry.implementingUnitCode ?? '—'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Badge tone={entry.expenseClass === 'capitalOutlay' ? 'warning' : 'neutral'}>
+                        {entry.expenseClass === 'capitalOutlay' ? 'CO' : entry.expenseClass.toUpperCase()}
+                      </Badge>
+                    </td>
+                    <td className="px-3 py-2 text-[13px] whitespace-nowrap text-navy">
+                      {peso(entry.estimatedCost)}
+                    </td>
+                    <td className="px-3 py-2 text-[13px] whitespace-nowrap text-text-secondary">
+                      {entry.startQuarter}–{entry.endQuarter}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...table.paginationProps} label="projects" />
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── WHERE THE MUNICIPALITY IS IN THE CHAIN ───────────────────────────────────
+// The complaint about this page was "I open it and I don't know what to look at
+// first", and the cause was that it opened with everything at once: every plan,
+// every goal, every investment program and every project in all of them, with
+// nothing saying which of those was the thing currently needing attention.
+//
+// This is the answer, and it is the delivery-timeline pattern from the
+// reference: four steps, each either done, in progress or not started, so the
+// first thing on the screen tells you where the work actually stands. The
+// detail is behind the tabs below.
+const chainSteps = (plans, programs) => {
+  const adoptedPlan = plans.find((p) => p.status === 'adopted')
+  const draftPlan = plans.find((p) => p.status === 'draft')
+  const priorities = (adoptedPlan?.goals ?? []).filter((g) => g.isMayorPriority)
+  const adoptedProgram = programs.find((p) => p.status === 'adopted')
+  const liveProgram = programs.find((p) => p.status !== 'adopted')
+
+  return [
+    {
+      label: 'Comprehensive Development Plan',
+      state: adoptedPlan ? 'done' : draftPlan ? 'active' : 'pending',
+      detail: adoptedPlan
+        ? `${adoptedPlan.title} · adopted${adoptedPlan.resolutionNo ? ` under ${adoptedPlan.resolutionNo}` : ''}`
+        : draftPlan
+          ? `${draftPlan.title} — drafted, not yet adopted by the Sanggunian`
+          : 'Nothing downstream can exist without one',
+    },
+    {
+      label: "Mayor's priorities",
+      state: priorities.length ? 'done' : adoptedPlan ? 'active' : 'pending',
+      detail: priorities.length
+        ? `${priorities.length} goal${priorities.length === 1 ? '' : 's'} named for FY ${priorities[0].priorityFiscalYear}`
+        : adoptedPlan
+          ? 'The plan is adopted — the year’s priorities have not been named'
+          : 'Named against an adopted plan',
+    },
+    {
+      label: 'Annual Investment Program',
+      state: adoptedProgram ? 'done' : liveProgram ? 'active' : 'pending',
+      detail: adoptedProgram
+        ? `${adoptedProgram.title} · ${peso(adoptedProgram.totalEstimatedCost)} programmed`
+        : liveProgram
+          ? `${liveProgram.title} · ${AIP_STATUS_LABELS[liveProgram.status] ?? liveProgram.status}`
+          : 'The year’s costed slice of the plan',
+    },
+    {
+      label: 'Ready for the budget',
+      state: adoptedProgram ? 'done' : 'pending',
+      detail: adoptedProgram
+        ? 'A budget can now be opened against this programme'
+        : 'The budget cannot be opened until the investment program is adopted',
+    },
+  ]
+}
+
+function PlanningChain({ plans, programs }) {
+  const steps = chainSteps(plans, programs)
+
+  return (
+    <Card title="Where this stands" icon={Route} bodyClassName="p-5">
+      <ol className="flex flex-col">
+        {steps.map((step, index) => (
+          <li key={step.label} className="flex gap-3.5">
+            <div className="flex flex-col items-center">
+              <span
+                className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                  step.state === 'done'
+                    ? 'bg-success text-white'
+                    : step.state === 'active'
+                      ? 'bg-warning/15 text-warning ring-2 ring-warning/40'
+                      : 'bg-track text-text-faint'
+                }`}
+              >
+                {step.state === 'done' ? <Check size={12} /> : index + 1}
+              </span>
+              {index < steps.length - 1 && (
+                <span
+                  className={`w-px flex-1 ${step.state === 'done' ? 'bg-success/40' : 'bg-border-muted'}`}
+                  style={{ minHeight: 20 }}
+                />
+              )}
+            </div>
+            <div className="flex-1 pb-5 last:pb-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p
+                  className={`text-[13.5px] font-medium ${
+                    step.state === 'pending' ? 'text-text-faint' : 'text-navy'
+                  }`}
+                >
+                  {step.label}
+                </p>
+                {step.state === 'active' && (
+                  <Badge tone="warning" dot>
+                    In progress
+                  </Badge>
+                )}
+                {step.state === 'done' && (
+                  <Badge tone="success" dot>
+                    Done
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-0.5 text-[12.5px] leading-relaxed text-text-secondary">{step.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </Card>
+  )
+}
+
+const TABS = [
+  { key: 'plan', label: 'Development Plan', icon: Target },
+  { key: 'aip', label: 'Investment Program', icon: ListTree },
+]
+
 export default function DevelopmentPlanning() {
   const permissions = usePermissions()
   const [plans, setPlans] = useState([])
@@ -432,6 +657,11 @@ export default function DevelopmentPlanning() {
   const [adoptingPlan, setAdoptingPlan] = useState(null)
   const [adoptingProgram, setAdoptingProgram] = useState(null)
   const [addingEntryTo, setAddingEntryTo] = useState(null)
+
+  // Which half of the chain is on screen. The two used to be stacked, so a
+  // reader scrolled past every development goal to reach the projects — and the
+  // page opened with both at once, which is what made it overwhelming.
+  const [tab, setTab] = useState('plan')
 
   const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
 
@@ -480,7 +710,7 @@ export default function DevelopmentPlanning() {
   return (
     <DashboardPage>
       <PageHeader
-        title="Development Planning"
+        title="Development Plan &amp; AIP"
         subtitle="The development plan, the Mayor's priorities for the year, and the investment program derived from them. Everything the LGU budgets for and procures traces back to a line on this page."
         actions={
           canManageCdp && (
@@ -503,8 +733,41 @@ export default function DevelopmentPlanning() {
         </Card>
       ) : (
         <>
+          <PlanningChain plans={plans} programs={programs} />
+
+          {/* One at a time. Both halves are still one record — the AIP is the
+              year's slice of the plan — so they stay on one route with one set
+              of permissions; only the reading is split. */}
+          <div className="flex flex-wrap gap-2">
+            {TABS.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setTab(item.key)}
+                aria-pressed={tab === item.key}
+                className={`flex items-center gap-2 rounded-md border px-4 py-2.5 text-[13px] font-medium transition-colors ${
+                  tab === item.key
+                    ? 'border-accent bg-accent text-accent-fg'
+                    : 'border-border-muted bg-surface text-text-secondary hover:text-navy'
+                }`}
+              >
+                <item.icon size={14} />
+                {item.label}
+                {item.key === 'aip' && programs.length > 0 && (
+                  <span
+                    className={`ml-0.5 text-[11.5px] ${
+                      tab === item.key ? 'text-accent-fg/70' : 'text-text-faint'
+                    }`}
+                  >
+                    {programs.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
           {/* ── Step 1 & 2: the plan and the priorities ── */}
-          {plans.length === 0 ? (
+          {tab === 'plan' && (plans.length === 0 ? (
             <Card title="Comprehensive Development Plan" icon={Target} bodyClassName="p-8">
               <p className="text-center text-[13px] text-text-faint">
                 No development plan recorded yet. Everything downstream — the investment program, the budget, the
@@ -584,9 +847,10 @@ export default function DevelopmentPlanning() {
                 </div>
               </Card>
             ))
-          )}
+          ))}
 
           {/* ── Step 3: the investment program ── */}
+          {tab === 'aip' && (
           <Card
             title="Annual Investment Program"
             icon={ListTree}
@@ -674,65 +938,13 @@ export default function DevelopmentPlanning() {
                       <p className="mb-2 text-xs text-danger">Returned: {program.returnRemarks}</p>
                     )}
 
-                    {program.entries.length === 0 ? (
-                      <p className="text-[13px] text-text-faint">No projects yet.</p>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                          <thead className="bg-sidebar">
-                            <tr>
-                              {['Project', 'Goal', 'Office', 'Class', 'Cost', 'Schedule'].map((head) => (
-                                <th
-                                  key={head}
-                                  className="px-3 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                                >
-                                  {head}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {program.entries.map((entry) => (
-                              <tr key={entry.id} className="border-t border-border-muted">
-                                <td className="px-3 py-2 text-[13px] text-navy">
-                                  {entry.title}
-                                  {entry.status === 'dropped' && (
-                                    <span className="ml-2">
-                                      <Badge tone="danger">DROPPED</Badge>
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2 text-[13px] text-text-secondary">
-                                  {entry.isMayorPriority && (
-                                    <Star size={11} className="mr-1 inline text-warning" fill="currentColor" />
-                                  )}
-                                  {entry.goalTitle ?? '—'}
-                                </td>
-                                <td className="px-3 py-2 text-[13px] text-text-secondary">
-                                  {entry.implementingUnitCode ?? '—'}
-                                </td>
-                                <td className="px-3 py-2">
-                                  <Badge tone={entry.expenseClass === 'capitalOutlay' ? 'warning' : 'neutral'}>
-                                    {entry.expenseClass === 'capitalOutlay' ? 'CO' : entry.expenseClass.toUpperCase()}
-                                  </Badge>
-                                </td>
-                                <td className="px-3 py-2 text-[13px] whitespace-nowrap text-navy">
-                                  {peso(entry.estimatedCost)}
-                                </td>
-                                <td className="px-3 py-2 text-[13px] whitespace-nowrap text-text-secondary">
-                                  {entry.startQuarter}–{entry.endQuarter}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                    <AipEntriesTable entries={program.entries} />
                   </div>
                 )
               })
             )}
           </Card>
+          )}
         </>
       )}
 

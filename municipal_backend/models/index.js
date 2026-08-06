@@ -74,6 +74,13 @@ export {
   isPubliclyVisible,
 } from "./announcementModel.js";
 export { Notification } from "./notificationModel.js";
+// The only thing the public may write to. See the model for why it is not part
+// of the procurement record.
+export {
+  PublicMessage,
+  MESSAGE_ROUTING,
+  MESSAGE_CATEGORIES,
+} from "./publicMessageModel.js";
 export { Contract, Delivery } from "./contractModel.js";
 export { Invoice, Payment } from "./paymentModel.js";
 export { PendingItem } from "./pendingItemModel.js";
@@ -81,3 +88,26 @@ export { AuditLog } from "./auditLogModel.js";
 export { Document } from "./documentModel.js";
 export { LiveConferenceSession, ConferenceAttendance } from "./liveConferenceModel.js";
 export { Rfq, Bid, BidOpeningRecord, Evaluation, PostQualification, Award } from "./biddingModel.js";
+
+// ── Observers (RA 12009 Sec. 43) ─────────────────────────────────────────────
+export {
+  ObserverOrganization,
+  ObserverInvitation,
+  ObservationReport,
+  OBSERVABLE_STAGES,
+  OBSERVABLE_STAGE_LABELS,
+  OBSERVER_SECTORS,
+  OBSERVER_SECTOR_LABELS,
+  OBSERVER_NOTICE_DAYS,
+  OBSERVATION_REPORT_DAYS,
+} from "./observerModel.js";
+
+// ── Protest mechanism (RA 12009 Rule XVI, Sec. 83–85) ────────────────────────
+export {
+  Protest,
+  PROTEST_STAGES,
+  PROTEST_STATES,
+  protestFeeFor,
+  decisionIsFinalAndExecutory,
+  LGU_FINALITY_CEILINGS,
+} from "./protestModel.js";

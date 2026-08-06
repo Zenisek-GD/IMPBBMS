@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Plus, Search, Building2, Users } from 'lucide-react'
+import { Plus, Building2, Users } from 'lucide-react'
 import * as departmentsApi from '../../api/departments'
 import { DEPARTMENT_TYPES, departmentTypeLabel } from '../../api/departments'
 import DashboardPage from '../../components/ui/DashboardPage'
@@ -14,7 +14,9 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const departmentSchema = z.object({
   name: z.string().trim().min(1, 'Department name is required'),
@@ -25,6 +27,13 @@ const departmentSchema = z.object({
     .max(12, 'Code must be 12 characters or fewer')
     .regex(/^[A-Za-z0-9-]+$/, 'Letters, numbers, and hyphens only'),
   type: z.enum(['endUser', 'committee', 'support', 'executive']),
+  // The select submits '' for "none designated". Normalised to null here rather
+  // than at the API, so the server never has to guess what an empty string means
+  // on a foreign key.
+  headUserId: z
+    .union([z.string(), z.number()])
+    .optional()
+    .transform((value) => (value === '' || value === undefined ? null : Number(value))),
 })
 
 const TYPE_TONES = {
@@ -34,7 +43,7 @@ const TYPE_TONES = {
   executive: 'success',
 }
 
-function DepartmentFormModal({ title, defaultValues, onSubmit, onClose }) {
+function DepartmentFormModal({ title, defaultValues, members = [], onSubmit, onClose }) {
   const [serverError, setServerError] = useState('')
   const {
     register,
@@ -82,6 +91,34 @@ function DepartmentFormModal({ title, defaultValues, onSubmit, onClose }) {
           </p>
         </div>
 
+        {/* ── Head of Office ────────────────────────────────────────────────
+            Step 15 of the municipal process: a requisition is prepared by staff
+            and endorsed by the head of the office it comes from. The server
+            decides endorsement from this designation, and refuses a requester
+            who tries to endorse their own request — so an office with no head
+            has requisitions that nobody can move on. There was no field for
+            this at all, which made the designation unreachable from the UI. */}
+        <div>
+          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+            Head of Office
+          </label>
+          <select
+            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+            {...register('headUserId')}
+          >
+            <option value="">— none designated —</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name} ({member.roleName ?? 'staff'})
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-text-faint">
+            Endorses the requisitions this office raises. Must not be the officer who prepares them —
+            the server refuses a requester who endorses their own request.
+          </p>
+        </div>
+
         {serverError && (
           <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
             {serverError}
@@ -107,30 +144,37 @@ function DepartmentFormModal({ title, defaultValues, onSubmit, onClose }) {
 
 export default function AdminDepartments() {
   const [departments, setDepartments] = useState([])
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [actionError, setActionError] = useState('')
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await departmentsApi.fetchDepartments({
-        ...(search ? { search } : {}),
-        ...(typeFilter ? { type: typeFilter } : {}),
-      })
-      setDepartments(data)
-    } finally {
-      setLoading(false)
-    }
-  }, [search, typeFilter])
+  const [refreshToken, setRefreshToken] = useState(0)
+  const load = useCallback(() => setRefreshToken((token) => token + 1), [])
 
+  // Fetched whole; search and filtering happen in the browser so they can be
+  // combined with a column sort and cost no round trip. That also means this
+  // runs on mount and after an edit, never on a keystroke — so the debounce
+  // that used to guard it is gone.
+  //
+  // State is set only from the promise callbacks, never synchronously in the
+  // effect body, which would cascade renders.
   useEffect(() => {
-    const timer = setTimeout(load, 250)
-    return () => clearTimeout(timer)
-  }, [load])
+    let cancelled = false
+    departmentsApi
+      .fetchDepartments()
+      .then((data) => {
+        if (cancelled) return
+        setDepartments(data)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [refreshToken])
 
   const toggleStatus = async (department) => {
     setActionError('')
@@ -147,9 +191,23 @@ export default function AdminDepartments() {
   const activeCount = departments.filter((d) => d.status === 'active').length
   const staffed = departments.reduce((total, d) => total + d.userCount, 0)
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(departments)
+  const table = useTableControls(departments, {
+    searchKeys: ['code', 'name', 'typeLabel'],
+    filters: [
+      {
+        key: 'type',
+        label: 'All classifications',
+        options: DEPARTMENT_TYPES.map((type) => ({ value: type.key, label: type.label })),
+      },
+      { key: 'status', label: 'All statuses' },
+    ],
+    accessors: {
+      userCount: (row) => Number(row.userCount ?? 0),
+      type: (row) => departmentTypeLabel(row.type),
+    },
+    initialSort: { key: 'code', direction: 'asc' },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -170,30 +228,7 @@ export default function AdminDepartments() {
       </div>
 
       <Card bodyClassName="p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-56 flex-1">
-            <Search size={15} className="absolute top-1/2 left-3 -translate-y-1/2 text-text-faint" />
-            <input
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name or code..."
-              className="w-full rounded border border-border-muted py-2 pr-4 pl-9 text-sm text-navy focus:border-navy focus:outline-none"
-            />
-          </div>
-          <select
-            value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value)}
-            className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-          >
-            <option value="">All classifications</option>
-            {DEPARTMENT_TYPES.map((type) => (
-              <option key={type.key} value={type.key}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search office name or code…" />
       </Card>
 
       {actionError && (
@@ -205,21 +240,23 @@ export default function AdminDepartments() {
       <Card bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading departments...</p>
-        ) : departments.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No departments match those filters.</p>
+        ) : table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No departments recorded yet.'
+              : 'No departments match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Code', 'Department', 'Classification', 'Users', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('code')}>Code</SortableTh>
+                  <SortableTh {...table.sortProps('name')}>Department</SortableTh>
+                  <SortableTh {...table.sortProps('type')}>Classification</SortableTh>
+                  <SortableTh {...table.sortProps('userCount')}>Users</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
@@ -276,7 +313,13 @@ export default function AdminDepartments() {
       {editing && (
         <DepartmentFormModal
           title={`Edit ${editing.name}`}
-          defaultValues={{ name: editing.name, code: editing.code, type: editing.type }}
+          defaultValues={{
+            name: editing.name,
+            code: editing.code,
+            type: editing.type,
+            headUserId: editing.headUserId ?? '',
+          }}
+          members={editing.members ?? []}
           onClose={() => setEditing(null)}
           onSubmit={async (values) => {
             await departmentsApi.updateDepartment(editing.id, values)

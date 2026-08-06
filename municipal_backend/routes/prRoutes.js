@@ -34,6 +34,10 @@ router.post(
     "pr.certifyCash",
     "pr.approve",
     "pr.certify",
+    // The Accountant's obligation (step 18b, LGC Sec. 344). Missing from this
+    // outer list the Accountant would hold the permission and still be refused
+    // before the controller ran — the trap documented in SYSTEM_MANUAL §12.
+    "pr.obligate",
     "pr.determineMode"
   ),
   transitionPr

@@ -22,7 +22,9 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
 
@@ -352,7 +354,6 @@ function ReturnModal({ entry, onClose, onConfirm }) {
 export default function AppEntries() {
   const permissions = usePermissions()
   const [entries, setEntries] = useState([])
-  const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -364,10 +365,14 @@ export default function AppEntries() {
 
   // State is only set from the promise callbacks, never synchronously in the
   // effect body — that would cascade renders.
+  // Fetched once and filtered in the browser. The status filter used to be a
+  // query parameter, which meant every change of the dropdown was a round trip
+  // and search could not be combined with it. The endpoint returns the whole
+  // set unpaged, so there is nothing to gain by asking the server again.
   useEffect(() => {
     let cancelled = false
     appApi
-      .fetchAppEntries(statusFilter ? { status: statusFilter } : {})
+      .fetchAppEntries()
       .then((data) => {
         if (!cancelled) {
           setEntries(data)
@@ -380,7 +385,7 @@ export default function AppEntries() {
     return () => {
       cancelled = true
     }
-  }, [statusFilter, refreshToken])
+  }, [refreshToken])
 
   const runTransition = async (entry, action, remarks) => {
     setActionError('')
@@ -395,9 +400,31 @@ export default function AppEntries() {
 
   const canCreate = permissions.has('app.create')
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(entries)
+  // Search, filter, sort and paging over the loaded set. Sorting the money and
+  // the mode by their *displayed* value would sort "₱1,200,000" as text and put
+  // it below "₱900" — so ABC sorts on the raw number and Mode on its label.
+  const table = useTableControls(entries, {
+    searchKeys: ['projectTitle', 'implementingUnitCode', 'description', 'fundSource', 'accountCode'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: Object.entries(APP_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      },
+      {
+        key: 'procurementMode',
+        label: 'All modes',
+        options: PROCUREMENT_MODES.map((mode) => ({ value: mode.key, label: mode.label })),
+      },
+      { key: 'targetStartQuarter', label: 'All start quarters', options: QUARTERS },
+    ],
+    accessors: {
+      abc: (entry) => Number(entry.abc ?? 0),
+      procurementMode: (entry) => modeLabel(entry.procurementMode),
+      status: (entry) => APP_STATUS_LABELS[entry.status] ?? entry.status,
+    },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -414,18 +441,7 @@ export default function AppEntries() {
       />
 
       <Card bodyClassName="p-4">
-        <select
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
-          className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-        >
-          <option value="">All statuses</option>
-          {Object.entries(APP_STATUS_LABELS).map(([key, label]) => (
-            <option key={key} value={key}>
-              {label}
-            </option>
-          ))}
-        </select>
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search project, unit or fund…" />
       </Card>
 
       {actionError && (
@@ -437,21 +453,24 @@ export default function AppEntries() {
       <Card title="APP Entries" icon={ClipboardList} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading entries...</p>
-        ) : entries.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No APP entries yet.</p>
+        ) : table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No APP entries yet.'
+              : 'No entries match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Project', 'Unit', 'ABC', 'Mode', 'Schedule', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('projectTitle')}>Project</SortableTh>
+                  <SortableTh {...table.sortProps('implementingUnitCode')}>Unit</SortableTh>
+                  <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
+                  <SortableTh {...table.sortProps('procurementMode')}>Mode</SortableTh>
+                  <SortableTh {...table.sortProps('targetStartQuarter')}>Schedule</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>

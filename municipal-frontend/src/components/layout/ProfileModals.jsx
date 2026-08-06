@@ -16,17 +16,9 @@ import { useAuth } from '../../context/useAuth'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import FormField from '../ui/FormField'
-import Badge from '../ui/Badge'
 import OtpInput from '../ui/OtpInput'
 
 const CODE_LENGTH = 6
-
-const Row = ({ label, value }) => (
-  <div className="flex justify-between gap-4 border-b border-border-muted py-2 last:border-0">
-    <span className="text-[13px] text-text-secondary">{label}</span>
-    <span className="text-right text-[13px] font-medium text-navy">{value ?? '—'}</span>
-  </div>
-)
 
 const ErrorNote = ({ children }) =>
   children ? (
@@ -115,9 +107,12 @@ const displayNameSchema = z.object({
     .max(190, 'That display name is too long'),
 })
 
-export function ProfileModal({ onClose }) {
+// Opened from the My Profile page, which owns the read-only view of the account
+// that used to be the first screen of this modal. What is left here is the one
+// thing that needs a dialog: a change that has to be confirmed by an emailed
+// code before it is written.
+export function EditDisplayNameModal({ onClose, onSaved }) {
   const { user, setUser } = useAuth()
-  const [editing, setEditing] = useState(false)
   const [step, setStep] = useState('form')
   const [challenge, setChallenge] = useState(null)
   const [pendingName, setPendingName] = useState('')
@@ -165,6 +160,7 @@ export function ProfileModal({ onClose }) {
       // The session user carries the name shown across the shell, so it has to be
       // refreshed here rather than waiting for the next full page load.
       setUser?.(updated)
+      onSaved?.(updated)
       setDone(true)
     } catch (err) {
       setCode('')
@@ -186,7 +182,7 @@ export function ProfileModal({ onClose }) {
     )
   }
 
-  if (editing && step === 'code') {
+  if (step === 'code') {
     return (
       <Modal
         title="Confirm this change"
@@ -208,77 +204,46 @@ export function ProfileModal({ onClose }) {
     )
   }
 
-  if (editing) {
-    return (
-      <Modal title="Edit display name" onClose={onClose}>
-        <form onSubmit={handleSubmit(start)} noValidate className="flex flex-col gap-4">
-          <FormField
-            label="Display name"
-            error={errors.displayName?.message}
-            registration={register('displayName')}
-          />
-
-          {/* Explained rather than simply disabled, because "why can't I change my
-              email?" is the obvious next question and the answer is a real one. */}
-          <div className="rounded-md border border-border-muted bg-chip px-3 py-2.5">
-            <p className="text-[11px] tracking-[0.04em] text-text-faint uppercase">Email address</p>
-            <p className="mt-0.5 text-[13px] font-medium text-navy">{user?.email}</p>
-            <p className="mt-1.5 text-[11.5px] leading-relaxed text-text-faint">
-              This is your accredited address and cannot be changed here. It is the channel your
-              account was approved against and the one every notice and verification code goes to —
-              only the BAC Secretariat can change it, on a reviewed registration.
-            </p>
-          </div>
-
-          <ErrorNote>{serverError}</ErrorNote>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="rounded-md bg-accent px-4 py-2 text-[12px] font-medium text-accent-fg disabled:opacity-60"
-            >
-              {isSubmitting ? 'Sending code…' : 'Continue'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-    )
-  }
-
   return (
-    <Modal title="My Profile" onClose={onClose}>
-      <Row label="Name" value={user?.name} />
-      <Row label="Email" value={user?.email} />
-      <Row label="Role" value={user?.roleName} />
-      <Row label="Department" value={user?.departmentName ?? 'External to the LGU'} />
+    <Modal
+      title="Edit display name"
+      subtitle="Confirmed by a code sent to your registered address."
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit(start)} noValidate className="flex flex-col gap-4">
+        <FormField
+          label="Display name"
+          error={errors.displayName?.message}
+          registration={register('displayName')}
+        />
 
-      <div className="mt-4">
-        <p className="mb-2 text-[11px] tracking-[0.03em] text-text-faint uppercase">
-          Permissions ({user?.permissions?.length ?? 0})
-        </p>
-        <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-          {(user?.permissions ?? []).map((permission) => (
-            <Badge key={permission} tone="info">
-              {permission}
-            </Badge>
-          ))}
+        {/* Explained rather than simply disabled, because "why can't I change my
+            email?" is the obvious next question and the answer is a real one. */}
+        <div className="rounded-md border border-border-muted bg-chip px-3 py-2.5">
+          <p className="text-[11px] tracking-[0.04em] text-text-faint uppercase">Email address</p>
+          <p className="mt-0.5 text-[13px] font-medium text-navy">{user?.email}</p>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-text-faint">
+            This is your accredited address and cannot be changed here. It is the channel your
+            account was approved against and the one every notice and verification code goes to —
+            only the BAC Secretariat can change it, on a reviewed registration.
+          </p>
         </div>
-        <p className="mt-3 text-xs text-text-faint">
-          Roles, departments and email addresses are managed by the System Administrator. Contact them
-          if any of this is wrong.
-        </p>
-      </div>
 
-      <div className="mt-5 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Close
-        </Button>
-        <Button onClick={() => setEditing(true)}>Edit display name</Button>
-      </div>
+        <ErrorNote>{serverError}</ErrorNote>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="rounded-md bg-accent px-4 py-2 text-[12px] font-medium text-accent-fg disabled:opacity-60"
+          >
+            {isSubmitting ? 'Sending code…' : 'Continue'}
+          </button>
+        </div>
+      </form>
     </Modal>
   )
 }

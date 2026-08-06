@@ -66,3 +66,27 @@ export const PROCUREMENT_MODES = [
 ]
 
 export const modeLabel = (key) => PROCUREMENT_MODES.find((mode) => mode.key === key)?.label ?? key
+
+// ── IRR Sec. 7.7 — the two plan cycles ───────────────────────────────────────
+// An indicative line supports the budget proposal and cites NO appropriation;
+// a final line is charged against the enacted ordinance.
+export const PLAN_CYCLE_LABELS = {
+  indicative: 'Indicative — supports the budget proposal (Sec. 7.7.1–7.7.2)',
+  final: 'Final — aligned to the enacted appropriation (Sec. 7.7.5)',
+}
+
+export const PLAN_STAGE_LABELS = {
+  ppmp: 'PPMP',
+  indicativeApp: 'Indicative APP',
+  updatedIndicativeApp: 'Updated Indicative APP (EPA basis)',
+  finalApp: 'Final APP',
+}
+
+// Sec. 7.7 — the 4% MOOE lump sum for foreseeable emergencies.
+export const fetchContingencyStatus = (fiscalYear) =>
+  apiClient.get('/app-entries/contingency', { params: { fiscalYear } }).then((res) => res.data)
+
+// Sec. 7.7.5 — the approved final APP is submitted to the GPPB on or before the
+// end of January of the budget year.
+export const recordGppbSubmission = (payload) =>
+  apiClient.post('/app-entries/gppb-submission', payload).then((res) => res.data)

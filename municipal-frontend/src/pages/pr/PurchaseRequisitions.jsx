@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, FileText, Trash2, AlertTriangle, Wallet, Gavel, Info } from 'lucide-react'
+import { Plus, FileText, Trash2, AlertTriangle, Wallet, Gavel, Info, Eye, Check } from 'lucide-react'
 import * as prApi from '../../api/purchaseRequisitions'
 import {
   PR_STATUS_LABELS,
   PR_STATUS_TONES,
+  PR_STAGE_SEQUENCE,
   PR_TRANSITION_FOR_STATUS,
   PR_RETURN_PERMISSION_FOR_STATUS,
   ASSET_CLASS_LABELS,
@@ -19,7 +20,9 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) =>
   `₱${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -534,16 +537,252 @@ function ReturnModal({ pr, onClose, onConfirm }) {
   )
 }
 
+// ── THE REQUISITION, IN FULL ─────────────────────────────────────────────────
+// There was no way to open a requisition. The table showed a reference, a total
+// and a stage, and every other fact the form carries — what is actually being
+// bought, who has signed, which fund it draws on, why the committee chose the
+// mode it did — was in the API response and rendered nowhere.
+//
+// Read-only on purpose. Acting on a requisition happens from the row, where the
+// controller has already decided which single transition this officer may make;
+// duplicating those buttons here would mean maintaining that decision twice.
+
+// Module scope, not inside the dialog: a component declared during render is a
+// new type on every pass, so React unmounts and remounts the whole subtree
+// instead of updating it.
+const Fact = ({ label, value, mono }) => (
+  <div>
+    <p className="text-[11.5px] tracking-[0.04em] text-text-faint uppercase">{label}</p>
+    <p className={`mt-0.5 text-[13.5px] text-navy ${mono ? 'font-mono text-[12.5px]' : ''}`}>
+      {value ?? '—'}
+    </p>
+  </div>
+)
+
+function RequisitionDetail({ pr, onClose }) {
+  const stageIndex = PR_STAGE_SEQUENCE.indexOf(pr.status)
+
+  // The four stamps LGC Sec. 344 and the municipal process collect, in the order
+  // they are collected. An empty one is as informative as a filled one — it is
+  // how a reader sees where the requisition actually is.
+  const signatures = [
+    ['Treasurer — funds available', pr.cashCertifiedByName, pr.cashCertifiedAt],
+    ["Mayor's approval", pr.mayorApprovedByName, pr.mayorApprovedAt],
+    ['Budget Office — appropriation', pr.appropriationCertifiedByName, pr.appropriationCertifiedAt],
+    ['Accountant — obligation (ORS)', pr.obligatedByName, pr.fundsReservedAt],
+  ]
+
+  return (
+    <Modal
+      title={pr.prNumber}
+      subtitle={pr.appEntryTitle ?? 'Purchase requisition'}
+      size="xl"
+      onClose={onClose}
+    >
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={PR_STATUS_TONES[pr.status]} dot>
+            {PR_STATUS_LABELS[pr.status] ?? pr.status}
+          </Badge>
+          {pr.isEmergency && <Badge tone="danger">Emergency</Badge>}
+          {pr.modeDepartedFromSuggestion && <Badge tone="warning">Departs from threshold</Badge>}
+        </div>
+
+        {pr.returnRemarks && (
+          <p className="rounded-md border border-danger/25 bg-danger/10 px-3.5 py-2.5 text-[13px] leading-relaxed text-danger">
+            <strong>Returned:</strong> {pr.returnRemarks}
+          </p>
+        )}
+
+        {/* ── Where it is in the chain ──────────────────────────────────── */}
+        <section>
+          <p className="mb-3 text-[11.5px] tracking-[0.04em] text-text-faint uppercase">Progress</p>
+          <ol className="flex flex-col gap-0">
+            {PR_STAGE_SEQUENCE.map((stage, index) => {
+              const done = stageIndex > index || pr.status === 'approved'
+              const current = stage === pr.status
+              return (
+                <li key={stage} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <span
+                      className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                        done
+                          ? 'bg-success text-white'
+                          : current
+                            ? 'bg-warning/15 text-warning ring-2 ring-warning/40'
+                            : 'bg-track text-text-faint'
+                      }`}
+                    >
+                      {done ? <Check size={11} /> : index + 1}
+                    </span>
+                    {index < PR_STAGE_SEQUENCE.length - 1 && (
+                      <span
+                        className={`w-px flex-1 ${done ? 'bg-success/40' : 'bg-border-muted'}`}
+                        style={{ minHeight: 18 }}
+                      />
+                    )}
+                  </div>
+                  <p
+                    className={`pb-3 text-[13px] ${
+                      current ? 'font-medium text-navy' : done ? 'text-text-secondary' : 'text-text-faint'
+                    }`}
+                  >
+                    {PR_STATUS_LABELS[stage] ?? stage}
+                  </p>
+                </li>
+              )
+            })}
+          </ol>
+        </section>
+
+        <section className="grid gap-5 border-t border-border-muted pt-5 sm:grid-cols-3">
+          <Fact label="Requested by" value={pr.requesterName} />
+          <Fact label="Office" value={pr.departmentCode} />
+          <Fact label="Date required" value={pr.dateRequired} />
+          <Fact label="Total" value={peso(pr.totalAmount)} />
+          <Fact label="Fund source" value={pr.fundSourceLabel} />
+          <Fact label="APP entry ABC" value={pr.appEntryAbc == null ? null : peso(pr.appEntryAbc)} />
+        </section>
+
+        {/* ── The committee's determination ─────────────────────────────── */}
+        {pr.procurementModeName && (
+          <section className="rounded-md border border-border-muted bg-sidebar p-4">
+            <p className="mb-2 text-[11.5px] tracking-[0.04em] text-text-faint uppercase">
+              Mode of procurement
+            </p>
+            <p className="text-[13.5px] font-medium text-navy">{pr.procurementModeName}</p>
+            {pr.procurementModeCitation && (
+              <p className="mt-0.5 font-mono text-[11.5px] text-text-faint">
+                {pr.procurementModeCitation}
+              </p>
+            )}
+            {pr.modeJustification && (
+              <p className="mt-2 text-[12.5px] leading-relaxed text-text-secondary">
+                {pr.modeJustification}
+              </p>
+            )}
+            {pr.modeDeterminedByName && (
+              <p className="mt-2 text-[11.5px] text-text-faint">
+                Determined by {pr.modeDeterminedByName}
+                {pr.modeDeterminedAt && ` · ${new Date(pr.modeDeterminedAt).toLocaleDateString()}`}
+              </p>
+            )}
+          </section>
+        )}
+
+        {/* ── What is being bought ──────────────────────────────────────── */}
+        <section>
+          <p className="mb-3 text-[11.5px] tracking-[0.04em] text-text-faint uppercase">
+            Items ({pr.lineItems?.length ?? 0})
+          </p>
+          {!pr.lineItems?.length ? (
+            <p className="text-[13px] text-text-faint">No line items recorded.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border-muted">
+              <table className="w-full text-left">
+                <thead className="bg-sidebar">
+                  <tr>
+                    {['Description', 'Qty', 'Unit cost', 'Total', 'Class'].map((head) => (
+                      <th
+                        key={head}
+                        className="px-4 py-2.5 text-[11px] font-medium tracking-[0.04em] whitespace-nowrap text-text-faint uppercase"
+                      >
+                        {head}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pr.lineItems.map((item) => (
+                    <tr key={item.id} className="border-t border-border-muted">
+                      <td className="px-4 py-2.5 text-[13px] text-navy">
+                        {item.description}
+                        {item.unit && (
+                          <span className="ml-1.5 text-[11.5px] text-text-faint">({item.unit})</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-[13px] text-text-secondary tabular-nums">
+                        {item.quantity}
+                      </td>
+                      <td className="px-4 py-2.5 text-[13px] whitespace-nowrap text-text-secondary tabular-nums">
+                        {peso(item.unitCost)}
+                      </td>
+                      <td className="px-4 py-2.5 text-[13px] whitespace-nowrap text-navy tabular-nums">
+                        {peso(item.lineTotal)}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <Badge tone={ASSET_CLASS_TONES[item.assetClass]}>
+                          {ASSET_CLASS_LABELS[item.assetClass]}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Which pot the money must come from. An officer certifying an
+              appropriation needs this before anything else on the form. */}
+          {pr.assetSummary && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {Object.entries(pr.assetSummary)
+                .filter(([, amount]) => amount > 0)
+                .map(([assetClass, amount]) => (
+                  <span
+                    key={assetClass}
+                    className="rounded-md border border-border-muted bg-surface px-3 py-1.5 text-[12px] text-text-secondary"
+                  >
+                    {ASSET_CLASS_LABELS[assetClass]}{' '}
+                    <strong className="text-navy tabular-nums">{peso(amount)}</strong>
+                  </span>
+                ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── Who has signed ────────────────────────────────────────────── */}
+        <section className="border-t border-border-muted pt-5">
+          <p className="mb-3 text-[11.5px] tracking-[0.04em] text-text-faint uppercase">Signatures</p>
+          <div className="grid gap-px overflow-hidden rounded-md border border-border-muted bg-border-muted sm:grid-cols-2">
+            {signatures.map(([label, name, at]) => (
+              <div key={label} className="bg-surface px-4 py-3">
+                <p className="text-[12px] text-text-secondary">{label}</p>
+                {name ? (
+                  <>
+                    <p className="mt-0.5 text-[13px] font-medium text-navy">{name}</p>
+                    <p className="text-[11.5px] text-text-faint">
+                      {at ? new Date(at).toLocaleString() : ''}
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-0.5 text-[13px] text-text-faint">Not yet signed</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="mt-6 flex justify-end">
+        <Button variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function PurchaseRequisitions() {
   const permissions = usePermissions()
   const [prs, setPrs] = useState([])
-  const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [returning, setReturning] = useState(null)
   const [determiningMode, setDeterminingMode] = useState(null)
+  const [viewing, setViewing] = useState(null)
   const [actionError, setActionError] = useState('')
 
   const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
@@ -551,7 +790,7 @@ export default function PurchaseRequisitions() {
   useEffect(() => {
     let cancelled = false
     prApi
-      .fetchPrs(statusFilter ? { status: statusFilter } : {})
+      .fetchPrs()
       .then((data) => {
         if (!cancelled) {
           setPrs(data)
@@ -564,7 +803,7 @@ export default function PurchaseRequisitions() {
     return () => {
       cancelled = true
     }
-  }, [statusFilter, refreshToken])
+  }, [refreshToken])
 
   const runTransition = async (pr, action, payload) => {
     setActionError('')
@@ -579,9 +818,35 @@ export default function PurchaseRequisitions() {
 
   const canCreate = permissions.has('pr.create')
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(prs)
+  // Total sorts on the raw number, not the formatted peso string — "₱90,000"
+  // and "₱900" compare the wrong way round as text. Emergency is a filter of
+  // its own because "show me only the emergencies" is the question this queue
+  // gets asked when something is on fire.
+  const table = useTableControls(prs, {
+    searchKeys: ['prNumber', 'appEntryTitle', 'fundSourceLabel', 'procurementModeName', 'purpose'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: Object.entries(PR_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      },
+      {
+        key: 'isEmergency',
+        label: 'Emergency & routine',
+        options: [
+          { value: 'true', label: 'Emergency only' },
+          { value: 'false', label: 'Routine only' },
+        ],
+        accessor: (pr) => String(Boolean(pr.isEmergency)),
+      },
+      { key: 'procurementModeName', label: 'All modes' },
+    ],
+    accessors: {
+      totalAmount: (pr) => Number(pr.totalAmount ?? 0),
+      status: (pr) => PR_STATUS_LABELS[pr.status] ?? pr.status,
+    },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -598,18 +863,7 @@ export default function PurchaseRequisitions() {
       />
 
       <Card bodyClassName="p-4">
-        <select
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
-          className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-        >
-          <option value="">All statuses</option>
-          {Object.entries(PR_STATUS_LABELS).map(([key, label]) => (
-            <option key={key} value={key}>
-              {label}
-            </option>
-          ))}
-        </select>
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search PR number, project or fund…" />
       </Card>
 
       {actionError && (
@@ -621,21 +875,23 @@ export default function PurchaseRequisitions() {
       <Card title="Requisitions" icon={FileText} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading requisitions...</p>
-        ) : prs.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No requisitions yet.</p>
+        ) : table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No requisitions yet.'
+              : 'No requisitions match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['PR Number', 'APP Entry', 'Total', 'Required', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('prNumber')}>PR Number</SortableTh>
+                  <SortableTh {...table.sortProps('appEntryTitle')}>APP Entry</SortableTh>
+                  <SortableTh {...table.sortProps('totalAmount')}>Total</SortableTh>
+                  <SortableTh {...table.sortProps('dateRequired')}>Required</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
@@ -697,6 +953,15 @@ export default function PurchaseRequisitions() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-3">
+                          {/* First, and available to everyone who can see the
+                              row: reading a requisition is not an action on it. */}
+                          <button
+                            type="button"
+                            onClick={() => setViewing(pr)}
+                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:underline"
+                          >
+                            <Eye size={12} /> View
+                          </button>
                           {pr.editable && canCreate && (
                             <button
                               type="button"
@@ -739,6 +1004,8 @@ export default function PurchaseRequisitions() {
         )}
         <Pagination {...paginationProps} label="requisitions" />
       </Card>
+
+      {viewing && <RequisitionDetail pr={viewing} onClose={() => setViewing(null)} />}
 
       {creating && <PrFormModal onClose={() => setCreating(false)} onSaved={refresh} />}
       {editing && <PrFormModal existing={editing} onClose={() => setEditing(null)} onSaved={refresh} />}

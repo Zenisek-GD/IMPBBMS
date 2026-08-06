@@ -12,6 +12,7 @@ import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
 import { PrHeader } from "../models/prModel.js";
 import { buildLedger, availableFor, programmedFor } from "../services/budgetLedger.js";
+import { REENACTABLE_EXPENSE_CLASSES } from "../services/budgetPreparationWorkflow.js";
 import { auditFromRequest } from "../services/auditLog.js";
 
 // The appropriation register: the ordinance lines the LGU may actually spend
@@ -114,6 +115,129 @@ const validate = (payload) => {
   return null;
 };
 
+// An appropriation's status is the authority behind every peso charged to it,
+// so it moves one way only: a line is keyed as a draft, becomes enacted when
+// the ordinance behind it is recorded, and is closed at year end. Reverting an
+// enacted line to draft would strip the authority from requisitions already
+// obligated against it while leaving those obligations standing.
+const APPROPRIATION_STATUS_FLOW = {
+  draft: ["draft", "enacted"],
+  enacted: ["enacted", "closed"],
+  closed: ["closed"],
+};
+
+const validateStatusChange = (current, next) => {
+  if (next === undefined || next === current) return null;
+  const allowed = APPROPRIATION_STATUS_FLOW[current] ?? [];
+  if (!allowed.includes(next)) {
+    return `An appropriation cannot move from "${current}" to "${next}".`;
+  }
+  return null;
+};
+
+// ── LGC Sec. 323 — reenact the preceding year's appropriations ──────────────
+// Where the Sanggunian has not passed the annual appropriations by the start of
+// the fiscal year, the previous year's are deemed reenacted by operation of law.
+// The LGU keeps operating; it does not stop spending. This system had no way to
+// express that, so a municipality in that position — which is common — would
+// have found every requisition refused for want of an appropriation.
+//
+// What carries over is limited. Sec. 323 reenacts the appropriations for
+// salaries and wages of existing positions, statutory and contractual
+// obligations, and essential operating expenses. New appropriations and capital
+// outlay do not carry over, which is exactly the constraint that makes an LGU
+// under a reenacted budget unable to start new projects.
+export const reenactPriorYear = async (req, res) => {
+  const fiscalYear = Number(req.body?.fiscalYear);
+  if (!Number.isInteger(fiscalYear)) {
+    return res.status(400).json({ message: "A valid fiscal year is required." });
+  }
+
+  // Only where nothing has been enacted for the year. A reenactment alongside
+  // an enacted ordinance would double the LGU's spending authority.
+  const enacted = await Appropriation.findOne({
+    where: { fiscalYear, type: { [Op.in]: ["annual", "supplemental"] }, status: "enacted" },
+  });
+  if (enacted) {
+    return res.status(409).json({
+      message:
+        `Ordinance ${enacted.ordinanceNo} has been enacted for ${fiscalYear}. Sec. 323 reenactment ` +
+        `applies only while the Sanggunian has not passed the annual appropriations.`,
+    });
+  }
+
+  if (await Appropriation.findOne({ where: { fiscalYear, type: "reenacted" } })) {
+    return res.status(409).json({ message: `${fiscalYear} has already been reenacted.` });
+  }
+
+  const priorYear = fiscalYear - 1;
+  const source = await Appropriation.findAll({
+    where: {
+      fiscalYear: priorYear,
+      status: "enacted",
+      // Capital Outlay is deliberately excluded — see above.
+      expenseClass: { [Op.in]: REENACTABLE_EXPENSE_CLASSES },
+    },
+  });
+
+  if (source.length === 0) {
+    return res.status(409).json({
+      message: `No enacted Personal Services or MOOE appropriations found for ${priorYear} to reenact.`,
+    });
+  }
+
+  const created = await Promise.all(
+    source.map((line) =>
+      Appropriation.create({
+        fiscalYear,
+        ordinanceNo: `${line.ordinanceNo} (reenacted for ${fiscalYear} under LGC Sec. 323)`,
+        ordinanceDate: line.ordinanceDate,
+        type: "reenacted",
+        fund: line.fund,
+        expenseClass: line.expenseClass,
+        papCode: line.papCode,
+        uacsCode: line.uacsCode,
+        title: line.title,
+        amount: line.amount,
+        // Reenactment is by operation of law, so the line is live immediately —
+        // there is no further act for anyone to perform.
+        status: "enacted",
+        remarks:
+          `Deemed reenacted from FY ${priorYear} under LGC Sec. 323 pending enactment of the ` +
+          `${fiscalYear} Appropriation Ordinance.`,
+        departmentId: line.departmentId,
+        recordedById: req.currentUser.id,
+      })
+    )
+  );
+
+  await auditFromRequest(req, {
+    actionType: "budget.appropriations.reenacted",
+    entityRef: "appropriation",
+    entityId: created[0]?.id ?? null,
+    summary:
+      `FY ${priorYear} appropriations deemed reenacted for ${fiscalYear} under LGC Sec. 323 — ` +
+      `${created.length} line(s), capital outlay excluded`,
+    afterState: {
+      fiscalYear,
+      linesReenacted: created.length,
+      totalAmount: created.reduce((sum, line) => sum + Number(line.amount), 0),
+      excluded: "capitalOutlay",
+    },
+  });
+
+  res.status(201).json({
+    fiscalYear,
+    reenactedFrom: priorYear,
+    lines: created.length,
+    totalAmount: created.reduce((sum, line) => sum + Number(line.amount), 0),
+    notice:
+      "Capital Outlay was not reenacted. Under LGC Sec. 323 only salaries of existing positions, " +
+      "statutory and contractual obligations and essential operating expenses carry over, so no new " +
+      "capital project may be started until the Appropriation Ordinance is passed.",
+  });
+};
+
 export const createAppropriation = async (req, res) => {
   const error = validate(req.body);
   if (error) return res.status(400).json({ message: error });
@@ -167,6 +291,9 @@ export const updateAppropriation = async (req, res) => {
   const merged = { ...serialize(appropriation), ...req.body };
   const error = validate(merged);
   if (error) return res.status(400).json({ message: error });
+
+  const statusError = validateStatusChange(appropriation.status, req.body.status);
+  if (statusError) return res.status(409).json({ message: statusError });
 
   // Reducing an appropriation below what has already been committed against it
   // would create a negative balance that no later transaction could resolve.

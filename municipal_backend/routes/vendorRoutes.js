@@ -7,6 +7,8 @@ import {
   reviewVendorDocument,
   createBidderAccount,
   resendBidderInvitation,
+  blacklistVendor,
+  liftBlacklist,
 } from "../controllers/vendorController.js";
 import { requirePermission, requireAnyPermission } from "../middleware/permissionMiddleware.js";
 import { rateLimit } from "../middleware/rateLimitMiddleware.js";
@@ -22,13 +24,14 @@ const router = express.Router();
 router.get("/me", requirePermission("bidding.submitBid"), getMyVendorProfile);
 
 // ── The accreditation queue ─────────────────────────────────────────────────
-// Readable by both offices in the onboarding chain, for different reasons: the
-// BAC Secretariat needs it to review submissions, and Admin/IT needs it to see
-// which approved registrations are still waiting for an account. Neither can do
-// the other's job — that is enforced on the routes below, not here.
+// Readable by all three offices in the onboarding chain, for different reasons:
+// the BAC Secretariat needs it to record submissions and check the papers, the
+// BAC itself needs it to rule on eligibility, and Admin/IT needs it to see which
+// approved registrations are still waiting for an account. None of them can do
+// another's job — that is enforced on the routes below, not here.
 router.get(
   "/",
-  requireAnyPermission("bidding.publish", "bidders.createAccount"),
+  requireAnyPermission("bidding.publish", "vendor.determineEligibility", "bidders.createAccount"),
   listVendors
 );
 
@@ -39,12 +42,21 @@ router.get(
 // name goes on the record, not an anonymous request from the internet.
 router.post("/", requirePermission("bidding.publish"), recordCounterSubmission);
 
-// Deciding on the registration belongs to the BAC Secretariat alone.
-router.post("/:id/review", requirePermission("bidding.publish"), reviewVendor);
+// ── The eligibility determination ───────────────────────────────────────────
+// GPM Volume 1, "Responsibilities of the BAC", item iv: "Determine the
+// eligibility of prospective bidders." This is the committee's decision, so it
+// is the Chairperson's and Vice-Chairperson's — not the Secretariat's, which
+// held it until now and was therefore making a committee determination on its
+// own signature.
+router.post("/:id/review", requirePermission("vendor.determineEligibility"), reviewVendor);
 
-// Document-by-document findings, which is what the registration-level decision
-// above is assembled from. Same permission: examining the papers and deciding on
-// them are one job held by one office.
+// Document-by-document findings, which is the evidence the determination above
+// is made on. This stays with the Secretariat: checking that each paper answers
+// the requirement it is filed against is custody and record-keeping, which the
+// GPM gives to the Secretariat as "central depository" and keeper of the
+// registry. The committee then rules on the file the Secretariat assembled —
+// and `reviewVendor` refuses to verify a registration whose documents have not
+// all been examined, so the two acts stay in the right order.
 router.patch(
   "/:id/documents/:documentId/review",
   requirePermission("bidding.publish"),
@@ -73,5 +85,13 @@ router.post(
   rateLimit({ bucket: "bidderInvite", max: 20 }),
   resendBidderInvitation
 );
+
+// ── Blacklisting (RA 12009 Sec. 69) ─────────────────────────────────────────
+// The Head of the Procuring Entity issues Blacklisting Orders, so this sits
+// with `bidding.award` rather than with the Secretariat that reviews
+// accreditations. Barring a firm from all government procurement is not a
+// clerical act.
+router.post("/:id/blacklist", requirePermission("bidding.award"), blacklistVendor);
+router.post("/:id/blacklist/lift", requirePermission("bidding.award"), liftBlacklist);
 
 export default router;

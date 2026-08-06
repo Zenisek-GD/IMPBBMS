@@ -54,7 +54,16 @@ export const EXPENSE_CLASS_LABELS = {
 // continuing   — a prior year's unexpended capital appropriation carried over,
 //                which is why an appropriation's fiscal year and its ordinance
 //                year are not always the same
-export const APPROPRIATION_TYPES = ["annual", "supplemental", "continuing"];
+// reenacted    — LGC Sec. 323. Where the Sanggunian has not passed the annual
+//                appropriations by the start of the fiscal year, "the annual
+//                appropriations of the preceding fiscal year shall be deemed
+//                reenacted and shall remain in force and effect" until it does.
+//                A reenacted line is real spending authority — the LGU operates
+//                on it — but a restricted one: Sec. 323 carries over salaries
+//                of existing positions, statutory and contractual obligations
+//                and essential operating expenses, and pointedly not new
+//                appropriations or capital outlay.
+export const APPROPRIATION_TYPES = ["annual", "supplemental", "continuing", "reenacted"];
 
 export const Appropriation = sequelize.define(
   "Appropriation",

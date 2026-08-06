@@ -82,6 +82,24 @@ export const Vendor = sequelize.define("Vendor", {
   // what the console keys off to stop a second account being created for the same
   // approved registration.
   accountCreatedAt: { type: DataTypes.DATE, allowNull: true },
+
+  // ── Blacklisting (RA 12009 Sec. 69) ────────────────────────────────────────
+  // The sanction that bars a supplier from participating in any government
+  // procurement. `registrationStatus: "blacklisted"` and the eligibility check
+  // that reads it both existed; the *act* did not, so a supplier could only be
+  // blacklisted by editing the database.
+  //
+  // A blacklisting has a term. The Performance Securing Declaration states the
+  // default the IRR carries: one year for a first offence, two where there is a
+  // prior similar offence. Storing the end date rather than a boolean means the
+  // sanction lapses on its own instead of needing somebody to remember.
+  blacklistedAt: { type: DataTypes.DATE, allowNull: true },
+  blacklistedUntil: { type: DataTypes.DATE, allowNull: true },
+  blacklistGrounds: { type: DataTypes.TEXT, allowNull: true },
+  blacklistOrderNo: { type: DataTypes.STRING, allowNull: true },
+  // What the registration was before the sanction, so lifting it restores the
+  // supplier to where they stood rather than guessing at "verified".
+  statusBeforeBlacklist: { type: DataTypes.STRING, allowNull: true },
 });
 
 // The account, once one exists.

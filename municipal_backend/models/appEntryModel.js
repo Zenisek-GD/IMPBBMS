@@ -24,22 +24,56 @@ export const APP_STATES = [
 
 export const QUARTERS = ["Q1", "Q2", "Q3", "Q4"];
 
-// ── PPMP → INDICATIVE APP → FINAL APP ────────────────────────────────────────
-// The plan is not one document. Each office prepares its own Project
-// Procurement Management Plan; the BAC Secretariat consolidates those into the
-// Annual Procurement Plan, which is indicative while the budget is still a
-// proposal and becomes final once the Appropriation Ordinance is enacted.
+// ── THE THREE PPMPs AND THE TWO APPs ─────────────────────────────────────────
+// RA 12009 IRR Sec. 7.7 prescribes a cycle that runs alongside the budget, not
+// after it:
 //
-// The system had one flat entry created directly by departments, which meant
-// the "consolidate" step in its own workflow had nothing to consolidate *from*.
-// The stage now moves with the workflow: an entry is filed as a PPMP line,
-// becomes part of the indicative APP on consolidation, and is marked final on
-// approval — at which point it is charged against an enacted appropriation.
-export const PLAN_STAGES = ["ppmp", "indicativeApp", "finalApp"];
+//   7.7.1  Indicative PPMP   — prepared by the End-User to SUPPORT the budget
+//                              proposal, before anything is appropriated
+//   7.7.2  Indicative APP    — the BAC Secretariat consolidates the approved
+//                              indicative PPMPs; the BAC then recommends the
+//                              mode of procurement to the HoPE
+//   7.7.3  Revised PPMP      — on submission of the Local Expenditure Program
+//                              to the Sanggunian, revised to the budgetary
+//                              allocation
+//   7.7.4  Updated Indicative APP — consolidated from the revised PPMPs and
+//                              posted; this is what Early Procurement
+//                              Activities run against
+//   7.7.5  Finalized PPMP    — once the appropriation ordinance is final
+//          Final APP         — consolidated, BAC-recommended, HoPE-approved,
+//                              posted and submitted to the GPPB by end-January
+//
+// This system previously implemented only the last of those. Every entry
+// required an ENACTED appropriation before it could be created, so all three
+// stages happened after enactment and the "indicative" stage was indicative of
+// nothing — the label said "pending appropriation" while the controller refused
+// to accept a line without one.
+//
+// `planCycle` is what distinguishes them. An indicative line is charged against
+// a budget PROPOSAL; a final line against an ENACTED appropriation. They are
+// the same project at two points in the year, which is why the final line
+// carries a link back to the indicative one it came from.
+export const PLAN_CYCLES = ["indicative", "final"];
+
+export const PLAN_CYCLE_LABELS = {
+  indicative: "Indicative — supports the budget proposal (IRR Sec. 7.7.1–7.7.2)",
+  final: "Final — aligned to the enacted appropriation (IRR Sec. 7.7.5)",
+};
+
+export const PLAN_STAGES = [
+  "ppmp",
+  "indicativeApp",
+  // Sec. 7.7.4 — the indicative APP re-consolidated from PPMPs revised to the
+  // Local Expenditure Program. This is the document Early Procurement
+  // Activities are conducted against.
+  "updatedIndicativeApp",
+  "finalApp",
+];
 
 export const PLAN_STAGE_LABELS = {
   ppmp: "PPMP — office project procurement management plan",
-  indicativeApp: "Indicative APP — consolidated, pending appropriation",
+  indicativeApp: "Indicative APP — consolidated to support the budget proposal",
+  updatedIndicativeApp: "Updated Indicative APP — revised to the Local Expenditure Program (EPA basis)",
   finalApp: "Final APP — aligned to the enacted appropriation",
 };
 
@@ -78,6 +112,36 @@ export const AppEntry = sequelize.define(
     // Which document this line currently belongs to. Advances with the
     // workflow rather than being set by hand.
     planStage: { type: DataTypes.ENUM(...PLAN_STAGES), allowNull: false, defaultValue: "ppmp" },
+
+    // Which of the two cycles this line belongs to. An indicative line is
+    // filed against a budget proposal before anything is appropriated; a final
+    // line against an enacted appropriation. The distinction is what lets the
+    // indicative APP exist at all.
+    planCycle: { type: DataTypes.ENUM(...PLAN_CYCLES), allowNull: false, defaultValue: "final" },
+
+    // Sec. 7.7.2(i) — "Indication whether the project shall be undertaken
+    // through EPA". Early Procurement Activities let the LGU run the whole
+    // procurement short of award before the ordinance is enacted, which is one
+    // of the substantive changes RA 12009 made and the reason the indicative
+    // APP matters operationally rather than only on paper.
+    earlyProcurement: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+
+    // Sec. 7.7.2(e) and (j) — fields the Indicative APP is required to carry
+    // and which had no representation at all.
+    bidEvaluationCriteria: { type: DataTypes.TEXT, allowNull: true },
+    procurementStrategy: { type: DataTypes.TEXT, allowNull: true },
+
+    // Sec. 7.7.2 — the BAC's recommendation of the mode to the HoPE. The mode
+    // itself was being chosen by the requesting office with nothing checking it
+    // against the thresholds and nothing reconciling it with what the committee
+    // later determined on the requisition.
+    modeRecommendedAt: { type: DataTypes.DATE, allowNull: true },
+    modeRecommendationBasis: { type: DataTypes.TEXT, allowNull: true },
+
+    // Sec. 7.7.5 — the approved final APP is posted and submitted to the GPPB
+    // on or before the end of January of the budget year.
+    postedAt: { type: DataTypes.DATE, allowNull: true },
+    gppbSubmittedAt: { type: DataTypes.DATE, allowNull: true },
 
     // Set when the entry is approved; Section 4.3 forbids edits afterwards.
     lockedAt: { type: DataTypes.DATE, allowNull: true },
@@ -121,5 +185,12 @@ AppEntry.belongsTo(AipEntry, { as: "aipEntry", foreignKey: "aipEntryId" });
 AipEntry.hasMany(AppEntry, { as: "appEntries", foreignKey: "aipEntryId" });
 
 AppEntry.belongsTo(User, { as: "createdBy", foreignKey: "createdById" });
+
+// The indicative line this final line was carried forward from. Sec. 7.7.5 has
+// the End-User "finalize the PPMPs to reflect the authorized budgetary
+// allocation" — it is the same project, re-costed, not a new one, and the link
+// is what lets an auditor see what was originally asked for against what the
+// ordinance actually allowed.
+AppEntry.belongsTo(AppEntry, { as: "indicativeOrigin", foreignKey: "indicativeOriginId" });
 
 export { sequelize };

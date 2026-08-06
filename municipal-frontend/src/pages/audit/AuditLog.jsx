@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import { ScrollText, ShieldCheck, ShieldAlert, Download, Search } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ScrollText, ShieldCheck, ShieldAlert, Download } from 'lucide-react'
 import * as insightsApi from '../../api/insights'
-import { OUTCOME_TONES, auditExportUrl } from '../../api/insights'
+import { OUTCOME_TONES, auditExportUrl, actionLabel, entityLabel } from '../../api/insights'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
@@ -10,43 +10,82 @@ import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 export default function AuditLog() {
   const permissions = usePermissions()
   const [entries, setEntries] = useState([])
   const [verification, setVerification] = useState(null)
-  const [actorFilter, setActorFilter] = useState('')
-  const [outcomeFilter, setOutcomeFilter] = useState('')
   const [inspecting, setInspecting] = useState(null)
 
   useEffect(() => {
     let cancelled = false
-    const params = {}
-    if (actorFilter) params.actor = actorFilter
-    if (outcomeFilter) params.outcome = outcomeFilter
-
-    const timer = setTimeout(() => {
-      Promise.all([insightsApi.fetchAuditLog(params), insightsApi.verifyAuditChain()])
-        .then(([log, verify]) => {
-          if (cancelled) return
-          setEntries(log)
-          setVerification(verify)
-        })
-        .catch(() => {})
-    }, 250)
-
+    Promise.all([insightsApi.fetchAuditLog(), insightsApi.verifyAuditChain()])
+      .then(([log, verify]) => {
+        if (cancelled) return
+        setEntries(log)
+        setVerification(verify)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
-      clearTimeout(timer)
     }
-  }, [actorFilter, outcomeFilter])
+  }, [])
 
   const canExport = permissions.has('audit.export')
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(entries)
+  // Only the actions actually present, named the way the table names them, and
+  // ordered the way a reader would look for them.
+  const actionOptions = useMemo(() => {
+    const seen = new Set(entries.map((entry) => entry.actionType).filter(Boolean))
+    return [...seen]
+      .map((value) => ({ value, label: actionLabel(value) }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [entries])
+
+  // The actor and outcome filters were query parameters behind a 250ms debounce;
+  // they are local now, so they combine with a free-text search across the
+  // action, the record and the summary, and with a column sort.
+  //
+  // Search covers the readable action name as well as the raw key, so both
+  // "signed in" and "auth.login" find the same rows.
+  const table = useTableControls(entries, {
+    searchKeys: (entry) =>
+      [
+        entry.actionType,
+        actionLabel(entry.actionType),
+        entityLabel(entry),
+        entry.summary,
+        entry.actorName,
+        entry.actorRole,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    filters: [
+      {
+        key: 'outcome',
+        label: 'All outcomes',
+        options: [
+          { value: 'success', label: 'Success' },
+          { value: 'denied', label: 'Denied' },
+          { value: 'failed', label: 'Failed' },
+        ],
+      },
+      { key: 'actorName', label: 'All actors' },
+      { key: 'actorRole', label: 'All roles' },
+      // Explicit options, because the derived ones would be the raw keys — and
+      // a dropdown full of "auth.login.success" is the thing this screen is
+      // being fixed to stop showing.
+      { key: 'actionType', label: 'All actions', options: actionOptions },
+    ],
+    accessors: {
+      sequence: (entry) => Number(entry.sequence ?? 0),
+      actionType: (entry) => actionLabel(entry.actionType),
+    },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -98,46 +137,30 @@ export default function AuditLog() {
       )}
 
       <Card bodyClassName="p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-56 flex-1">
-            <Search size={15} className="absolute top-1/2 left-3 -translate-y-1/2 text-text-faint" />
-            <input
-              type="text"
-              value={actorFilter}
-              onChange={(event) => setActorFilter(event.target.value)}
-              placeholder="Filter by actor..."
-              className="w-full rounded border border-border-muted py-2 pr-4 pl-9 text-sm text-navy focus:border-navy focus:outline-none"
-            />
-          </div>
-          <select
-            value={outcomeFilter}
-            onChange={(event) => setOutcomeFilter(event.target.value)}
-            className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-          >
-            <option value="">All outcomes</option>
-            <option value="success">Success</option>
-            <option value="denied">Denied</option>
-            <option value="failed">Failed</option>
-          </select>
-        </div>
+        <TableToolbar
+          {...table.toolbarProps}
+          searchPlaceholder="Search action, record, actor or summary…"
+        />
       </Card>
 
       <Card title="Events" icon={ScrollText} bodyClassName="">
-        {entries.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No matching events.</p>
+        {table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No recorded events yet.'
+              : 'No events match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['#', 'When', 'Action', 'Actor', 'Entity', 'Outcome', 'Chain'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('sequence')}>#</SortableTh>
+                  <SortableTh {...table.sortProps('recordedAt')}>When</SortableTh>
+                  <SortableTh {...table.sortProps('actionType')}>Action</SortableTh>
+                  <SortableTh {...table.sortProps('actorName')}>Actor</SortableTh>
+                  <SortableTh {...table.sortProps('outcome')}>Outcome</SortableTh>
+                  <SortableTh {...table.sortProps('hash')}>Chain</SortableTh>
                 </tr>
               </thead>
               <tbody>
@@ -145,21 +168,27 @@ export default function AuditLog() {
                   <tr
                     key={entry.id}
                     onClick={() => setInspecting(entry)}
-                    className="cursor-pointer border-t border-border-muted hover:bg-sidebar"
+                    className="cursor-pointer border-t border-border-muted align-top hover:bg-sidebar"
                   >
                     <td className="px-4 py-3 font-mono text-xs text-text-faint">{entry.sequence}</td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">
                       {new Date(entry.recordedAt).toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs text-navy">{entry.actionType}</td>
+                    {/* The record acted on used to have a column of its own,
+                        printed as "Contract#41". It reads better as a subtitle
+                        under the action, and the raw key stays available in the
+                        detail dialog and the CSV export. */}
+                    <td className="px-4 py-3">
+                      <p className="text-[13px] text-navy">{actionLabel(entry.actionType)}</p>
+                      {entityLabel(entry) && (
+                        <p className="mt-0.5 text-[11px] text-text-faint">{entityLabel(entry)}</p>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-[13px] text-navy">
                       {entry.actorName ?? '—'}
                       {entry.actorRole && (
                         <p className="text-[11px] text-text-faint">{entry.actorRole}</p>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-[13px] text-text-secondary">
-                      {entry.entityRef ? `${entry.entityRef}#${entry.entityId ?? '—'}` : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={OUTCOME_TONES[entry.outcome]}>{entry.outcome}</Badge>
@@ -181,7 +210,17 @@ export default function AuditLog() {
           <div className="flex flex-col gap-3 text-[13px]">
             <div>
               <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">Action</p>
-              <p className="font-mono text-navy">{inspecting.actionType}</p>
+              <p className="text-navy">{actionLabel(inspecting.actionType)}</p>
+              {/* The raw key stays here on purpose: it is what the CSV export
+                  and anything scripting against the log actually match on. */}
+              <p className="mt-0.5 font-mono text-[11px] text-text-faint">{inspecting.actionType}</p>
+            </div>
+
+            {/* Never shown anywhere before — the table had an Entity column but
+                the dialog behind it did not repeat the reference. */}
+            <div>
+              <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">Record</p>
+              <p className="text-text-secondary">{entityLabel(inspecting) ?? '—'}</p>
             </div>
             {inspecting.summary && (
               <div>

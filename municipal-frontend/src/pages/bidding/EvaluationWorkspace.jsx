@@ -9,6 +9,10 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) =>
   value === null || value === undefined
@@ -162,6 +166,38 @@ export default function EvaluationWorkspace() {
   const canChair = permissions.has('bidding.chairEvaluation')
   const canApproveAward = permissions.has('bidding.award')
 
+  // The procurement picker. It is a row of buttons rather than a table, but it
+  // is a list that grows with the LGU's workload and it needed the same search
+  // and filter as everything else — a Mayor approving awards should not have to
+  // read forty reference numbers to find one.
+  const rfqTable = useTableControls(rfqs, {
+    searchKeys: ['referenceNo', 'title'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All stages',
+        options: Object.entries(RFQ_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      },
+    ],
+  })
+
+  // Bid price and average score sort numerically. This is the ranking the
+  // Chairperson works from — the Lowest Calculated Responsive Bid is decided on
+  // the server, but being able to order the table by price is how a reader
+  // checks that the ranking says what it should.
+  //
+  // Sealed values sort last in both directions, which is the honest position
+  // for a figure nobody is allowed to see yet.
+  const bidTable = useTableControls(bidData?.bids, {
+    searchKeys: ['vendorName', 'status'],
+    filters: [{ key: 'status', label: 'All bid statuses' }],
+    accessors: {
+      totalBidPrice: (bid) => (bid.totalBidPrice == null ? null : Number(bid.totalBidPrice)),
+      averageScore: (bid) => (bid.averageScore == null ? null : Number(bid.averageScore)),
+      evaluationCount: (bid) => Number(bid.evaluationCount ?? 0),
+    },
+  })
+
   return (
     <DashboardPage>
       <PageHeader
@@ -176,11 +212,19 @@ export default function EvaluationWorkspace() {
       )}
 
       <Card bodyClassName="p-4">
+        {rfqs.length > 0 && (
+          <div className="mb-3">
+            <TableToolbar {...rfqTable.toolbarProps} searchPlaceholder="Search reference or title…" />
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
           {rfqs.length === 0 && (
             <p className="text-[13px] text-text-faint">No procurements are currently under evaluation.</p>
           )}
-          {rfqs.map((rfq) => (
+          {rfqs.length > 0 && rfqTable.rows.length === 0 && (
+            <p className="text-[13px] text-text-faint">No procurements match your search or filters.</p>
+          )}
+          {rfqTable.rows.map((rfq) => (
             <button
               key={rfq.id}
               type="button"
@@ -221,22 +265,26 @@ export default function EvaluationWorkspace() {
             </p>
           </div>
 
+          {bidData.bids.length > 0 && (
+            <div className="border-b border-border-muted p-4">
+              <TableToolbar {...bidTable.toolbarProps} searchPlaceholder="Search bidder…" />
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Bidder', 'Avg. Score', 'Evaluations', 'Bid Price', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...bidTable.sortProps('vendorName')}>Bidder</SortableTh>
+                  <SortableTh {...bidTable.sortProps('averageScore')}>Avg. Score</SortableTh>
+                  <SortableTh {...bidTable.sortProps('evaluationCount')}>Evaluations</SortableTh>
+                  <SortableTh {...bidTable.sortProps('totalBidPrice')}>Bid Price</SortableTh>
+                  <SortableTh {...bidTable.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
-                {bidData.bids.map((bid) => (
+                {bidTable.pageRows.map((bid) => (
                   <tr key={bid.id} className="border-t border-border-muted">
                     <td className="px-4 py-3 text-[13px] text-navy">
                       <span className="flex items-center gap-2">
@@ -305,6 +353,13 @@ export default function EvaluationWorkspace() {
               </tbody>
             </table>
           </div>
+
+          {bidData.bids.length > 0 && bidTable.rows.length === 0 && (
+            <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+              No bids match your search or filters.
+            </p>
+          )}
+          {bidTable.rows.length > 0 && <Pagination {...bidTable.paginationProps} label="bids" />}
 
           {bidData.blind && canChair && (
             <div className="flex items-center justify-between gap-4 border-t border-border-muted px-4 py-3">

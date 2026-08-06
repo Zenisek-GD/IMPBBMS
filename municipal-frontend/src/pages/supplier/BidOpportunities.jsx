@@ -10,7 +10,9 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
 import OtpInput from '../../components/ui/OtpInput'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -252,9 +254,25 @@ export default function BidOpportunities() {
 
   const verified = profile?.canBid
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(rfqs)
+  // A supplier's first question is what closes soonest, so that is the default
+  // order rather than whatever the API returned.
+  const table = useTableControls(rfqs, {
+    searchKeys: ['referenceNo', 'title', 'modeName'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: Object.entries(RFQ_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      },
+      { key: 'modeName', label: 'All modes' },
+    ],
+    accessors: {
+      abc: (rfq) => Number(rfq.abc ?? 0),
+      status: (rfq) => RFQ_STATUS_LABELS[rfq.status] ?? rfq.status,
+    },
+    initialSort: { key: 'closingDate', direction: 'asc' },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -278,23 +296,29 @@ export default function BidOpportunities() {
       )}
 
       <Card title="Open Procurements" icon={Inbox} bodyClassName="">
-        {rfqs.length === 0 ? (
+        {rfqs.length > 0 && (
+          <div className="border-b border-border-muted p-4">
+            <TableToolbar {...table.toolbarProps} searchPlaceholder="Search reference, project or mode…" />
+          </div>
+        )}
+        {table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            No opportunities are open right now.
+            {table.totalBeforeFilters === 0
+              ? 'No opportunities are open right now.'
+              : 'No opportunities match your search or filters.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Reference', 'Project', 'Mode', 'ABC', 'Closes', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('referenceNo')}>Reference</SortableTh>
+                  <SortableTh {...table.sortProps('title')}>Project</SortableTh>
+                  <SortableTh {...table.sortProps('modeName')}>Mode</SortableTh>
+                  <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
+                  <SortableTh {...table.sortProps('closingDate')}>Closes</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>

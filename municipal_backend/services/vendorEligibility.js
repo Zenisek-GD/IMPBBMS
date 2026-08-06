@@ -14,6 +14,17 @@ export const checkVendorEligibility = (vendor, { asOf = new Date() } = {}) => {
     return { eligible: false, reason: "No supplier registration on record." };
   }
 
+  // A blacklisting that has run its term is spent. Checked before the status so
+  // a supplier whose one or two years have elapsed is not barred forever by a
+  // flag nobody thought to clear.
+  if (
+    vendor.registrationStatus === "blacklisted" &&
+    vendor.blacklistedUntil &&
+    new Date() > new Date(vendor.blacklistedUntil)
+  ) {
+    return { eligible: true, expiredBlacklist: true };
+  }
+
   if (vendor.registrationStatus === "blacklisted") {
     return {
       eligible: false,

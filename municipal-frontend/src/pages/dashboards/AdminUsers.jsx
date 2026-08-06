@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Plus, KeyRound, Search, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Plus, KeyRound, CheckCircle2, AlertCircle } from 'lucide-react'
 import * as usersApi from '../../api/users'
 import { fetchDepartments } from '../../api/departments'
 import { emailSchema, passwordSchema } from '../../config/validation'
@@ -15,7 +15,9 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
-import { usePagination } from '../../components/ui/usePagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 // Which roles are external to the LGU comes from the API (Role.isExternal), so
 // the rule lives in one place — see EXTERNAL_ROLES in userController.js.
@@ -184,9 +186,6 @@ export default function AdminUsers() {
   const [users, setUsers] = useState([])
   const [roles, setRoles] = useState([])
   const [departments, setDepartments] = useState([])
-  const [search, setSearch] = useState('')
-  const [roleFilter, setRoleFilter] = useState('')
-  const [departmentFilter, setDepartmentFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -195,16 +194,15 @@ export default function AdminUsers() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await usersApi.fetchUsers({
-        ...(search ? { search } : {}),
-        ...(roleFilter ? { role: roleFilter } : {}),
-        ...(departmentFilter ? { department: departmentFilter } : {}),
-      })
+      // Fetched whole and filtered in the browser. The search and the two
+      // filters used to be query parameters, which meant every keystroke was a
+      // round trip and none of them could be combined with a column sort.
+      const data = await usersApi.fetchUsers()
       setUsers(data)
     } finally {
       setLoading(false)
     }
-  }, [search, roleFilter, departmentFilter])
+  }, [])
 
   useEffect(() => {
     usersApi.fetchRoles().then(setRoles).catch(() => setRoles([]))
@@ -237,9 +235,16 @@ export default function AdminUsers() {
     }
   }
 
-  // Paged client-side: the whole set is already loaded, so this keeps
-  // filtering instant while stopping a long list from running off-screen.
-  const { pageRows, paginationProps } = usePagination(users)
+  const table = useTableControls(users, {
+    searchKeys: ['name', 'email', 'roleName', 'departmentName'],
+    filters: [
+      { key: 'roleName', label: 'All roles' },
+      { key: 'departmentName', label: 'All departments' },
+      { key: 'status', label: 'All statuses' },
+    ],
+    initialSort: { key: 'name', direction: 'asc' },
+  })
+  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -254,62 +259,29 @@ export default function AdminUsers() {
       />
 
       <Card bodyClassName="p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-56 flex-1">
-            <Search size={15} className="absolute top-1/2 left-3 -translate-y-1/2 text-text-faint" />
-            <input
-              type="text"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name or email..."
-              className="w-full rounded border border-border-muted py-2 pr-4 pl-9 text-sm text-navy focus:border-navy focus:outline-none"
-            />
-          </div>
-          <select
-            value={roleFilter}
-            onChange={(event) => setRoleFilter(event.target.value)}
-            className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-          >
-            <option value="">All roles</option>
-            {roles.map((role) => (
-              <option key={role.id} value={role.key}>
-                {role.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={departmentFilter}
-            onChange={(event) => setDepartmentFilter(event.target.value)}
-            className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-          >
-            <option value="">All departments</option>
-            {departments.map((department) => (
-              <option key={department.id} value={department.id}>
-                {department.code} — {department.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search name, email, role or office…" />
       </Card>
 
       <Card bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading users...</p>
-        ) : users.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No users match those filters.</p>
+        ) : table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No users yet.'
+              : 'No users match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Name', 'Email', 'Role', 'Department', 'Status', 'Actions'].map((head) => (
-                    <th
-                      key={head}
-                      className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                    >
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('name')}>Name</SortableTh>
+                  <SortableTh {...table.sortProps('email')}>Email</SortableTh>
+                  <SortableTh {...table.sortProps('roleName')}>Role</SortableTh>
+                  <SortableTh {...table.sortProps('departmentName')}>Department</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>

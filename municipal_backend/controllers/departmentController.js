@@ -1,6 +1,7 @@
 import { Op, fn, col } from "sequelize";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
+import { Role } from "../models/roleModel.js";
 
 const serialize = (department) => ({
   id: department.id,
@@ -10,6 +11,13 @@ const serialize = (department) => ({
   status: department.status,
   headUserId: department.headUserId ?? null,
   userCount: Number(department.get("userCount") ?? 0),
+  // The office's own staff, so the administrator can designate a head from a
+  // list rather than knowing a user id. Only returned on the admin listing.
+  members: (department.Users ?? []).map((user) => ({
+    id: user.id,
+    name: user.name,
+    roleName: user.Role?.name ?? null,
+  })),
 });
 
 // ── The office directory ─────────────────────────────────────────────────────
@@ -55,16 +63,18 @@ export const listDepartments = async (req, res) => {
 
   const departments = await Department.findAll({
     where,
-    attributes: {
-      include: [[fn("COUNT", col("Users.id")), "userCount"]],
-    },
-    include: [{ model: User, attributes: [] }],
-    group: ["Department.id"],
+    include: [{ model: User, attributes: ["id", "name"], include: [{ model: Role, attributes: ["name"] }] }],
     order: [["name", "ASC"]],
-    subQuery: false,
   });
 
-  res.json(departments.map(serialize));
+  // Counted in JS rather than by SQL aggregate: the members list above needs the
+  // rows anyway, and COUNT() alongside an eager-loaded association forces a
+  // GROUP BY that returns one member per office instead of all of them.
+  res.json(
+    departments.map((department) =>
+      serialize(Object.assign(department, { dataValues: { ...department.dataValues, userCount: (department.Users ?? []).length } }))
+    )
+  );
 };
 
 export const createDepartment = async (req, res) => {

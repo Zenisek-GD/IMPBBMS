@@ -8,9 +8,12 @@ import ProtectedRoute from './routes/ProtectedRoute'
 import RoleRoute from './routes/RoleRoute'
 import RoleHome from './routes/RoleHome'
 import RoleWorkspace from './pages/dashboards/RoleWorkspace'
+import MyProfile from './pages/account/MyProfile'
+import PublicMessages from './pages/messages/PublicMessages'
 import AdminUsers from './pages/dashboards/AdminUsers'
 import AdminDepartments from './pages/dashboards/AdminDepartments'
 import AdminSettings from './pages/dashboards/AdminSettings'
+import AdminThresholds from './pages/dashboards/AdminThresholds'
 import BidOpportunities from './pages/supplier/BidOpportunities'
 import DevelopmentPlanning from './pages/planning/DevelopmentPlanning'
 import BudgetPreparation from './pages/budget/BudgetPreparation'
@@ -19,6 +22,8 @@ import PurchaseRequisitions from './pages/pr/PurchaseRequisitions'
 import RfqManagement from './pages/bidding/RfqManagement'
 import VendorVerification from './pages/bidding/VendorVerification'
 import EvaluationWorkspace from './pages/bidding/EvaluationWorkspace'
+import Observers from './pages/bidding/Observers'
+import Protests from './pages/bidding/Protests'
 import Contracts from './pages/contracts/Contracts'
 import Deliveries from './pages/contracts/Deliveries'
 import LiveConference from './pages/contracts/LiveConference'
@@ -77,6 +82,30 @@ function App() {
         <Route path="/coming-soon" element={<ComingSoon />} />
 
         <Route element={<AppShell />}>
+          {/* Every signed-in account has one, whatever the role — it is reached
+              from the sidebar footer rather than a header dropdown, so it needs
+              no RoleRoute guard. */}
+          <Route path="/profile" element={<MyProfile />} />
+
+          {/* Public correspondence. The five offices a message can be routed to
+              — see MESSAGE_ROUTING on the server. The API scopes the list to
+              what the caller's permissions actually cover, so this list only
+              decides who may open the screen. */}
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'bacSecretariat',
+                  'internalAuditor',
+                  'hope',
+                  'systemAdministrator',
+                ]}
+              />
+            }
+          >
+            <Route path="/messages" element={<PublicMessages />} />
+          </Route>
+
           {/* ── Development planning ────────────────────────────────────────
               The layer above procurement. Read by everyone who has to cite a
               plan; written only by the offices that hold the permissions, which
@@ -92,6 +121,7 @@ function App() {
                   'budgetOfficer',
                   'municipalTreasurer',
                   'departmentRequester',
+                  'headOfOffice',
                   'bacSecretariat',
                   'internalAuditor',
                 ]}
@@ -116,6 +146,7 @@ function App() {
                   'sanggunianSecretary',
                   'hope',
                   'departmentRequester',
+                  'headOfOffice',
                   'municipalAccountant',
                   'internalAuditor',
                 ]}
@@ -125,34 +156,73 @@ function App() {
             <Route path="/budget/preparation" element={<BudgetPreparation />} />
           </Route>
 
-          {/* The APP is shared across the roles that act on it (Section 4.2),
-              so access is by permission rather than by a single role. */}
+          {/* ── The Annual Procurement Plan ──────────────────────────────────
+              Shared across the roles that act on it (Section 4.2), so access is
+              by permission rather than by a single role. Observers belong here:
+              they hold `app.viewPublished`, and the controller narrows their
+              query to approved entries only. */}
           <Route
             element={
               <RoleRoute
                 allow={[
                   'departmentRequester',
+                  'headOfOffice',
                   'bacSecretariat',
                   'budgetOfficer',
-                  // The Treasurer certifies cash availability on requisitions
-                  // (LGC Sec. 344), so they need to reach this page — without
-                  // this they held the permission but had no route to use it.
                   'municipalTreasurer',
+                  'municipalAccountant',
                   'hope',
                   'bacChairperson',
+                  'bacViceChairperson',
                   'bacMember',
                   'twgMember',
                   'internalAuditor',
                   'observer',
+                  // The Planning Office holds `app.view` and its sidebar has
+                  // always linked here — the route guard simply never listed
+                  // it, so the link 403'd. Planning reads the APP to check that
+                  // what is being procured matches what was programmed.
+                  'planningOfficer',
                 ]}
               />
             }
           >
             <Route path="/app-entries" element={<AppEntries />} />
+          </Route>
+
+          {/* ── Purchase requisitions ────────────────────────────────────────
+              A narrower list than the APP above. `observer` is deliberately
+              absent: observers hold `app.viewPublished` but no `pr.view`, so
+              routing them here sent them to a page that could only ever 403.
+
+              The Treasurer certifies availability of funds and the Accountant
+              obligates the appropriation (LGC Sec. 344) — both need to reach
+              this page, and the Accountant previously had no route to a stage
+              they now own. */}
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'departmentRequester',
+                  'headOfOffice',
+                  'bacSecretariat',
+                  'budgetOfficer',
+                  'municipalTreasurer',
+                  'municipalAccountant',
+                  'hope',
+                  'bacChairperson',
+                  'bacViceChairperson',
+                  'bacMember',
+                  'twgMember',
+                  'internalAuditor',
+                ]}
+              />
+            }
+          >
             <Route path="/purchase-requisitions" element={<PurchaseRequisitions />} />
           </Route>
 
-          <Route element={<RoleRoute allow={['departmentRequester']} />}>
+          <Route element={<RoleRoute allow={['departmentRequester', 'headOfOffice']} />}>
             <Route path="/dashboard" element={<RoleWorkspace />} />
           </Route>
 
@@ -161,7 +231,9 @@ function App() {
             <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/admin/departments" element={<AdminDepartments />} />
             <Route path="/admin/settings" element={<AdminSettings />} />
-            <Route path="/admin/thresholds" element={<AdminSettings />} />
+            {/* Was <AdminSettings /> as well, which made the "Thresholds"
+                sidebar entry a second link to the settings page. */}
+            <Route path="/admin/thresholds" element={<AdminThresholds />} />
 
             {/* The Admin/IT end of bidder onboarding. Same screen the
                 Secretariat uses, because it is the same queue — but the two
@@ -176,7 +248,7 @@ function App() {
             <Route path="/executive" element={<RoleWorkspace />} />
           </Route>
 
-          <Route element={<RoleRoute allow={['bacChairperson']} />}>
+          <Route element={<RoleRoute allow={['bacChairperson', 'bacViceChairperson']} />}>
             <Route path="/bac-chair" element={<RoleWorkspace />} />
           </Route>
 
@@ -187,6 +259,16 @@ function App() {
           <Route element={<RoleRoute allow={['bacSecretariat']} />}>
             <Route path="/secretariat" element={<RoleWorkspace />} />
             <Route path="/secretariat/rfq" element={<RfqManagement />} />
+          </Route>
+
+          {/* Bidder eligibility. The same screen for the two offices that act on
+              a registration, because it is one file: the Secretariat records the
+              submission and checks the requirements, the BAC determines whether
+              the bidder is eligible. The page renders the half the caller holds
+              — see the permission split in VendorVerification.jsx. */}
+          <Route
+            element={<RoleRoute allow={['bacSecretariat', 'bacChairperson', 'bacViceChairperson']} />}
+          >
             <Route path="/secretariat/vendors" element={<VendorVerification />} />
           </Route>
 
@@ -236,6 +318,13 @@ function App() {
                   'municipalAccountant',
                   'municipalTreasurer',
                   'internalAuditor',
+                  // Both hold `budget.view` and both link here from their
+                  // sidebars. The Planning Office consolidates proposals
+                  // against the appropriation register, and the Sanggunian's
+                  // clerk of record has to be able to read back the ordinance
+                  // lines they recorded.
+                  'planningOfficer',
+                  'sanggunianSecretary',
                 ]}
               />
             }
@@ -247,7 +336,13 @@ function App() {
             <Route path="/budget/appropriations" element={<Appropriations />} />
           </Route>
 
-          <Route element={<RoleRoute allow={['bacSecretariat', 'budgetOfficer', 'departmentRequester', 'hope', 'internalAuditor']} />}>
+          {/* The Accountant and Treasurer were missing here while the shared
+              dashboard was already fetching this list for them — the API allows
+              both (it asks for `pr.view` or `budget.view`), so the only thing
+              stopping them was this list, and the link 403'd. */}
+          <Route element={<RoleRoute allow={['bacSecretariat', 'budgetOfficer', 'departmentRequester',
+                  'headOfOffice', 'hope', 'municipalAccountant', 'municipalTreasurer',
+                  'internalAuditor']} />}>
             <Route path="/pending-items" element={<PendingItems />} />
           </Route>
 
@@ -255,7 +350,7 @@ function App() {
           <Route
             element={
               <RoleRoute
-                allow={['bacSecretariat', 'bacChairperson', 'bacMember', 'twgMember', 'vendor', 'observer', 'internalAuditor']}
+                allow={['bacSecretariat', 'bacChairperson', 'bacViceChairperson', 'bacMember', 'twgMember', 'vendor', 'observer', 'internalAuditor']}
               />
             }
           >
@@ -266,20 +361,65 @@ function App() {
           <Route
             element={
               <RoleRoute
-                allow={['bacSecretariat', 'bacChairperson', 'departmentRequester', 'vendor', 'municipalAccountant', 'municipalTreasurer', 'observer', 'internalAuditor']}
+                allow={['bacSecretariat', 'bacChairperson', 'bacViceChairperson', 'hope', 'departmentRequester',
+                  'headOfOffice', 'vendor', 'municipalAccountant', 'municipalTreasurer', 'observer', 'internalAuditor']}
               />
             }
           >
             <Route path="/contracts" element={<Contracts />} />
           </Route>
 
-          <Route element={<RoleRoute allow={['departmentRequester', 'bacSecretariat', 'bacChairperson']} />}>
+          <Route element={<RoleRoute allow={['departmentRequester',
+                  'headOfOffice', 'bacSecretariat', 'bacChairperson', 'bacViceChairperson']} />}>
             <Route path="/deliveries" element={<Deliveries />} />
           </Route>
 
           {/* Evaluation is shared by the roles that score or chair it. */}
-          <Route element={<RoleRoute allow={['bacChairperson', 'bacMember', 'twgMember', 'hope']} />}>
+          <Route element={<RoleRoute allow={['bacChairperson', 'bacViceChairperson', 'bacMember', 'twgMember', 'hope']} />}>
             <Route path="/evaluation" element={<EvaluationWorkspace />} />
+          </Route>
+
+          {/* ── Observers (RA 12009 Sec. 43) ────────────────────────────────
+              Two sides of one mechanism on one screen: the Secretariat keeps the
+              roster and issues the invitations, the observer records attendance
+              and files the report. The page decides which controls to render
+              from the caller's permissions. */}
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'bacSecretariat',
+                  'observer',
+                  'bacChairperson',
+                  'bacViceChairperson',
+                  'internalAuditor',
+                ]}
+              />
+            }
+          >
+            <Route path="/observers" element={<Observers />} />
+          </Route>
+
+          {/* ── Protests (RA 12009 Sec. 83–85) ──────────────────────────────
+              The bidder files, the BAC decides the request for reconsideration,
+              and the Mayor decides the protest that may follow. Three different
+              actors, one queue. */}
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'vendor',
+                  'bacChairperson',
+                  'bacViceChairperson',
+                  'bacMember',
+                  'hope',
+                  'bacSecretariat',
+                  'internalAuditor',
+                ]}
+              />
+            }
+          >
+            <Route path="/protests" element={<Protests />} />
           </Route>
 
           <Route element={<RoleRoute allow={['twgMember']} />}>

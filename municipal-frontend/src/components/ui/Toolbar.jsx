@@ -9,7 +9,9 @@ import { Search, XCircle, List, LayoutGrid } from 'lucide-react'
 // because every screen filters on something different — but they should all
 // look identical while doing it.
 
-const CONTROL = 'h-9 rounded-md border border-border-muted bg-surface text-[12.5px] transition-colors'
+// Matched to the medium Button height so a toolbar row lines up with the action
+// beside it rather than sitting a pixel or two proud of it.
+const CONTROL = 'h-9.5 rounded-md border border-border-muted bg-surface text-[13px] transition-colors'
 
 export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }) {
   return (
@@ -60,7 +62,7 @@ export function ResetFilters({ onReset, disabled }) {
       type="button"
       onClick={onReset}
       disabled={disabled}
-      className="flex h-9 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-text-secondary transition-colors hover:text-navy disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex h-9.5 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-text-secondary transition-colors hover:text-navy disabled:cursor-not-allowed disabled:opacity-40"
     >
       <XCircle size={15} />
       Reset filters

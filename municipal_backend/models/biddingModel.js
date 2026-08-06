@@ -4,6 +4,7 @@ import { User } from "./userModel.js";
 import { Vendor } from "./vendorModel.js";
 import { PrHeader } from "./prModel.js";
 import { ProcurementMode } from "./procurementModeModel.js";
+import { AppEntry } from "./appEntryModel.js";
 
 // ── Invitation to Bid / Request for Quotation ────────────────────────────────
 // Section 9's invitations_rfq. Created from an approved PR (lifecycle step 4).
@@ -29,6 +30,19 @@ export const Rfq = sequelize.define("Rfq", {
   // IRR Sec. 34.3(b) — an SVP at or below ₱200,000 need not be posted.
   postingRequired: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 
+  // IRR Sec. 50.3 — posting on the PhilGEPS is what makes the opportunity
+  // public; notifying registered suppliers in-system is not a substitute for
+  // it. This system does not integrate with the PhilGEPS, so what is recorded
+  // is the fact of posting and the reference the Secretariat obtained there,
+  // which is the thing COA asks for.
+  philgepsPostedAt: { type: DataTypes.DATE, allowNull: true },
+  philgepsReference: { type: DataTypes.STRING, allowNull: true },
+
+  // An Early Procurement Activity: advertised against the updated Indicative
+  // APP before the appropriation ordinance exists. Everything up to award is
+  // lawful; the award itself is not, until the ordinance is enacted.
+  isEarlyProcurement: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+
   status: {
     type: DataTypes.ENUM("draft", "published", "closed", "opened", "evaluated", "awarded", "cancelled", "failed"),
     allowNull: false,
@@ -40,6 +54,12 @@ export const Rfq = sequelize.define("Rfq", {
 Rfq.belongsTo(PrHeader, { as: "purchaseRequisition", foreignKey: "prHeaderId" });
 Rfq.belongsTo(ProcurementMode, { as: "mode", foreignKey: "procurementModeId" });
 Rfq.belongsTo(User, { as: "publishedBy", foreignKey: "publishedById" });
+
+// An EPA solicitation hangs off the indicative APP line directly, because there
+// is no requisition at that stage. Safe to declare here: appEntryModel.js does
+// not import this file, so there is no cycle.
+Rfq.belongsTo(AppEntry, { as: "appEntry", foreignKey: "appEntryId" });
+AppEntry.hasMany(Rfq, { as: "solicitations", foreignKey: "appEntryId" });
 
 // ── Bids ────────────────────────────────────────────────────────────────────
 export const Bid = sequelize.define("Bid", {
@@ -126,11 +146,34 @@ export const Award = sequelize.define("Award", {
   noaNumber: { type: DataTypes.STRING, allowNull: false, unique: true },
   noaDate: { type: DataTypes.DATEONLY, allowNull: false },
   amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
+
+  // RA 12009 Sec. 65 — Goods and Infrastructure Projects go to the Lowest
+  // Calculated Responsive Bid; Consulting Services to the Highest Rated
+  // Responsive Bid. Recorded so the basis the award was made on is part of the
+  // award rather than something reconstructed from the resolution's prose.
+  awardBasis: { type: DataTypes.ENUM("LCRB", "HRRB"), allowNull: true },
+
   status: {
-    type: DataTypes.ENUM("pendingHopeApproval", "issued", "accepted", "declined", "cancelled"),
+    type: DataTypes.ENUM(
+      "pendingHopeApproval",
+      "issued",
+      "accepted",
+      "declined",
+      "cancelled",
+      // Sec. 66 — the HoPE may disapprove the BAC's recommendation, but only on
+      // valid, reasonable and justifiable grounds expressed in writing and
+      // furnished to the committee. There was previously no way to record that.
+      "disapproved"
+    ),
     allowNull: false,
     defaultValue: "pendingHopeApproval",
   },
+
+  // The written grounds for a disapproval, and the notice to proceed that
+  // starts contract time once the contract is in force.
+  disapprovalGrounds: { type: DataTypes.TEXT, allowNull: true },
+  disapprovedAt: { type: DataTypes.DATE, allowNull: true },
+
   remarks: { type: DataTypes.TEXT, allowNull: true },
 });
 

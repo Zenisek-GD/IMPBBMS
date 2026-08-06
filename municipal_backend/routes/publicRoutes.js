@@ -15,6 +15,7 @@ import {
   downloadProjectDocument,
   listAnnouncements,
 } from "../controllers/publicProjectController.js";
+import { submitPublicMessage } from "../controllers/publicMessageController.js";
 import { rateLimit } from "../middleware/rateLimitMiddleware.js";
 
 // ── PUBLIC API ──────────────────────────────────────────────────────────────
@@ -35,10 +36,21 @@ import { rateLimit } from "../middleware/rateLimitMiddleware.js";
 //
 // Do NOT mount an authenticated endpoint here to save writing a route.
 //
-// This surface is now READ ONLY, with no exceptions. It briefly carried a
-// bidder-requirements intake endpoint; accreditation documents are submitted in
-// person at the BAC office, so there is nothing for the public to write here and
-// the endpoint was removed rather than left in place unused.
+// ── The one write ────────────────────────────────────────────────────────────
+// This surface was READ ONLY with no exceptions, and stayed that way when a
+// bidder-requirements intake endpoint was removed: accreditation documents are
+// submitted in person at the BAC office, so there was nothing for the public to
+// write.
+//
+// `POST /messages` is now the single deliberate exception. A portal that
+// publishes a figure and offers no way to say "that figure is wrong" is only
+// half a transparency portal, and the alternative — an email address in the
+// footer — routes nowhere and is answerable by nobody.
+//
+// It is safe to be here because of what it is *not*: it writes to its own
+// correspondence table, it touches no procurement record, it enters nothing into
+// the audit chain, and it cannot address itself to an office of the sender's
+// choosing. See controllers/publicMessageController.js.
 const router = express.Router();
 
 // Anonymous traffic still gets a ceiling so the portal cannot be used to hammer
@@ -68,5 +80,15 @@ router.get("/projects/:id", getProject);
 router.get("/projects/:id/timeline", getProjectTimeline);
 router.get("/projects/:id/documents", listProjectDocuments);
 router.get("/projects/:id/documents/:documentId/download", downloadProjectDocument);
+
+// Its own bucket, far tighter than the browsing one above: reading is cheap and
+// should be generous, writing is not. Five in the window is more than any honest
+// citizen needs and small enough that flooding the officers' inbox is not worth
+// attempting from one address.
+router.post(
+  "/messages",
+  rateLimit({ bucket: "publicMessage", max: 5 }),
+  submitPublicMessage
+);
 
 export default router;

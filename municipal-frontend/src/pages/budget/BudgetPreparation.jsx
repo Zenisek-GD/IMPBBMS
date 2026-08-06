@@ -15,6 +15,10 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 
 // Steps 6 to 14: from an office asking for money to the Sanggunian granting it.
 //
@@ -527,6 +531,167 @@ function ProceedingForm({ budget, onClose, onSaved }) {
   )
 }
 
+// ── The office-by-office proposal register ───────────────────────────────────
+// Lifted out of the budget card so it can hold its own search, filters, sort
+// and paging: hooks cannot be called inside the `budgets.map()` that renders one
+// card per fiscal year, and each year's register needs controls of its own
+// anyway — filtering one year's proposals must not touch another's.
+//
+// A municipality has one row here per office, so this list is as long as the
+// LGU's organisational chart. It was previously unsorted, unfiltered and
+// unpaged, which is workable at ten offices and not at forty.
+function ProposalsTable({ budget, permissions, canPropose, run, setEditingProposal, setAmountsFor }) {
+  const table = useTableControls(budget.proposals, {
+    searchKeys: ['departmentName', 'justification'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: Object.entries(PROPOSAL_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      },
+      {
+        key: 'exceedsCeiling',
+        label: 'Ceiling',
+        options: [
+          { value: 'true', label: 'Over ceiling only' },
+          { value: 'false', label: 'Within ceiling' },
+        ],
+        accessor: (proposal) => String(Boolean(proposal.exceedsCeiling)),
+      },
+    ],
+    accessors: {
+      proposedTotal: (proposal) => Number(proposal.proposedTotal ?? 0),
+      recommendedTotal: (proposal) => Number(proposal.recommendedTotal ?? 0),
+      finalTotal: (proposal) => Number(proposal.finalTotal ?? 0),
+      status: (proposal) => PROPOSAL_STATUS_LABELS[proposal.status] ?? proposal.status,
+    },
+    pageSize: 10,
+  })
+
+  return (
+    <div>
+      {budget.proposals.length > 0 && (
+        <div className="mb-3">
+          <TableToolbar {...table.toolbarProps} searchPlaceholder="Search office…" />
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <thead className="bg-sidebar">
+            <tr>
+              <SortableTh {...table.sortProps('departmentName')}>Office</SortableTh>
+              <SortableTh {...table.sortProps('proposedTotal')}>Proposed</SortableTh>
+              <SortableTh {...table.sortProps('recommendedTotal')}>Recommended</SortableTh>
+              <SortableTh {...table.sortProps('finalTotal')}>Final</SortableTh>
+              <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+              <Th>Actions</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {table.rows.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-3 py-6 text-center text-[13px] text-text-faint">
+                  {table.totalBeforeFilters === 0
+                    ? 'No proposals submitted yet.'
+                    : 'No proposals match your search or filters.'}
+                </td>
+              </tr>
+            ) : (
+              table.pageRows.map((proposal) => (
+                <tr key={proposal.id} className="border-t border-border-muted">
+                  <td className="px-3 py-2 text-[13px] text-navy">
+                    {proposal.departmentName}
+                    {proposal.exceedsCeiling && (
+                      <span className="ml-2">
+                        <Badge tone="warning">OVER CEILING</Badge>
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-[13px] whitespace-nowrap text-navy">
+                    {peso(proposal.proposedTotal)}
+                  </td>
+                  <td className="px-3 py-2 text-[13px] whitespace-nowrap text-text-secondary">
+                    {proposal.recommendedTotal ? peso(proposal.recommendedTotal) : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-[13px] whitespace-nowrap text-text-secondary">
+                    {proposal.finalTotal ? peso(proposal.finalTotal) : '—'}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>
+                      {PROPOSAL_STATUS_LABELS[proposal.status]}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-3">
+                      {proposal.status === 'draft' && budget.proposalsOpen && canPropose && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setEditingProposal({ budget, proposal })}
+                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                          >
+                            EDIT
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => run(() => budgetApi.submitProposal(proposal.id)).catch(() => {})}
+                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                          >
+                            SUBMIT
+                          </button>
+                        </>
+                      )}
+                      {budget.status === 'pendingMbcReview' &&
+                        permissions.has('budget.reviewProposal') &&
+                        proposal.status !== 'draft' && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAmountsFor({
+                                proposal,
+                                field: 'recommendedAmount',
+                                title: 'Budget Council recommendation',
+                                submit: (payload) => budgetApi.reviewProposal(proposal.id, payload),
+                              })
+                            }
+                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                          >
+                            RECOMMEND
+                          </button>
+                        )}
+                      {budget.status === 'pendingFinalisation' &&
+                        permissions.has('budget.finaliseExecutive') &&
+                        proposal.status !== 'draft' && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAmountsFor({
+                                proposal,
+                                field: 'finalAmount',
+                                title: 'Final appropriation figures',
+                                submit: (payload) => budgetApi.finaliseProposal(proposal.id, payload),
+                              })
+                            }
+                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                          >
+                            STRIKE FINAL FIGURES
+                          </button>
+                        )}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {table.rows.length > 0 && <Pagination {...table.paginationProps} label="proposals" />}
+    </div>
+  )
+}
+
 export default function BudgetPreparation() {
   const permissions = usePermissions()
   const [budgets, setBudgets] = useState([])
@@ -709,118 +874,14 @@ export default function BudgetPreparation() {
               )}
 
               {/* ── Proposals ── */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-sidebar">
-                    <tr>
-                      {['Office', 'Proposed', 'Recommended', 'Final', 'Status', 'Actions'].map((head) => (
-                        <th
-                          key={head}
-                          className="px-3 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase"
-                        >
-                          {head}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {budget.proposals.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="px-3 py-6 text-center text-[13px] text-text-faint">
-                          No proposals submitted yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      budget.proposals.map((proposal) => (
-                        <tr key={proposal.id} className="border-t border-border-muted">
-                          <td className="px-3 py-2 text-[13px] text-navy">
-                            {proposal.departmentName}
-                            {proposal.exceedsCeiling && (
-                              <span className="ml-2">
-                                <Badge tone="warning">OVER CEILING</Badge>
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-[13px] whitespace-nowrap text-navy">
-                            {peso(proposal.proposedTotal)}
-                          </td>
-                          <td className="px-3 py-2 text-[13px] whitespace-nowrap text-text-secondary">
-                            {proposal.recommendedTotal ? peso(proposal.recommendedTotal) : '—'}
-                          </td>
-                          <td className="px-3 py-2 text-[13px] whitespace-nowrap text-text-secondary">
-                            {proposal.finalTotal ? peso(proposal.finalTotal) : '—'}
-                          </td>
-                          <td className="px-3 py-2">
-                            <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>
-                              {PROPOSAL_STATUS_LABELS[proposal.status]}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="flex flex-wrap gap-3">
-                              {proposal.status === 'draft' && budget.proposalsOpen && canPropose && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingProposal({ budget, proposal })}
-                                    className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
-                                  >
-                                    EDIT
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      run(() => budgetApi.submitProposal(proposal.id)).catch(() => {})
-                                    }
-                                    className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
-                                  >
-                                    SUBMIT
-                                  </button>
-                                </>
-                              )}
-                              {budget.status === 'pendingMbcReview' &&
-                                permissions.has('budget.reviewProposal') &&
-                                proposal.status !== 'draft' && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setAmountsFor({
-                                        proposal,
-                                        field: 'recommendedAmount',
-                                        title: 'Budget Council recommendation',
-                                        submit: (payload) => budgetApi.reviewProposal(proposal.id, payload),
-                                      })
-                                    }
-                                    className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
-                                  >
-                                    RECOMMEND
-                                  </button>
-                                )}
-                              {budget.status === 'pendingFinalisation' &&
-                                permissions.has('budget.finaliseExecutive') &&
-                                proposal.status !== 'draft' && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setAmountsFor({
-                                        proposal,
-                                        field: 'finalAmount',
-                                        title: 'Final appropriation figures',
-                                        submit: (payload) => budgetApi.finaliseProposal(proposal.id, payload),
-                                      })
-                                    }
-                                    className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
-                                  >
-                                    STRIKE FINAL FIGURES
-                                  </button>
-                                )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <ProposalsTable
+                budget={budget}
+                permissions={permissions}
+                canPropose={canPropose}
+                run={run}
+                setEditingProposal={setEditingProposal}
+                setAmountsFor={setAmountsFor}
+              />
 
               {/* ── Proceedings ── */}
               {budget.proceedings.length > 0 && (

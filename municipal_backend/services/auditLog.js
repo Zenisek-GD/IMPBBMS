@@ -340,7 +340,37 @@ export const AUDIT_ACTIONS = {
   EVALUATION_CLOSED: "evaluation.closed",
   AWARD_RECOMMENDED: "award.recommended",
   AWARD_APPROVED: "award.approved",
+
+  // ── Observers (RA 12009 Sec. 43) ──────────────────────────────────────────
+  // The invitation is what makes an observer's absence lawful, and the report
+  // is the observer's finding on the committee itself. Both belong in the trail
+  // as first-class acts: "were observers invited, and what did they say" is a
+  // question COA asks of every procurement.
+  OBSERVERS_INVITED: "observers.invited",
+  OBSERVATION_REPORT_FILED: "observers.report.filed",
+
+  // ── Protest mechanism (RA 12009 Sec. 83–85) ───────────────────────────────
+  PROTEST_FILED: "protest.filed",
+  PROTEST_RESOLVED: "protest.resolved",
+
+  // Sec. 64 — a failed bidding is a recorded act, not the absence of an award.
+  // Two of these on one project is what opens Negotiated Procurement.
+  BIDDING_FAILED: "bidding.failed",
+
+  // Sec. 69 — blacklisting is the sanction that bars a supplier from every
+  // government procurement, so it belongs in the trail as its own act.
+  VENDOR_BLACKLISTED: "vendor.blacklisted",
+  VENDOR_BLACKLIST_LIFTED: "vendor.blacklist.lifted",
+
+  // Sec. 71 — variation orders and contract termination.
+  VARIATION_ORDER_APPROVED: "contract.variation.approved",
+  CONTRACT_TERMINATED: "contract.terminated",
+
   CONTRACT_SIGNED: "contract.signed",
+  // The instrument that starts contract time. Separate from signing because a
+  // contract can be in force for days before the supplier is told to begin.
+  NOTICE_TO_PROCEED_ISSUED: "contract.ntp.issued",
+  SECURITY_POSTED: "security.posted",
   DELIVERY_INSPECTED: "delivery.inspected",
   INVOICE_CERTIFIED: "invoice.certified",
   PAYMENT_RELEASED: "payment.released",
