@@ -2,7 +2,7 @@
 // Regulations of RA No. 12009, 1st Edition (as of March 30, 2026):
 // https://www.gppb.gov.ph/wp-content/uploads/2026/05/IRR-of-RA-12009-1st-Edition.pdf
 //
-// IMPORTANT: the CivicBid design document quotes a ₱2,000,000 Small Value
+// IMPORTANT: the Procurenance design document quotes a ₱2,000,000 Small Value
 // Procurement ceiling. That is the figure for National Government Agencies
 // (Sec. 34.1). Sec. 34.2 sets a *separate, lower* table for LGUs by income
 // classification — for a municipality it is ₱400,000 or ₱200,000. Since this

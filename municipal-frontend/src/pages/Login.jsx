@@ -38,6 +38,20 @@ export default function Login() {
     }
   })
 
+  // Set by the idle-timeout hook when the session expires from inactivity.
+  const [idleLogout] = useState(() => {
+    try {
+      const reason = sessionStorage.getItem('logout.reason')
+      if (reason === 'idle') {
+        sessionStorage.removeItem('logout.reason')
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  })
+
   const {
     register,
     handleSubmit,
@@ -68,6 +82,16 @@ export default function Login() {
             You were signed out of this browser, but the server could not be reached to end the
             session there. If this is a shared computer, close the browser to be certain.
           </span>
+        </p>
+      )}
+
+      {idleLogout && (
+        <p
+          role="status"
+          className="mb-4 flex items-start gap-2 rounded-md border border-border-muted bg-chip px-3.5 py-2.5 text-[12.5px] leading-relaxed text-text-secondary"
+        >
+          <AlertCircle size={15} className="mt-0.5 shrink-0" />
+          <span>You were signed out automatically due to inactivity. Sign in again to continue.</span>
         </p>
       )}
 

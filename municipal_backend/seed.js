@@ -338,7 +338,7 @@ try {
     const grantedKeys = ROLE_PERMISSIONS[role.key] ?? [];
     await record.setPermissions(grantedKeys.map((key) => permissionsByKey[key]));
 
-    const email = `${role.key.toLowerCase()}@civicbid.com`;
+    const email = `${role.key.toLowerCase()}@procurenance.com`;
     const [user, created] = await User.findOrCreate({
       where: { email },
       defaults: {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CivicBid</title>
+    <title>Procurenance</title>
 
     <!-- Applies the theme before the first paint.
          React can only set the class from an effect, which runs *after* the
@@ -21,13 +21,13 @@
       ;(function () {
         try {
           var keys = Object.keys(localStorage).filter(function (k) {
-            return k.indexOf('civicbid.theme.') === 0
+            return k.indexOf('procurenance.theme.') === 0
           })
           // A signed-in user's own key is preferred over the anonymous one.
           var owned = keys.filter(function (k) {
-            return k !== 'civicbid.theme.public'
+            return k !== 'procurenance.theme.public'
           })
-          var pref = localStorage.getItem(owned[0] || 'civicbid.theme.public')
+          var pref = localStorage.getItem(owned[0] || 'procurenance.theme.public')
           // No stored preference means LIGHT, not "ask the OS". A first-time
           // visitor on a dark-mode phone should still see a government records
           // portal in its default appearance; dark is opt-in. Someone who has

@@ -31,7 +31,7 @@ const SECTIONS = [
   { key: 'contact', label: 'Contact', to: '/?view=contact' },
 ]
 
-export default function PublicHeader({ lguName }) {
+export default function PublicHeader({ lguName, systemName }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -94,7 +94,7 @@ export default function PublicHeader({ lguName }) {
         <Link to="/" className="col-start-1 flex min-w-0 items-center">
           <div className="min-w-0">
             <p className="truncate text-[16px] font-semibold tracking-[-0.015em] text-navy">
-              CivicBid
+              {systemName || 'Procurenance'}
             </p>
             <p className="truncate text-[11.5px] text-text-faint">
               {lguName ?? 'Municipal Transparency Portal'}

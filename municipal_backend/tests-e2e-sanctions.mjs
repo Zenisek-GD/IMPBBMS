@@ -49,10 +49,10 @@ const section = (t) => console.log(`\n=== ${t} ===`);
 
 const run = async () => {
   for (const [who, email] of [
-    ["hope", "hope@civicbid.com"],
-    ["sec", "bacsecretariat@civicbid.com"],
-    ["chair", "bacchairperson@civicbid.com"],
-    ["vendor", "vendor@civicbid.com"],
+    ["hope", "hope@procurenance.com"],
+    ["sec", "bacsecretariat@procurenance.com"],
+    ["chair", "bacchairperson@procurenance.com"],
+    ["vendor", "vendor@procurenance.com"],
   ])
     await login(who, email);
 

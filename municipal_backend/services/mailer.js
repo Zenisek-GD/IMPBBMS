@@ -103,7 +103,7 @@ const layout = ({ heading, bodyHtml, footerNote }) => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
     <tr>
       <td style="padding:18px 28px;background:#0f2740;">
-        <span style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:-0.01em;">CivicBid</span>
+        <span style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:-0.01em;">Procurenance</span>
         <span style="color:#93a7bd;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;padding-left:10px;">Municipal Procurement</span>
       </td>
     </tr>
@@ -127,7 +127,7 @@ const paragraph = (text) =>
   `<p style="margin:0 0 12px;font-size:14px;line-height:1.65;color:#334155;">${text}</p>`;
 
 const AUTOMATED_FOOTER =
-  "This message was sent automatically by the CivicBid procurement system. " +
+  "This message was sent automatically by the Procurenance procurement system. " +
   "Please do not reply to it. If you were not expecting this message, contact the BAC Secretariat.";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,13 +142,13 @@ export const sendActivationInvitation = async ({
   expiresInHours,
   invitedBy,
 }) => {
-  const subject = "Activate your CivicBid bidder account";
+  const subject = "Activate your Procurenance bidder account";
 
   const text = [
     `Good day${contactName ? `, ${contactName}` : ""},`,
     "",
     `Your bidder registration for ${businessName} has been reviewed and approved, and an`,
-    "account has been created for you in the CivicBid municipal procurement system.",
+    "account has been created for you in the Procurenance municipal procurement system.",
     "",
     "To activate it, open the link below and set your own password:",
     "",
@@ -173,7 +173,7 @@ export const sendActivationInvitation = async ({
       paragraph(`Good day${contactName ? `, ${escapeHtml(contactName)}` : ""},`),
       paragraph(
         `Your bidder registration for <strong>${escapeHtml(businessName)}</strong> has been reviewed and approved. ` +
-          "An account has been created for you in the CivicBid municipal procurement system."
+          "An account has been created for you in the Procurenance municipal procurement system."
       ),
       paragraph("Open the link below to set your own password and activate the account."),
       `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 20px;">
@@ -217,7 +217,7 @@ const OTP_INTROS = {
 
 export const sendOtpEmail = async ({ to, name, code, purpose, purposeLabel, expiresInMinutes }) => {
   const reason = OTP_INTROS[purpose] ?? `to confirm your ${purposeLabel}`;
-  const subject = `Your CivicBid verification code: ${code}`;
+  const subject = `Your Procurenance verification code: ${code}`;
 
   const text = [
     `Good day${name ? `, ${name}` : ""},`,
@@ -263,7 +263,7 @@ export const sendOtpEmail = async ({ to, name, code, purpose, purposeLabel, expi
 // made by someone other than the account holder does not go unnoticed.
 // ─────────────────────────────────────────────────────────────────────────────
 export const sendActivationCompleteEmail = async ({ to, name, businessName }) => {
-  const subject = "Your CivicBid bidder account is now active";
+  const subject = "Your Procurenance bidder account is now active";
 
   const text = [
     `Good day${name ? `, ${name}` : ""},`,
@@ -296,7 +296,7 @@ export const sendActivationCompleteEmail = async ({ to, name, businessName }) =>
 
 export const sendPasswordChangedEmail = async ({ to, name, at, ipAddress, wasReset }) => {
   const what = wasReset ? "reset" : "changed";
-  const subject = `Your CivicBid password was ${what}`;
+  const subject = `Your Procurenance password was ${what}`;
 
   const when = new Date(at).toLocaleString("en-PH", {
     dateStyle: "medium",
@@ -307,7 +307,7 @@ export const sendPasswordChangedEmail = async ({ to, name, at, ipAddress, wasRes
   const text = [
     `Good day${name ? `, ${name}` : ""},`,
     "",
-    `The password on your CivicBid account was ${what} on ${when}`,
+    `The password on your Procurenance account was ${what} on ${when}`,
     ipAddress ? `from IP address ${ipAddress}.` : ".",
     "",
     "If this was you, nothing further is needed.",
@@ -321,7 +321,7 @@ export const sendPasswordChangedEmail = async ({ to, name, at, ipAddress, wasRes
     bodyHtml: [
       paragraph(`Good day${name ? `, ${escapeHtml(name)}` : ""},`),
       paragraph(
-        `The password on your CivicBid account was ${what} on <strong>${escapeHtml(when)}</strong>` +
+        `The password on your Procurenance account was ${what} on <strong>${escapeHtml(when)}</strong>` +
           (ipAddress ? ` from IP address <strong>${escapeHtml(ipAddress)}</strong>.` : ".")
       ),
       paragraph("If this was you, nothing further is needed."),
@@ -400,7 +400,7 @@ export const sendIntakeAcknowledgementEmail = async ({
 export const sendPasswordResetEmail = async ({ to, resetUrl, expiresInMinutes }) =>
   deliver({
     to,
-    subject: "Reset your CivicBid password",
+    subject: "Reset your Procurenance password",
     text: `Open this link to reset your password (valid ${expiresInMinutes} minutes):\n\n${resetUrl}\n`,
     html: layout({
       heading: "Reset your password",

@@ -8,6 +8,23 @@ import { clearRateLimit } from "../middleware/rateLimitMiddleware.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
 import { sendPasswordChangedEmail } from "../services/mailer.js";
 
+// ── Session timeouts ──────────────────────────────────────────────────────────
+// Admin-side roles handle budgets, contracts, and user accounts — a session
+// left open on an unattended workstation is a real risk. Thirty minutes of
+// inactivity is the common ceiling for privileged web applications.
+//
+// Vendors and observers interact less frequently and from less controlled
+// environments (personal laptops, phones), so their session lives longer.
+const ADMIN_SESSION_MS  = 1000 * 60 * 30;  // 30 minutes
+const DEFAULT_SESSION_MS = 1000 * 60 * 60 * 8; // 8 hours (unchanged)
+
+// Roles whose sessions keep the longer timeout. Every role not listed here
+// gets the shorter admin timeout.
+const EXTERNAL_ROLES = ["vendor", "observer"];
+
+const sessionTtlForRole = (roleKey) =>
+  EXTERNAL_ROLES.includes(roleKey) ? DEFAULT_SESSION_MS : ADMIN_SESSION_MS;
+
 // Permissions travel with the session user so the UI can hide actions the
 // caller cannot perform. The server still enforces them independently — this
 // is presentation only.
@@ -24,6 +41,9 @@ const serializeUser = (user) => ({
   // own theme rather than whatever the last person on this browser chose.
   themePreference: user.themePreference ?? "light",
   sidebarCollapsed: Boolean(user.sidebarCollapsed),
+  // Sent so the frontend can run an idle-timeout countdown that matches the
+  // server's cookie lifetime, rather than having to guess or hard-code it.
+  sessionTimeoutMs: sessionTtlForRole(user.Role.key),
 });
 
 const userIncludes = [{ model: Role, include: [Permission] }, { model: Department }];
@@ -98,6 +118,10 @@ export const login = async (req, res) => {
     });
   }
 
+  // Shorten the cookie lifetime for admin-side roles. The global session
+  // middleware sets an 8-hour default; overriding it here per-session means
+  // vendors keep the full window while officers are logged out sooner.
+  req.session.cookie.maxAge = sessionTtlForRole(user.Role.key);
   req.session.userId = user.id;
 
   // The password was right, so this attempt was not an attack — release the

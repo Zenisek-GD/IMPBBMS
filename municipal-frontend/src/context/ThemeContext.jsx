@@ -16,7 +16,7 @@ import { updatePreferences } from '../api/auth'
 //           the page paints in the default theme and then snaps to the user's
 //           once /auth/me resolves, which is a visible flash on every load.
 
-const STORAGE_PREFIX = 'civicbid.theme.'
+const STORAGE_PREFIX = 'procurenance.theme.'
 const ANONYMOUS_KEY = `${STORAGE_PREFIX}public`
 
 const readStored = (key) => {

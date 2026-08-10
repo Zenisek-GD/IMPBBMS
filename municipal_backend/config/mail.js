@@ -27,7 +27,7 @@ export const mailConfig = {
   secure,
   user,
   password,
-  fromName: process.env.MAIL_FROM_NAME?.trim() || "CivicBid Procurement",
+  fromName: process.env.MAIL_FROM_NAME?.trim() || "Procurenance Procurement",
   fromAddress: process.env.MAIL_FROM_ADDRESS?.trim() || user,
 
   // With no host configured the mailer prints messages to the console instead of

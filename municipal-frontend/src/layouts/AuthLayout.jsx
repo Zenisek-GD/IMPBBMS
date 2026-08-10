@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Landmark } from 'lucide-react'
 import ThemeToggle from '../components/ui/ThemeToggle'
+import { fetchPublicBranding } from '../api/settings'
 
 // Shared shell for login / forgot-password / activate-account.
 //
@@ -14,7 +16,25 @@ import ThemeToggle from '../components/ui/ThemeToggle'
 // should be nothing but that task: the mark, the form, and the way back to the
 // public portal. The three pages that share this shell stay consistent with each
 // other, which is the other reason the change lives here rather than in Login.
+//
+// ── DYNAMIC SYSTEM NAME ─────────────────────────────────────────────────────
+// The wordmark fetches the admin-configured system name from the public
+// branding endpoint (no auth required). Falls back to "Procurenance".
 export default function AuthLayout({ title, subtitle, children, footer }) {
+  const [systemName, setSystemName] = useState('Procurenance')
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPublicBranding()
+      .then((branding) => {
+        if (!cancelled && branding.systemName) setSystemName(branding.systemName)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center bg-canvas px-5 py-12">
       {/* Available before sign-in, because someone reading in the dark should
@@ -35,7 +55,7 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-fg">
             <Landmark size={18} />
           </span>
-          <span className="text-[16px] font-semibold tracking-[-0.01em] text-navy">CivicBid</span>
+          <span className="text-[16px] font-semibold tracking-[-0.01em] text-navy">{systemName}</span>
         </Link>
 
         <div className="text-center">

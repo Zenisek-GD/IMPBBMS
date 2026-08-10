@@ -47,18 +47,18 @@ const section = (t) => console.log(`\n=== ${t} ===`);
 
 const run = async () => {
   for (const [who, email] of [
-    ["dr", "departmentrequester@civicbid.com"],
-    ["sec", "bacsecretariat@civicbid.com"],
-    ["bo", "budgetofficer@civicbid.com"],
-    ["hope", "hope@civicbid.com"],
-    ["acct", "municipalaccountant@civicbid.com"],
-    ["treas", "municipaltreasurer@civicbid.com"],
-    ["chair", "bacchairperson@civicbid.com"],
-    ["vendor", "vendor@civicbid.com"],
+    ["dr", "departmentrequester@procurenance.com"],
+    ["sec", "bacsecretariat@procurenance.com"],
+    ["bo", "budgetofficer@procurenance.com"],
+    ["hope", "hope@procurenance.com"],
+    ["acct", "municipalaccountant@procurenance.com"],
+    ["treas", "municipaltreasurer@procurenance.com"],
+    ["chair", "bacchairperson@procurenance.com"],
+    ["vendor", "vendor@procurenance.com"],
   ]) await login(who, email);
 
   // The endorsing head must not be the requester.
-  sql("UPDATE Departments SET headUserId=(SELECT id FROM Users WHERE email='budgetofficer@civicbid.com') WHERE code='ENGR';");
+  sql("UPDATE Departments SET headUserId=(SELECT id FROM Users WHERE email='budgetofficer@procurenance.com') WHERE code='ENGR';");
 
   section("Build a final APP line and an approved requisition");
 

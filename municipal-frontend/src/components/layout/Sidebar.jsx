@@ -16,7 +16,7 @@ import { useAuth } from '../../context/useAuth'
 // them the only two destinations in the application that were not in the rail.
 // They are navigation like everything else, so they are here, pinned to the
 // bottom where an account block is conventionally looked for.
-
+//
 const initialsOf = (name = '') =>
   name
     .split(' ')
@@ -81,9 +81,6 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
                 <NavLink
                   key={`${item.href}:${item.label}`}
                   to={item.href}
-                  // The native tooltip carries the label when it is not on
-                  // screen — without it a collapsed rail is a column of
-                  // unlabelled icons.
                   title={collapsed ? item.label : undefined}
                   className={({ isActive }) => itemClass(collapsed, isActive)}
                 >

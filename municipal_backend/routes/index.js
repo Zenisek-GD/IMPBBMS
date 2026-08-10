@@ -55,7 +55,7 @@ const router = express.Router();
 // says so rather than rendering a page nobody should be looking at.
 router.get("/", (req, res) =>
   res.json({
-    service: "CivicBid procurement API",
+    service: "Procurenance procurement API",
     ui: "http://localhost:5173",
     publicRecords: "/api/public/projects",
   })

@@ -5,6 +5,7 @@ import {
   listPublishedProcurements,
   listPublishedAwards,
 } from "../controllers/transparencyController.js";
+import { getPublicBranding } from "../controllers/settingsController.js";
 import {
   getPublicFilters,
   getPublicOverview,
@@ -58,6 +59,10 @@ const router = express.Router();
 // per minute — and separate from the auth buckets so public browsing can never
 // lock anybody out of signing in.
 router.use(rateLimit({ bucket: "public", max: 600 }));
+
+// System branding — the login screen, the public header and the transparency
+// footer all need the admin-configured system name. No auth required.
+router.get("/branding", getPublicBranding);
 
 router.get("/transparency/overview", getTransparencyOverview);
 router.get("/transparency/app", listPublishedApp);

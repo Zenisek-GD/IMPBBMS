@@ -14,6 +14,7 @@ import {
   Check,
 } from 'lucide-react'
 import * as publicApi from '../../api/publicProjects'
+import { fetchPublicBranding } from '../../api/settings'
 import PublicHeader from '../../components/public/PublicHeader'
 import PublicFooter from '../../components/public/PublicFooter'
 import ProjectTimeline from '../../components/public/ProjectTimeline'
@@ -157,6 +158,19 @@ export default function PublicProjectDetail() {
   // the request is even issued.
   const [loaded, setLoaded] = useState({ id: null, status: 'loading', project: null })
   const [extras, setExtras] = useState({ id: null, timeline: null, documents: [] })
+  const [branding, setBranding] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPublicBranding()
+      .then((result) => {
+        if (!cancelled) setBranding(result)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -196,9 +210,9 @@ export default function PublicProjectDetail() {
   if (status === 'loading') {
     return (
       <div className="flex min-h-screen flex-col bg-canvas">
-        <PublicHeader />
+        <PublicHeader systemName={branding?.systemName} />
         <main className="flex-1 px-8 py-16 text-center text-[13px] text-text-faint">Loading project…</main>
-        <PublicFooter />
+        <PublicFooter transparencyFooter={branding?.transparencyFooter} />
       </div>
     )
   }
@@ -206,7 +220,7 @@ export default function PublicProjectDetail() {
   if (status !== 'ready') {
     return (
       <div className="flex min-h-screen flex-col bg-canvas">
-        <PublicHeader />
+        <PublicHeader systemName={branding?.systemName} />
         <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-16 text-center">
           <FileWarning size={26} className="mx-auto text-text-faint" />
           <h1 className="mt-3 text-lg font-semibold text-navy">
@@ -224,7 +238,7 @@ export default function PublicProjectDetail() {
             <ArrowLeft size={13} /> Back to all projects
           </Link>
         </main>
-        <PublicFooter />
+        <PublicFooter transparencyFooter={branding?.transparencyFooter} />
       </div>
     )
   }
@@ -234,7 +248,7 @@ export default function PublicProjectDetail() {
 
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
-      <PublicHeader />
+      <PublicHeader systemName={branding?.systemName} />
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
         <Link
@@ -537,7 +551,7 @@ export default function PublicProjectDetail() {
         )}
       </main>
 
-      <PublicFooter />
+      <PublicFooter transparencyFooter={branding?.transparencyFooter} />
     </div>
   )
 }

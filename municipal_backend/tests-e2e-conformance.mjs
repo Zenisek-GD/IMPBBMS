@@ -49,17 +49,17 @@ const section = (title) => console.log(`\n=== ${title} ===`);
 
 const run = async () => {
   // â”€â”€ Sign in every actor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  await login("dr", "departmentrequester@civicbid.com");
-  await login("sec", "bacsecretariat@civicbid.com");
-  await login("bo", "budgetofficer@civicbid.com");
-  await login("hope", "hope@civicbid.com");
-  await login("acct", "municipalaccountant@civicbid.com");
-  await login("treas", "municipaltreasurer@civicbid.com");
-  await login("chair", "bacchairperson@civicbid.com");
-  await login("vice", "bacvicechairperson@civicbid.com");
-  await login("member", "bacmember@civicbid.com");
-  await login("obs", "observer@civicbid.com");
-  await login("vendor", "vendor@civicbid.com");
+  await login("dr", "departmentrequester@procurenance.com");
+  await login("sec", "bacsecretariat@procurenance.com");
+  await login("bo", "budgetofficer@procurenance.com");
+  await login("hope", "hope@procurenance.com");
+  await login("acct", "municipalaccountant@procurenance.com");
+  await login("treas", "municipaltreasurer@procurenance.com");
+  await login("chair", "bacchairperson@procurenance.com");
+  await login("vice", "bacvicechairperson@procurenance.com");
+  await login("member", "bacmember@procurenance.com");
+  await login("obs", "observer@procurenance.com");
+  await login("vendor", "vendor@procurenance.com");
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   section("LGC Sec. 323 â€” reenacted budget");

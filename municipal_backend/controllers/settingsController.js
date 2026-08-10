@@ -1,4 +1,14 @@
-import { SystemSetting, SETTING_KEYS, getLguProfile } from "../models/systemSettingModel.js";
+import {
+  SystemSetting,
+  SETTING_KEYS,
+  getLguProfile,
+  getSystemBranding,
+  getNavShortcuts,
+  setNavShortcuts,
+  DEFAULT_SYSTEM_NAME,
+  DEFAULT_TRANSPARENCY_TITLE,
+  DEFAULT_TRANSPARENCY_FOOTER,
+} from "../models/systemSettingModel.js";
 import {
   LGU_TYPES,
   LGU_INCOME_CLASSES,
@@ -10,8 +20,9 @@ import {
 
 // Returns the LGU profile together with the thresholds it implies, so the
 // admin screen can show the consequence of a change rather than just the input.
-const buildResponse = (lgu) => ({
+const buildResponse = (lgu, branding) => ({
   lgu,
+  branding,
   options: { lguTypes: LGU_TYPES, incomeClasses: LGU_INCOME_CLASSES },
   thresholds: {
     smallValueProcurement: {
@@ -50,11 +61,20 @@ const buildResponse = (lgu) => ({
 });
 
 export const getSettings = async (req, res) => {
-  res.json(buildResponse(await getLguProfile()));
+  const [lgu, branding] = await Promise.all([getLguProfile(), getSystemBranding()]);
+  res.json(buildResponse(lgu, branding));
 };
 
 export const updateSettings = async (req, res) => {
-  const { name, lguType, incomeClass, capitalizationThreshold } = req.body;
+  const {
+    name,
+    lguType,
+    incomeClass,
+    capitalizationThreshold,
+    systemName,
+    transparencyTitle,
+    transparencyFooter,
+  } = req.body;
 
   if (lguType && !LGU_TYPES.includes(lguType)) {
     return res.status(400).json({ message: "Unknown LGU type." });
@@ -72,6 +92,9 @@ export const updateSettings = async (req, res) => {
       return res.status(400).json({ message: "The capitalisation threshold must be greater than 0." });
     }
   }
+  if (systemName !== undefined && !systemName.trim()) {
+    return res.status(400).json({ message: "System name cannot be empty." });
+  }
 
   const updates = [
     [SETTING_KEYS.LGU_NAME, name?.trim()],
@@ -83,6 +106,10 @@ export const updateSettings = async (req, res) => {
         ? undefined
         : String(Number(capitalizationThreshold)),
     ],
+    [SETTING_KEYS.SYSTEM_NAME, systemName?.trim()],
+    [SETTING_KEYS.TRANSPARENCY_TITLE, transparencyTitle?.trim()],
+    // Footer may legitimately be multi-line, so only trim leading/trailing.
+    [SETTING_KEYS.TRANSPARENCY_FOOTER, transparencyFooter?.trim()],
   ].filter(([, value]) => value !== undefined && value !== null);
 
   for (const [key, value] of updates) {
@@ -91,5 +118,43 @@ export const updateSettings = async (req, res) => {
     await row.save();
   }
 
-  res.json(buildResponse(await getLguProfile()));
+  const [lgu, branding] = await Promise.all([getLguProfile(), getSystemBranding()]);
+  res.json(buildResponse(lgu, branding));
+};
+
+// ── Navigation shortcut endpoints ──────────────────────────────────────────
+
+export const getShortcuts = async (_req, res) => {
+  res.json(await getNavShortcuts());
+};
+
+export const updateShortcuts = async (req, res) => {
+  const { shortcuts } = req.body;
+  if (!shortcuts || typeof shortcuts !== "object") {
+    return res.status(400).json({ message: "shortcuts must be an object keyed by role name." });
+  }
+
+  // Validate structure: each role maps to an array of { href, shortcut } pairs.
+  for (const [role, items] of Object.entries(shortcuts)) {
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ message: `shortcuts.${role} must be an array.` });
+    }
+    for (const item of items) {
+      if (!item.href || typeof item.href !== "string") {
+        return res.status(400).json({ message: `Each shortcut entry must have an href string.` });
+      }
+      if (!item.shortcut || typeof item.shortcut !== "string") {
+        return res.status(400).json({ message: `Each shortcut entry must have a shortcut string.` });
+      }
+    }
+  }
+
+  await setNavShortcuts(shortcuts);
+  res.json(shortcuts);
+};
+
+// ── Public branding endpoint (no auth required) ────────────────────────────
+export const getPublicBranding = async (_req, res) => {
+  const branding = await getSystemBranding();
+  res.json(branding);
 };

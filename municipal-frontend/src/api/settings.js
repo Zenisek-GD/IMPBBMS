@@ -5,6 +5,17 @@ export const fetchSettings = () => apiClient.get('/settings').then((res) => res.
 export const updateSettings = (payload) =>
   apiClient.patch('/settings', payload).then((res) => res.data)
 
+// ── Navigation shortcuts ────────────────────────────────────────────────────
+export const fetchNavShortcuts = () =>
+  apiClient.get('/settings/shortcuts').then((res) => res.data)
+
+export const updateNavShortcuts = (shortcuts) =>
+  apiClient.patch('/settings/shortcuts', { shortcuts }).then((res) => res.data)
+
+// ── Public branding (no auth) ───────────────────────────────────────────────
+export const fetchPublicBranding = () =>
+  apiClient.get('/public/branding').then((res) => res.data)
+
 export const LGU_TYPE_LABELS = {
   province: 'Province',
   city: 'City',

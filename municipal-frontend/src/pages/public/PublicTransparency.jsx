@@ -14,6 +14,7 @@ import {
   FileCheck2,
 } from 'lucide-react'
 import * as publicApi from '../../api/publicProjects'
+import { fetchPublicBranding } from '../../api/settings'
 import PublicHeader from '../../components/public/PublicHeader'
 import PublicFooter from '../../components/public/PublicFooter'
 import AnnouncementFeed from '../../components/public/AnnouncementFeed'
@@ -307,6 +308,7 @@ function ProjectCard({ project }) {
 export default function PublicTransparency() {
   const [overview, setOverview] = useState(null)
   const [filters, setFilters] = useState(null)
+  const [branding, setBranding] = useState(null)
 
   const [result, setResult] = useState({ key: null, projects: [], failed: false })
 
@@ -338,7 +340,22 @@ export default function PublicTransparency() {
   const [department, setDepartment] = useState('')
 
   useEffect(() => {
-    document.title = 'Procurement Transparency Portal'
+    document.title = branding?.systemName
+      ? `${branding.systemName} — Transparency Portal`
+      : 'Procurement Transparency Portal'
+  }, [branding])
+
+  // Fetch branding for the public portal header and footer.
+  useEffect(() => {
+    let cancelled = false
+    fetchPublicBranding()
+      .then((result) => {
+        if (!cancelled) setBranding(result)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -430,7 +447,7 @@ export default function PublicTransparency() {
     // diffuse. Without it the bar has nothing behind it and reads as a plain
     // translucent slab.
     <div className="pattern-dots flex min-h-screen flex-col bg-canvas">
-      <PublicHeader lguName={overview?.lgu?.name} />
+      <PublicHeader lguName={overview?.lgu?.name} systemName={branding?.systemName} />
 
       <main className="flex-1">
         <div className="mx-auto w-full max-w-7xl px-4 sm:px-8">
@@ -684,7 +701,7 @@ export default function PublicTransparency() {
         </div>
       </main>
 
-      <PublicFooter />
+      <PublicFooter transparencyFooter={branding?.transparencyFooter} />
     </div>
   )
 }

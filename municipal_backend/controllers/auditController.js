@@ -119,7 +119,7 @@ export const exportAuditLog = async (req, res) => {
   // The integrity verdict travels with the export, so a reviewer holding the
   // file knows whether the chain was intact when it was produced.
   const preamble = [
-    `# CivicBid audit log export`,
+    `# Procurenance audit log export`,
     `# generated: ${new Date().toISOString()}`,
     `# entries: ${verification.entriesChecked}`,
     `# chain intact: ${verification.intact}`,
@@ -127,6 +127,6 @@ export const exportAuditLog = async (req, res) => {
   ].join("\n");
 
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader("Content-Disposition", `attachment; filename="civicbid-audit-log.csv"`);
+  res.setHeader("Content-Disposition", `attachment; filename="procurenance-audit-log.csv"`);
   res.send(`${preamble}\n${header.join(",")}\n${rows.join("\n")}\n`);
 };
