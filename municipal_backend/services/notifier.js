@@ -31,6 +31,10 @@ export const NOTIFICATION_EVENTS = {
   // The planning and budget calendar. These are the handoffs between offices
   // that previously happened by walking a folder down the corridor — an office
   // has no way to know the budget has reached its stage unless it is told.
+  // An approved Notice of Award sits waiting for someone to publish it, and the
+  // office that publishes is not the office that approved — so it has to be told.
+  DOCUMENT_STATUS: "document.status",
+
   AIP_STATUS: "aip.status",
   BUDGET_CALL: "budget.call",
   BUDGET_STATUS: "budget.status",

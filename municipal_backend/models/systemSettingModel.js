@@ -15,6 +15,10 @@ export const SystemSetting = sequelize.define("SystemSetting", {
 
 export const SETTING_KEYS = {
   LGU_NAME: "lgu.name",
+  // The office address, for the party clause and letterhead of generated
+  // documents. A contract naming the municipality has to say where it sits, and
+  // there was previously nowhere to hold that.
+  LGU_ADDRESS: "lgu.address",
   LGU_TYPE: "lgu.type",
   LGU_INCOME_CLASS: "lgu.incomeClass",
   // COA's capitalisation threshold: an item with a useful life beyond one year
@@ -61,6 +65,7 @@ export const getLguProfile = async () => {
 
   return {
     name: map[SETTING_KEYS.LGU_NAME] ?? "Municipality",
+    address: map[SETTING_KEYS.LGU_ADDRESS] ?? "",
     lguType: map[SETTING_KEYS.LGU_TYPE] ?? "municipality",
     incomeClass: map[SETTING_KEYS.LGU_INCOME_CLASS] ?? "1st",
     capitalizationThreshold:

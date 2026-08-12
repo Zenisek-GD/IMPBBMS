@@ -9,6 +9,7 @@ import RoleRoute from './routes/RoleRoute'
 import RoleHome from './routes/RoleHome'
 import RoleWorkspace from './pages/dashboards/RoleWorkspace'
 import MyProfile from './pages/account/MyProfile'
+import MfaEnrollment from './pages/account/MfaEnrollment'
 import PublicMessages from './pages/messages/PublicMessages'
 import AdminUsers from './pages/dashboards/AdminUsers'
 import AdminDepartments from './pages/dashboards/AdminDepartments'
@@ -37,6 +38,9 @@ import TransparencyPortal from './pages/insights/TransparencyPortal'
 import PublicTransparency from './pages/public/PublicTransparency'
 import PublicProjectDetail from './pages/public/PublicProjectDetail'
 import AnnouncementsAdmin from './pages/announcements/AnnouncementsAdmin'
+import InvitationToBid from './pages/announcements/InvitationToBid'
+import TemplateManager from './pages/documents/TemplateManager'
+import GeneratedDocuments from './pages/documents/GeneratedDocuments'
 
 // Each route declares which roles may reach it, mirroring the permission
 // matrix in design doc Section 2.3. The backend enforces the same rules.
@@ -86,6 +90,10 @@ function App() {
               from the sidebar footer rather than a header dropdown, so it needs
               no RoleRoute guard. */}
           <Route path="/profile" element={<MyProfile />} />
+
+          {/* Two-factor set-up. Reachable by every signed-in account whatever
+              its role, and the one page an un-enrolled session may open. */}
+          <Route path="/account/two-factor" element={<MfaEnrollment />} />
 
           {/* Public correspondence. The five offices a message can be routed to
               — see MESSAGE_ROUTING on the server. The API scopes the list to
@@ -278,6 +286,41 @@ function App() {
               permission — this list only decides what the nav can reach. */}
           <Route element={<RoleRoute allow={['bacSecretariat', 'systemAdministrator']} />}>
             <Route path="/announcements/manage" element={<AnnouncementsAdmin />} />
+            {/* The ITB workflow is its own screen. Same table underneath —
+                announcements with category procurementOpportunity — but
+                inviting bids is a different job from posting a notice, and it
+                carries particulars, attachments and a schedule that a general
+                notice has no use for. */}
+            <Route path="/announcements/itb" element={<InvitationToBid />} />
+          </Route>
+
+          {/* ── Document templates and generation ───────────────────────────
+              Template authoring is restricted to the offices that own the
+              wording; the documents workspace is wider, because approving and
+              publishing are different offices again. The pages render controls
+              from the caller's permissions, so a role that can only approve
+              sees only the approve button. */}
+          <Route
+            element={<RoleRoute allow={['systemAdministrator', 'bacSecretariat', 'bacChairperson', 'hope', 'internalAuditor']} />}
+          >
+            <Route path="/documents/templates" element={<TemplateManager />} />
+          </Route>
+
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'bacSecretariat',
+                  'bacChairperson',
+                  'hope',
+                  'departmentRequester',
+                  'headOfOffice',
+                  'internalAuditor',
+                ]}
+              />
+            }
+          >
+            <Route path="/documents" element={<GeneratedDocuments />} />
           </Route>
 
           {/* Audit log: Internal Auditor sees everything; the System

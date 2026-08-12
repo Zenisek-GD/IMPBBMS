@@ -8,6 +8,13 @@ import { SystemSetting, SETTING_KEYS } from "./models/systemSettingModel.js";
 import { ProcurementMode } from "./models/procurementModeModel.js";
 import { ObserverOrganization } from "./models/observerModel.js";
 import { PERMISSIONS, ROLE_PERMISSIONS } from "./config/permissionMatrix.js";
+import {
+  DocumentTemplate,
+  DocumentTemplateVersion,
+  nextVersionNo,
+} from "./models/documentTemplateModel.js";
+import { isPublishableType } from "./services/documentTypes.js";
+import { DEFAULT_TEMPLATES } from "./config/defaultTemplates.js";
 
 // One row per role from the system design doc, Section 2.1. `key` must match
 // municipal-frontend/src/config/navigation.js's ROLE_NAV keys and
@@ -230,6 +237,11 @@ const LGU_SETTINGS = [
     description: "Name of the local government unit",
   },
   {
+    key: SETTING_KEYS.LGU_ADDRESS,
+    value: "Municipal Hall Compound, Poblacion, Roxas, Oriental Mindoro",
+    description: "Office address printed on generated documents and contract party clauses",
+  },
+  {
     key: SETTING_KEYS.LGU_TYPE,
     value: "municipality",
     description: "province | city | municipality | barangay — drives IRR Sec. 34.2 thresholds",
@@ -378,6 +390,64 @@ try {
       }
     }
   }
+
+  // ── Document templates ─────────────────────────────────────────────────────
+  // Seeded system templates are refreshed on re-run so a wording fix ships,
+  // but only ever by adding a *new version* — the old one stays, because
+  // documents already generated from it must remain explicable. Anything an
+  // official authored is left alone entirely.
+  for (const spec of DEFAULT_TEMPLATES) {
+    const [template, created] = await DocumentTemplate.findOrCreate({
+      where: { key: spec.key },
+      defaults: {
+        key: spec.key,
+        name: spec.name,
+        documentType: spec.documentType,
+        description: spec.description,
+        status: "active",
+        publishable: isPublishableType(spec.documentType),
+        isSystemTemplate: true,
+      },
+    });
+
+    const current = template.activeVersionId
+      ? await DocumentTemplateVersion.findByPk(template.activeVersionId)
+      : null;
+
+    const unchanged =
+      current &&
+      current.bodyHtml === spec.bodyHtml &&
+      (current.footerHtml ?? null) === (spec.footerHtml ?? null) &&
+      (current.css ?? null) === (spec.css ?? null);
+
+    if (unchanged) {
+      console.log(`↷ template up to date: ${spec.key} (v${current.versionNo})`);
+      continue;
+    }
+
+    const version = await DocumentTemplateVersion.create({
+      documentTemplateId: template.id,
+      versionNo: await nextVersionNo(template.id),
+      bodyHtml: spec.bodyHtml,
+      headerHtml: spec.headerHtml ?? null,
+      footerHtml: spec.footerHtml ?? null,
+      css: spec.css ?? null,
+      pageSize: spec.pageSize ?? "A4",
+      landscape: Boolean(spec.landscape),
+      margins: spec.margins ?? null,
+      changeNote: created ? "Seeded with the system" : "Refreshed from the seeded default",
+    });
+
+    await template.update({
+      activeVersionId: version.id,
+      name: spec.name,
+      description: spec.description,
+      publishable: isPublishableType(spec.documentType),
+    });
+
+    console.log(`${created ? "✅ created" : "↷ updated"} template: ${spec.key} → v${version.versionNo}`);
+  }
+  console.log(`✅ ${DEFAULT_TEMPLATES.length} document templates registered`);
 
   console.log(`\nAll seed accounts use the password: ${SEED_PASSWORD}`);
   console.log("Dev-only — do not reuse these accounts or password outside local development.");

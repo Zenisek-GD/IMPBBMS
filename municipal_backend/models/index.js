@@ -8,6 +8,12 @@ export { User, USER_STATUSES } from "./userModel.js";
 // against an OtpChallenge, not a bearer link. See controllers/passwordResetController.js.
 export { ActivationToken } from "./activationTokenModel.js";
 export { OtpChallenge, OTP_PURPOSES, OTP_PURPOSE_LABELS } from "./otpChallengeModel.js";
+export {
+  MfaEnrollment,
+  MfaRecoveryCode,
+  MFA_LOCK_THRESHOLD,
+  MFA_LOCK_MINUTES,
+} from "./mfaModel.js";
 export { Permission, RolePermission } from "./permissionModel.js";
 export { SystemSetting, SETTING_KEYS, getLguProfile } from "./systemSettingModel.js";
 export {
@@ -86,6 +92,18 @@ export { Invoice, Payment } from "./paymentModel.js";
 export { PendingItem } from "./pendingItemModel.js";
 export { AuditLog } from "./auditLogModel.js";
 export { Document } from "./documentModel.js";
+export {
+  DocumentTemplate,
+  DocumentTemplateVersion,
+  DOCUMENT_TYPES,
+  DOCUMENT_TYPE_LABELS,
+  TEMPLATE_STATUSES,
+} from "./documentTemplateModel.js";
+export {
+  GeneratedDocument,
+  GENERATED_DOCUMENT_STATUSES,
+  GENERATED_DOCUMENT_STATUS_LABELS,
+} from "./generatedDocumentModel.js";
 export { LiveConferenceSession, ConferenceAttendance } from "./liveConferenceModel.js";
 export { Rfq, Bid, BidOpeningRecord, Evaluation, PostQualification, Award } from "./biddingModel.js";
 

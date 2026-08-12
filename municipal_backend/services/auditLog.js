@@ -292,6 +292,21 @@ export const AUDIT_ACTIONS = {
   OTP_VERIFIED: "otp.verified",
   OTP_FAILED: "otp.failed",
 
+  // ── Two-factor authentication ─────────────────────────────────────────────
+  // Every change to somebody's second factor is logged, because each one is a
+  // change to who can get into an account. The administrator reset is the one
+  // that matters most: it is the only path that removes the protection without
+  // the account holder's phone, so it must never be able to happen quietly.
+  MFA_CHALLENGE_ISSUED: "auth.mfa.challenge.issued",
+  MFA_ENROLLMENT_STARTED: "auth.mfa.enrollment.started",
+  MFA_ENABLED: "auth.mfa.enabled",
+  MFA_DISABLED: "auth.mfa.disabled",
+  MFA_DISABLE_REFUSED: "auth.mfa.disable.refused",
+  MFA_CHALLENGE_FAILED: "auth.mfa.challenge.failed",
+  MFA_RECOVERY_USED: "auth.mfa.recovery.used",
+  MFA_RECOVERY_REGENERATED: "auth.mfa.recovery.regenerated",
+  MFA_RESET_BY_ADMIN: "auth.mfa.reset.byAdmin",
+
   // ── Credentials ───────────────────────────────────────────────────────────
   PASSWORD_RESET_REQUESTED: "auth.password.reset.requested",
   PASSWORD_RESET: "auth.password.reset",
@@ -328,6 +343,27 @@ export const AUDIT_ACTIONS = {
   BUDGET_PROCEEDING_RECORDED: "budget.proceeding.recorded",
   // The moment budget stops being a proposal and becomes spendable authority.
   APPROPRIATIONS_RELEASED: "budget.appropriations.released",
+
+  // ── Document templates and generated documents ────────────────────────────
+  // Templates are logged because whoever edits one changes what the
+  // municipality says in every future document of that kind — a heavier act
+  // than issuing any single document, and one with no other trace.
+  TEMPLATE_CREATED: "template.created",
+  TEMPLATE_UPDATED: "template.updated",
+  TEMPLATE_VERSION_SAVED: "template.version.saved",
+  TEMPLATE_VERSION_ACTIVATED: "template.version.activated",
+
+  // Generated documents are logged at every point the spec asks for:
+  // generation, manual edit, approval, download, publication and voiding.
+  // The download entry is the one people forget — it answers "who took a copy
+  // of this, and when", which is the question asked after a leak.
+  DOCUMENT_GENERATED: "document.generated",
+  DOCUMENT_EDITED: "document.edited",
+  DOCUMENT_APPROVED: "document.approved",
+  DOCUMENT_DOWNLOADED: "document.downloaded",
+  DOCUMENT_PUBLISHED: "document.published",
+  DOCUMENT_UNPUBLISHED: "document.unpublished",
+  DOCUMENT_VOIDED: "document.voided",
 
   APP_TRANSITION: "app.transition",
   PR_TRANSITION: "pr.transition",

@@ -15,8 +15,15 @@ import {
   listProjectDocuments,
   downloadProjectDocument,
   listAnnouncements,
+  listArchivedAnnouncements,
+  listPublicAnnouncementAttachments,
+  downloadPublicAnnouncementAttachment,
 } from "../controllers/publicProjectController.js";
 import { submitPublicMessage } from "../controllers/publicMessageController.js";
+import {
+  listPublicDocuments,
+  downloadPublicDocument,
+} from "../controllers/generatedDocumentController.js";
 import { rateLimit } from "../middleware/rateLimitMiddleware.js";
 
 // ── PUBLIC API ──────────────────────────────────────────────────────────────
@@ -78,6 +85,28 @@ router.get("/projects", listProjects);
 router.get("/projects/filters", getPublicFilters);
 router.get("/projects/overview", getPublicOverview);
 router.get("/announcements", listAnnouncements);
+
+// The archive: notices the office retired, and published notices that have
+// simply expired. Kept publicly readable because a procurement that vanishes
+// from the record once it closes is the opposite of transparency.
+router.get("/announcements/archive", listArchivedAnnouncements);
+
+// Bidding documents, terms of reference and specifications attached to a
+// published notice. Unauthenticated by design — that is what public posting
+// means — and scoped to the notice, so an attachment id from an unpublished
+// notice cannot be fetched by pairing it with a published one.
+router.get("/announcements/:id/attachments", listPublicAnnouncementAttachments);
+router.get(
+  "/announcements/:id/attachments/:documentId",
+  downloadPublicAnnouncementAttachment
+);
+
+// Officially issued documents the municipality has chosen to publish —
+// Notices of Award and Notices to Proceed. Narrowed at the query to approved
+// AND published AND a publishable *type*, so no unapproved or internal
+// document can be reached by guessing an id.
+router.get("/documents", listPublicDocuments);
+router.get("/documents/:id/download", downloadPublicDocument);
 
 // Registered after the fixed paths above so "/projects/filters" is not
 // swallowed by the ":id" parameter.

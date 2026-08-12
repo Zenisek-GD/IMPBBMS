@@ -8,9 +8,10 @@ import { landingRouteForRole } from '../config/roleLanding'
 import { loginSchema } from '../config/validation'
 import AuthLayout from '../layouts/AuthLayout'
 import FormField from '../components/ui/FormField'
+import MfaChallenge from './MfaChallenge'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, setUser } = useAuth()
   const navigate = useNavigate()
   const [serverError, setServerError] = useState('')
 
@@ -52,6 +53,8 @@ export default function Login() {
     }
   })
 
+  const [challenge, setChallenge] = useState(null)
+
   const {
     register,
     handleSubmit,
@@ -63,11 +66,33 @@ export default function Login() {
     setNeedsActivation(false)
     try {
       const user = await login(email, password)
+      // The password was right but it is not enough on its own. Hand over to
+      // the second-factor step rather than navigating anywhere — there is no
+      // session yet, so every protected route would bounce straight back.
+      if (user?.mfaRequired) {
+        setChallenge(user)
+        return
+      }
       navigate(landingRouteForRole(user.role), { replace: true })
     } catch (err) {
       setNeedsActivation(err.response?.data?.status === 'pendingActivation')
       setServerError(err.response?.data?.message ?? 'Something went wrong. Please try again.')
     }
+  }
+
+  // ── Second factor ──────────────────────────────────────────────────────────
+  // Rendered instead of the password form once the password has been accepted.
+  if (challenge) {
+    return (
+      <MfaChallenge
+        challenge={challenge}
+        onCancel={() => setChallenge(null)}
+        onVerified={(user) => {
+          setUser(user)
+          navigate(landingRouteForRole(user.role), { replace: true })
+        }}
+      />
+    )
   }
 
   return (

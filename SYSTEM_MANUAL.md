@@ -162,6 +162,30 @@ The frontend loads the current user through the auth context in `municipal-front
 - If no user is active, the app redirects to `/login`.
 - On successful login, the user is routed to a role-specific landing page.
 
+### Two-factor authentication
+**Every account in the system requires a second factor.** A password is a secret its holder can be tricked into typing somewhere else, and every account here can approve spending, issue a document under the municipality's name, or read the whole procurement record.
+
+The scheme is **TOTP (RFC 6238)** — the six-digit codes produced by Google Authenticator, Microsoft Authenticator, Authy, 1Password and any other standard app. SHA-1, six digits, thirty-second steps, which are the parameters every client assumes.
+
+**The implementation is hand-rolled, deliberately.** `services/totp.js` is the one place where a compromised dependency would be silent and total: a package that returned predictable codes would let anyone in and nothing would look wrong. It is fifty lines of well-specified arithmetic, and the RFC publishes test vectors — so correctness is *proven*, not assumed. Run the proof:
+
+```bash
+node municipal_backend/services/totp.test.mjs
+```
+
+How it behaves:
+- a correct password **no longer creates a session**. It creates a five-minute pending state carrying a user id and nothing else — no permissions are loaded and no protected route accepts it
+- accounts that have not enrolled are let in but **confined to the enrolment screen** until they do. Refusing the sign-in outright would have locked out every account the day it shipped, including the administrator who would have to fix it
+- a code is **single-use**: the time step it came from is recorded, and any code at or below it is refused. Without this, a code captured by a phishing proxy stays valid for the rest of its window
+- **five wrong codes locks the account for 15 minutes**, counted per enrolment rather than per address, because the account is what is under attack
+- **ten recovery codes** are issued once at enrolment and stored hashed. Without them a lost phone means an administrator wipe, which is a support burden and a social-engineering target
+- **turning it off needs the password *and* a current code** — either alone would let whoever is at an unlocked screen remove the protection
+- an **administrator reset** clears an enrolment so the user can set it up again. It cannot reveal or set a secret and cannot sign anybody in, so a compromised administrator gains no path into another account. Reason required, and audited
+
+**The secret at rest** is encrypted with AES-256-GCM under `MFA_ENCRYPTION_KEY` (falling back to `SESSION_SECRET`), never hashed — verification needs the original bytes. That is what makes a database dump insufficient on its own: password hashes survive a leak, and plaintext TOTP secrets would not.
+
+Every change to a second factor is audit-logged: enrolment, failures, recovery-code use, regeneration, disabling and the administrator reset.
+
 ### Backend security
 The backend uses session-based authentication and permission checks:
 - `requireAuth` blocks unauthenticated requests.
@@ -422,7 +446,63 @@ Typical tasks:
 - view published-only procurement records
 - expose approved APPs, procurements, and awards to the public portal
 
-### 7.9 Notifications and Documents
+### 7.8a Invitation to Bid and Public Posting
+Used by the BAC Secretariat; read by anyone, with no account.
+
+Frontend page: Invitation to Bid (`/announcements/itb`).
+Backend: the authoring half under `/api/announcements`, the public half under `/api/public/announcements`.
+
+**Two documents, one invitation.** The *announcement* is the public-friendly posting on the transparency portal. The *Invitation to Bid letter* is the official signed instrument, generated in the documents module (§7.9) from the same solicitation. Both draw their figures from the `Rfq`, so they cannot disagree.
+
+**Particulars are copied once, then frozen.** Linking a notice to its solicitation pulls the reference, ABC, mode, citation and schedule from the record rather than having an officer retype them. From that moment the notice holds its own copy — a published invitation must not change because somebody edited the RFQ behind it.
+
+Rules enforced and verified:
+- a notice is always born a **draft**; publication is a separate, audited act
+- bid opening cannot precede the submission deadline, and a pre-bid conference cannot follow it
+- the rich body is **sanitised on the way in**, and the plain-text `body` is derived from it so older consumers keep working
+- an unpublished notice and its attachments return **404** to the public, never 403
+- **duplicating** reuses the wording, contact and venue but deliberately drops the reference, ABC and every date — inheriting last year's deadline silently is how a bad invitation goes out
+- a draft that was never published cannot be archived into public view
+- attachments are scoped to their notice: an attachment id cannot be fetched by pairing it with a different published notice
+
+**Scheduling.** `publishAt` releases a notice automatically. The sweep runs on the public listing as well as on demand, so a schedule works even with no cron attached — the alternative is a notice that silently never publishes.
+
+**The archive is public.** Notices the office retired, and published notices that have simply expired, stay readable at `/api/public/announcements/archive`. A procurement that vanishes from the record once it closes is the opposite of transparency.
+
+Public readers get search (title, reference, mode), category and open/closed filters, four sort orders, key dates, and attachment downloads — all without an account.
+
+### 7.9 Document Templates and Auto-Generation
+Used by the BAC Secretariat (authors and issues), the Mayor (approves), and read by the Internal Auditor.
+
+Frontend pages:
+- Document Templates (`/documents/templates`) — authoring with a placeholder palette and version history
+- Official Documents (`/documents`) — generate, preview, edit, approve, publish, download
+
+Backend routes: `/api/doc-generation/*`, plus the public `/api/public/documents`.
+
+**How it works.** A template is HTML with `{placeholder}` tokens. Generating resolves those against the procurement record — supplier, project, amounts, dates, signing official — so nothing is retyped. The merged HTML is rendered to PDF by headless Chrome and stored in the attachment table.
+
+Templates ship for all eight required types: Notice of Award, Notice to Proceed, Contract Agreement, Purchase Request, Inspection and Acceptance Report, and Certificates of Recognition, Participation and Appreciation.
+
+**Version control.** Editing a template writes a **new version**; the old one is append-only at the model level. A document generated last March still resolves against the wording in force then, and any version can be reactivated.
+
+**Three things are snapshotted at generation**, each answering a question asked later: the rendered HTML including any manual edit, the resolved placeholder values (a supplier's address changes; the document still bears the old one), and the template version id.
+
+**Amounts spell themselves out** — `TWO MILLION SEVEN HUNDRED THREE THOUSAND FIVE HUNDRED PESOS AND 00/100` — because official documents carry both forms and a figure in words cannot be altered by adding a digit.
+
+Rules enforced and verified:
+- the officer who **generated** a document cannot **approve** it — the same separation as certify-versus-release on a disbursement
+- a document cannot be published unless it is approved **and** its type is publishable; an internal requisition form is refused even when approved
+- an unpublished document returns **404** to the public, not 403 — a 403 would confirm it exists to anyone probing ids
+- manual edits are allowed on drafts only, are flagged on the record, and drop the cached PDF so a stale copy cannot be downloaded as current
+- voiding requires a reason and withdraws the document from the portal; the original is never deleted, since it may already be in a supplier's hands
+- generation, edits, approvals, **downloads**, publication and voiding are all audit-logged
+
+**Security.** Template HTML is filtered by an allow-list sanitiser before rendering or publishing — `<script>` and its contents, `on*` handlers, anchors, iframes and `url()` in CSS are all dropped, and images may only be inline `data:` URIs. The PDF renderer independently blocks all network requests, so a template cannot make the server fetch a URL of its author's choosing.
+
+> **Deployment requirement:** the server needs Chrome, Chromium or Edge installed. Set `CHROME_PATH` in the backend `.env` to point at it; otherwise the usual install locations are searched. Without a browser, PDF endpoints return 503 with a clear message and everything else continues to work.
+
+### 7.10 Notifications and Documents
 The system also supports:
 - notification inbox and read status
 - document upload, download, and deletion
@@ -901,6 +981,11 @@ This is the practical route map for the backend.
 - `GET /api/transparency/*`
 - `GET /api/notifications`, `POST /api/notifications/:id/read`, `POST /api/notifications/read-all`
 - `POST /api/documents`, `GET /api/documents`, `GET /api/documents/:id/download`, `DELETE /api/documents/:id`
+- `GET /api/doc-generation/templates`, `POST /api/doc-generation/templates`, `POST /api/doc-generation/templates/:id/versions`
+- `POST /api/doc-generation/templates/:id/versions/:versionId/activate`, `POST /api/doc-generation/templates/preview`
+- `POST /api/doc-generation/documents`, `PATCH /api/doc-generation/documents/:id/body`
+- `POST /api/doc-generation/documents/:id/{approve,publish,unpublish,void}`, `GET /api/doc-generation/documents/:id/pdf`
+- `GET /api/public/documents`, `GET /api/public/documents/:id/download` — published documents only
 
 ## 11. Common Operator Workflow
 1. Log in with a seeded account or a real account created by the administrator.

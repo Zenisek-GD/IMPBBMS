@@ -27,6 +27,7 @@ import {
   ScrollText,
   TrendingUp,
   Target,
+  Stamp,
   ListTree,
   Scale,
   Eye,
@@ -80,6 +81,7 @@ export const ROLE_NAV = {
           // The administrator's route to the public portal, for maintenance and
           // system notices.
           { label: 'Announcements', href: '/announcements/manage', icon: Megaphone, shortcut: 'Alt+7' },
+          { label: 'Document Templates', href: '/documents/templates', icon: FileText },
         ],
       },
       {
@@ -115,6 +117,7 @@ export const ROLE_NAV = {
           { label: 'APP Approvals', href: '/app-entries', icon: ClipboardCheck, shortcut: 'Alt+4' },
           { label: 'PR Approvals', href: '/purchase-requisitions', icon: FileText, shortcut: 'Alt+5' },
           { label: 'Award Approvals', href: '/evaluation', icon: Award, shortcut: 'Alt+6' },
+          { label: 'Document Approvals', href: '/documents', icon: Stamp },
         ],
       },
       {
@@ -240,6 +243,7 @@ export const ROLE_NAV = {
           // Sits above vendor verification deliberately: a call for bidders is
           // posted first, and the applications it attracts are what the next
           // screen reviews.
+          { label: 'Invitation to Bid', href: '/announcements/itb', icon: Megaphone },
           { label: 'Announcements', href: '/announcements/manage', icon: Megaphone, shortcut: 'Alt+5' },
           // Renamed: this office records the submission and checks the
           // requirements. Whether the bidder is *eligible* is the BAC's call.
@@ -260,6 +264,9 @@ export const ROLE_NAV = {
         heading: 'Contracts',
         items: [
           { label: 'Contract Drafting', href: '/contracts', icon: FileSignature, shortcut: 'Alt+0' },
+          // Generated from the procurement record rather than retyped.
+          { label: 'Official Documents', href: '/documents', icon: Stamp },
+          { label: 'Document Templates', href: '/documents/templates', icon: FileText },
           { label: 'Pending Items', href: '/pending-items', icon: Package, shortcut: 'Alt+q' },
         ],
       },
@@ -356,6 +363,7 @@ export const ROLE_NAV = {
           { label: 'Development Plan & AIP', href: '/planning', icon: ListTree, shortcut: 'Alt+3' },
           { label: 'APP Entries', href: '/app-entries', icon: ClipboardList, shortcut: 'Alt+4' },
           { label: 'Purchase Requisitions', href: '/purchase-requisitions', icon: FileText, shortcut: 'Alt+5' },
+          { label: 'Official Documents', href: '/documents', icon: Stamp },
         ],
       },
       {
@@ -382,6 +390,7 @@ export const ROLE_NAV = {
           { label: 'Development Plan & AIP', href: '/planning', icon: ListTree, shortcut: 'Alt+3' },
           { label: 'APP Entries', href: '/app-entries', icon: ClipboardList, shortcut: 'Alt+4' },
           { label: 'Purchase Requisitions', href: '/purchase-requisitions', icon: FileText, shortcut: 'Alt+5' },
+          { label: 'Official Documents', href: '/documents', icon: Stamp },
         ],
       },
       {
@@ -579,6 +588,9 @@ export const ROLE_NAV = {
           // authorised to buy this, and by whom.
           { label: 'Development Plan & AIP', href: '/planning', icon: Target, shortcut: 'Alt+6' },
           { label: 'Budget Preparation', href: '/budget/preparation', icon: Landmark, shortcut: 'Alt+7' },
+          // What the office actually issued, and who approved and downloaded
+          // each one — the paper trail the audit log entries refer to.
+          { label: 'Issued Documents', href: '/documents', icon: Stamp },
           { label: 'Contracts', href: '/contracts', icon: FileSignature, shortcut: 'Alt+8' },
           { label: 'Invoices', href: '/invoices', icon: Receipt, shortcut: 'Alt+9' },
           { label: 'Pending Items', href: '/pending-items', icon: Package, shortcut: 'Alt+0' },

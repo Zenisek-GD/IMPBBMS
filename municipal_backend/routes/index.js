@@ -45,8 +45,11 @@ import conferenceRoutes from "./conferenceRoutes.js";
 import financeRoutes from "./financeRoutes.js";
 import insightRoutes from "./insightRoutes.js";
 import documentRoutes from "./documentRoutes.js";
+import documentTemplateRoutes from "./documentTemplateRoutes.js";
 import announcementRoutes from "./announcementRoutes.js";
 import publicRoutes from "./publicRoutes.js";
+import { requireMfaEnrollment } from "../middleware/mfaMiddleware.js";
+
 const router = express.Router();
 
 // The scaffold's landing page used to live here. It was framework boilerplate
@@ -62,6 +65,11 @@ router.get("/", (req, res) =>
 );
 
 router.use("/api/auth", authRoutes);
+
+// Applied after auth so the enrolment and sign-out routes stay reachable, and
+// before every module below so an account that has not set up a second factor
+// cannot reach any of them. See middleware/mfaMiddleware.js.
+router.use(requireMfaEnrollment);
 
 // Bidder account activation. Session-less: the caller holds an invitation token,
 // not a cookie, because the account they are activating cannot be signed into
@@ -96,6 +104,11 @@ router.use("/api/contracts", contractRoutes);
 router.use("/api/conferences", conferenceRoutes);
 router.use("/api/finance", financeRoutes);
 router.use("/api/documents", documentRoutes);
+
+// Template management and document generation. Mounted at its own prefix rather
+// than under /api/documents, which is the raw attachment store — the two are
+// different things and sharing a prefix would make the routes ambiguous.
+router.use("/api/doc-generation", documentTemplateRoutes);
 router.use("/api/announcements", announcementRoutes);
 router.use("/api", insightRoutes);
 

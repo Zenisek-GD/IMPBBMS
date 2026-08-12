@@ -16,6 +16,11 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     const loggedInUser = await authApi.login(email, password)
+    // A password-only response is NOT a session. The server has recorded a
+    // short-lived pending state and nothing else, so the user must not be
+    // stored — doing so would make the app behave as though the second factor
+    // had already been given.
+    if (loggedInUser?.mfaRequired) return loggedInUser
     setUser(loggedInUser)
     return loggedInUser
   }, [])

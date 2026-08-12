@@ -3,7 +3,13 @@ import {
   Announcement,
   ANNOUNCEMENT_CATEGORIES,
   acceptsRegistrations,
+  submissionsClosed,
+  releaseScheduledAnnouncements,
 } from "../models/announcementModel.js";
+import { Rfq } from "../models/biddingModel.js";
+import { ProcurementMode } from "../models/procurementModeModel.js";
+import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
+import { sanitizeHtml } from "../services/htmlSanitizer.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { User } from "../models/userModel.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
@@ -37,9 +43,35 @@ const serialize = (announcement) => ({
   status: announcement.status,
   referenceNo: announcement.referenceNo,
   pinned: announcement.pinned,
+  bodyHtml: announcement.bodyHtml,
   publishedAt: announcement.publishedAt,
+  publishAt: announcement.publishAt,
+  archivedAt: announcement.archivedAt,
   expiresAt: announcement.expiresAt,
   registrationDeadline: announcement.registrationDeadline,
+
+  // ── Invitation to Bid particulars ─────────────────────────────────────────
+  abc: announcement.abc === null || announcement.abc === undefined ? null : Number(announcement.abc),
+  fundSource: announcement.fundSource,
+  procurementMethod: announcement.procurementMethod,
+  procurementMethodCitation: announcement.procurementMethodCitation,
+  prebidAt: announcement.prebidAt,
+  submissionDeadline: announcement.submissionDeadline,
+  bidOpeningAt: announcement.bidOpeningAt,
+  venue: announcement.venue,
+  contactPerson: announcement.contactPerson,
+  contactEmail: announcement.contactEmail,
+  contactPhone: announcement.contactPhone,
+  rfqId: announcement.rfqId,
+  duplicatedFromId: announcement.duplicatedFromId,
+
+  // Bidding having closed is not the same as the notice having expired: the
+  // notice stays readable, it just stops accepting anything.
+  submissionsClosed: submissionsClosed(announcement),
+
+  // Scheduled but not yet live. Surfaced so the console can say "goes out
+  // Monday" rather than showing an indistinguishable draft.
+  scheduled: announcement.status === "draft" && Boolean(announcement.publishAt),
 
   // Derived rather than stored, from the same helper the intake controller
   // enforces with — so the badge an officer sees in this console is the literal
@@ -88,10 +120,41 @@ const readBody = (payload, { partial = false } = {}) => {
     else patch.title = title;
   }
 
+  // ── Rich body, handled before the plain-text check below ──────────────────
+  // Order is load-bearing. The rich editor sends only `bodyHtml`, and the
+  // plain-text `body` is *derived* from it — so deriving it after the "a body
+  // is required" check meant every notice written in the editor was rejected
+  // for having no body it had in fact just supplied.
+  //
+  // Sanitised on the way in, not on the way out: storing raw authored markup
+  // and cleaning it at render time means every future reader of the column has
+  // to remember to clean it too, and one that forgets is a stored XSS on a page
+  // served to the public.
+  if (has("bodyHtml")) {
+    const clean = sanitizeHtml(payload.bodyHtml ?? "");
+    patch.bodyHtml = clean || null;
+
+    // Keep the plain-text `body` in step so search, exports and any older
+    // consumer keep working without having to strip tags themselves.
+    if (clean && !String(payload.body ?? "").trim()) {
+      const text = clean
+        // Block-level closers become line breaks first, so the plain-text
+        // version keeps the paragraph structure instead of running together.
+        .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&nbsp;/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      if (text) patch.body = text;
+    }
+  }
+
   if (required("body")) {
     const body = String(payload.body ?? "").trim();
-    if (!body) errors.body = "An announcement needs something to say.";
-    else patch.body = body;
+    // `patch.body` may already hold the text derived from `bodyHtml` above.
+    if (!body && !patch.body) errors.body = "An announcement needs something to say.";
+    else if (body) patch.body = body;
   }
 
   if (has("category")) {
@@ -123,6 +186,44 @@ const readBody = (payload, { partial = false } = {}) => {
 
   if (has("appEntryId")) {
     patch.appEntryId = payload.appEntryId ? Number(payload.appEntryId) : null;
+  }
+  if (has("rfqId")) patch.rfqId = payload.rfqId ? Number(payload.rfqId) : null;
+
+  // ── Invitation to Bid particulars ─────────────────────────────────────────
+  if (has("abc")) {
+    if (payload.abc === null || payload.abc === "") patch.abc = null;
+    else {
+      const amount = Number(payload.abc);
+      if (!Number.isFinite(amount) || amount < 0) errors.abc = "The ABC must be a positive amount.";
+      else patch.abc = amount;
+    }
+  }
+
+  for (const field of ["fundSource", "procurementMethod", "procurementMethodCitation", "venue",
+                       "contactPerson", "contactEmail", "contactPhone"]) {
+    if (has(field)) patch[field] = String(payload[field] ?? "").trim() || null;
+  }
+
+  // The three dates a bidder plans around. Each is validated the same way and
+  // each may legitimately be cleared, so this is a loop rather than three
+  // near-identical blocks that could drift apart.
+  for (const field of ["prebidAt", "submissionDeadline", "bidOpeningAt", "publishAt"]) {
+    if (!has(field)) continue;
+    if (payload[field] === null || payload[field] === "") { patch[field] = null; continue; }
+    const parsed = new Date(payload[field]);
+    if (Number.isNaN(parsed.getTime())) errors[field] = "That is not a valid date and time.";
+    else patch[field] = parsed;
+  }
+
+  // Bids cannot be opened before they are submitted, and a pre-bid conference
+  // held after the deadline helps nobody. Caught here so the officer gets a
+  // sentence rather than publishing a schedule that cannot happen.
+  const deadlineAt = patch.submissionDeadline ?? null;
+  if (deadlineAt && patch.bidOpeningAt && patch.bidOpeningAt < deadlineAt) {
+    errors.bidOpeningAt = "Bid opening cannot be scheduled before the submission deadline.";
+  }
+  if (deadlineAt && patch.prebidAt && patch.prebidAt > deadlineAt) {
+    errors.prebidAt = "The pre-bid conference must fall before the submission deadline.";
   }
 
   return { errors, patch };
@@ -378,4 +479,175 @@ export const listOpenCalls = async (_req, res) => {
       closed: new Date(announcement.registrationDeadline) <= now,
     }))
   );
+};
+
+// ── Populate from a solicitation ─────────────────────────────────────────────
+// The whole point of linking a notice to its RFQ: the reference number, ABC,
+// mode and schedule are already on file, and an officer retyping them is how a
+// published invitation ends up quoting a different ABC from the one the BAC
+// approved.
+//
+// Returns the values rather than writing them, so the officer sees what will be
+// filled in and can still override any of it before saving. Copied once at
+// authoring time — a published notice must not change because somebody edited
+// the RFQ behind it.
+export const draftFromSolicitation = async (req, res) => {
+  const rfq = await Rfq.findByPk(req.params.rfqId, {
+    include: [
+      { model: ProcurementMode, as: "mode" },
+      { model: AppEntry, as: "appEntry", attributes: ["id", "projectTitle", "fundSource"] },
+    ],
+  });
+  if (!rfq) return res.status(404).json({ message: "That solicitation does not exist." });
+
+  res.json({
+    rfqId: rfq.id,
+    appEntryId: rfq.appEntryId ?? null,
+    referenceNo: rfq.referenceNo,
+    title: `Invitation to Bid — ${rfq.title}`,
+    category: "procurementOpportunity",
+    abc: rfq.abc === null || rfq.abc === undefined ? null : Number(rfq.abc),
+    fundSource: rfq.appEntry?.fundSource ?? null,
+    procurementMethod: rfq.mode?.name ?? null,
+    procurementMethodCitation: rfq.mode?.citation ?? null,
+    prebidAt: rfq.prebidAt,
+    submissionDeadline: rfq.closingDate,
+    // Bid opening follows the deadline on the same day unless the office says
+    // otherwise — the usual practice, and a sensible default the officer can
+    // change rather than a blank they must fill.
+    bidOpeningAt: rfq.closingDate,
+    projectTitle: rfq.appEntry?.projectTitle ?? null,
+  });
+};
+
+// ── Preview ──────────────────────────────────────────────────────────────────
+// The public-facing rendering of a draft, built by the same serialiser the
+// portal uses. Previewing through a *different* code path would show the
+// officer something the public will never see, which is worse than no preview.
+export const previewAnnouncement = async (req, res) => {
+  const announcement = await Announcement.findByPk(req.params.id, withIncludes);
+  if (!announcement) return res.status(404).json({ message: "Announcement not found." });
+
+  const { publicAnnouncement } = await import("./publicProjectController.js");
+  res.json({
+    preview: publicAnnouncement(announcement, new Date(), { force: true }),
+    attachments: await listAttachmentsFor(announcement.id),
+  });
+};
+
+const listAttachmentsFor = async (announcementId) => {
+  const files = await Document.findAll({
+    where: { entityRef: "announcement", entityId: announcementId },
+    attributes: DOCUMENT_METADATA_ATTRIBUTES,
+    order: [["uploadedAt", "ASC"]],
+  });
+  return files.map((file) => ({
+    id: file.id,
+    filename: file.filename,
+    mimeType: file.mimeType,
+    sizeBytes: file.sizeBytes,
+    checksum: file.checksum,
+    label: file.label,
+    docType: file.docType,
+    uploadedAt: file.uploadedAt,
+  }));
+};
+
+export const listAnnouncementAttachments = async (req, res) => {
+  const announcement = await Announcement.findByPk(req.params.id);
+  if (!announcement) return res.status(404).json({ message: "Announcement not found." });
+  res.json(await listAttachmentsFor(announcement.id));
+};
+
+// ── Duplicate as a template ──────────────────────────────────────────────────
+// Procurement notices are near-identical year to year, and retyping one is both
+// slow and how a stale ABC survives into a new invitation. The copy is always a
+// draft, and deliberately drops everything that belongs to the original
+// procurement: its schedule, its reference, its link to a solicitation and its
+// publication history. What is reused is the wording.
+export const duplicateAnnouncement = async (req, res) => {
+  const source = await Announcement.findByPk(req.params.id);
+  if (!source) return res.status(404).json({ message: "Announcement not found." });
+
+  const copy = await Announcement.create({
+    title: `${source.title} (copy)`.slice(0, 200),
+    body: source.body,
+    bodyHtml: source.bodyHtml,
+    category: source.category,
+    status: "draft",
+
+    // Carried over: the standing facts about how this office procures.
+    fundSource: source.fundSource,
+    procurementMethod: source.procurementMethod,
+    procurementMethodCitation: source.procurementMethodCitation,
+    venue: source.venue,
+    contactPerson: source.contactPerson,
+    contactEmail: source.contactEmail,
+    contactPhone: source.contactPhone,
+
+    // Deliberately NOT carried: reference number, ABC, every date, the project
+    // and solicitation links, pinning, and all publication history. Each
+    // belongs to the procurement being copied, and silently inheriting any of
+    // them is how a new invitation goes out quoting last year's deadline.
+    duplicatedFromId: source.id,
+    createdByUserId: req.currentUser.id,
+  });
+
+  await auditFromRequest(req, {
+    actionType: AUDIT_ACTIONS.ANNOUNCEMENT_UPDATED,
+    entityRef: "announcement",
+    entityId: copy.id,
+    summary: `Notice duplicated from #${source.id} — "${source.title}"`,
+    afterState: { duplicatedFromId: source.id, status: "draft" },
+  });
+
+  res.status(201).json(serialize(await Announcement.findByPk(copy.id, withIncludes)));
+};
+
+// ── Archive ──────────────────────────────────────────────────────────────────
+// Distinct from withdrawal. Withdrawing says the notice should not have been
+// public; archiving says the procurement it announced is over. Archived notices
+// stay readable on the portal's archive view, because a closed procurement that
+// disappears from the record is the opposite of transparency.
+export const archiveAnnouncement = async (req, res) => {
+  const announcement = await Announcement.findByPk(req.params.id, withIncludes);
+  if (!announcement) return res.status(404).json({ message: "Announcement not found." });
+
+  if (announcement.status !== "published") {
+    return res.status(409).json({
+      message: "Only a published notice can be archived. A draft can simply be left unpublished.",
+    });
+  }
+
+  await announcement.update({ status: "archived", archivedAt: new Date() });
+
+  await auditFromRequest(req, {
+    actionType: AUDIT_ACTIONS.ANNOUNCEMENT_WITHDRAWN,
+    entityRef: "announcement",
+    entityId: announcement.id,
+    summary: `Notice archived: "${announcement.title}"`,
+    beforeState: { status: "published" },
+    afterState: { status: "archived", remainsPubliclyReadable: true },
+  });
+
+  res.json(serialize(await Announcement.findByPk(announcement.id, withIncludes)));
+};
+
+// Releases any notice whose scheduled publication time has arrived. Exposed so
+// the console can trigger it, and called from the list endpoints so a schedule
+// works even with no cron attached.
+export const runScheduledReleases = async (req, res) => {
+  const released = await releaseScheduledAnnouncements();
+
+  for (const announcement of released) {
+    await auditFromRequest(req, {
+      actionType: AUDIT_ACTIONS.ANNOUNCEMENT_PUBLISHED,
+      entityRef: "announcement",
+      entityId: announcement.id,
+      summary: `Scheduled notice released: "${announcement.title}"`,
+      afterState: { status: "published", scheduled: true },
+    });
+  }
+
+  res.json({ released: released.length });
 };

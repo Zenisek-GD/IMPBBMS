@@ -53,3 +53,32 @@ export const updateProfile = ({ displayName, reference, ticket }) =>
 // not a sensitive action.
 export const updatePreferences = (payload) =>
   apiClient.patch('/auth/preferences', payload).then((res) => res.data)
+
+// ── Two-factor authentication ────────────────────────────────────────────────
+// The sign-in challenge. Reached only after `login` returned `mfaRequired` —
+// at that point the server holds a short-lived pending state and no session, so
+// this call is what turns a proved password into actual access.
+export const verifyMfaChallenge = ({ token, recoveryCode }) =>
+  apiClient.post('/auth/mfa/challenge', token ? { token } : { recoveryCode }).then((res) => res.data)
+
+export const fetchMfaStatus = () => apiClient.get('/auth/mfa').then((res) => res.data)
+
+// Issues a secret and a QR. The secret is returned exactly once — nothing reads
+// it back afterwards — so the enrolment screen must not discard it before the
+// user has scanned or copied it.
+export const beginMfaEnrollment = () => apiClient.post('/auth/mfa/enroll').then((res) => res.data)
+
+export const confirmMfaEnrollment = (token) =>
+  apiClient.post('/auth/mfa/enroll/confirm', { token }).then((res) => res.data)
+
+export const regenerateRecoveryCodes = (token) =>
+  apiClient.post('/auth/mfa/recovery-codes', { token }).then((res) => res.data)
+
+// Needs both factors: the password and a current code.
+export const disableMfa = (password, token) =>
+  apiClient.post('/auth/mfa/disable', { password, token }).then((res) => res.data)
+
+// Administrator only. Clears someone else's enrolment so they can set it up
+// again — it cannot reveal a secret or sign anybody in.
+export const resetUserMfa = (userId, reason) =>
+  apiClient.post(`/users/${userId}/mfa/reset`, { reason }).then((res) => res.data)

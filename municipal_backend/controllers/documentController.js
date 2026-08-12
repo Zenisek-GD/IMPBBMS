@@ -36,6 +36,26 @@ const accessFor = async (req, entityRef, entityId) => {
       };
     }
 
+    case "announcement": {
+      // Bidding documents, terms of reference and specifications hung off an
+      // Invitation to Bid.
+      //
+      // Read is wide on purpose: these are the papers a prospective bidder
+      // needs, and once the notice is published they are public anyway — the
+      // unauthenticated download lives on the public router, which checks that
+      // the notice is published before serving anything. This branch governs
+      // the *internal* view, so it is scoped to the offices that work on
+      // procurement rather than to everyone with a login.
+      //
+      // Write is the publishing office alone. An attachment on a notice is part
+      // of the invitation: whoever can add one can change what bidders are
+      // asked to price.
+      return {
+        read: has("bidding.view") || has("announcements.manage") || has("audit.viewAll"),
+        write: has("announcements.manage"),
+      };
+    }
+
     case "bid": {
       // Bid attachments follow the same disclosure rule as the bid itself, so
       // they are readable by evaluators and by the bid's owner.

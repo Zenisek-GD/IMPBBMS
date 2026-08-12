@@ -285,6 +285,47 @@ export const PERMISSIONS = [
     description: "Record the Sangguniang Panlalawigan's review of the ordinance (LGC Sec. 327)",
   },
 
+  // ── Document templates and generation ──────────────────────────────────────
+  // Authoring a template and issuing a document from it are deliberately
+  // separate. A template is the wording every future Notice of Award will carry;
+  // whoever can rewrite it can change what the municipality says in all of them,
+  // which is a heavier power than producing one document from settled wording.
+  {
+    key: "template.view",
+    module: "documents",
+    description: "View document templates and their version history",
+  },
+  {
+    key: "template.manage",
+    module: "documents",
+    description: "Create, edit and archive document templates",
+  },
+  {
+    key: "document.generate",
+    module: "documents",
+    description: "Generate official documents from procurement records",
+  },
+  {
+    // Approval is what turns a draft into an issued document bearing the
+    // municipality's name, so it sits with the office whose name is on it
+    // rather than with whoever pressed generate.
+    key: "document.approve",
+    module: "documents",
+    description: "Approve and issue generated documents",
+  },
+  {
+    // Held apart from approval on purpose: putting a document in front of the
+    // whole municipality is a second decision, taken after the first.
+    key: "document.publish",
+    module: "documents",
+    description: "Publish approved documents to the public transparency portal",
+  },
+  {
+    key: "document.void",
+    module: "documents",
+    description: "Void an issued document so a corrected one can be reissued",
+  },
+
   // Audit and transparency
   { key: "audit.viewLogs", module: "audit", description: "View system logs" },
   { key: "audit.viewAll", module: "audit", description: "View full workflow history across modules" },
@@ -296,6 +337,7 @@ export const PERMISSIONS = [
 // dash in that grid means the role simply has no entry here.
 export const ROLE_PERMISSIONS = {
   systemAdministrator: [
+    "template.view", "template.manage",
     "users.manage",
     // Admin/IT is the ONLY holder of this. A bidder's account comes into
     // existence here and nowhere else, after the BAC Secretariat has approved
@@ -309,6 +351,7 @@ export const ROLE_PERMISSIONS = {
   ],
 
   hope: [
+    "template.view", "document.approve",
     // The Mayor's own acts in the planning and budgeting chain: naming the
     // year's priorities against the development plan, endorsing the investment
     // program, and approving the executive budget before it goes to the
@@ -375,6 +418,7 @@ export const ROLE_PERMISSIONS = {
   // Granting both here would let the Chairperson approve their own
   // recommendation and collapse that separation of duties.
   bacChairperson: [
+    "template.view", "document.generate",
     "app.view",
     "pr.view", "pr.determineMode",
     "bidding.view", "bidding.evaluate", "bidding.chairEvaluation",
@@ -437,6 +481,7 @@ export const ROLE_PERMISSIONS = {
   // verified registration is handed to Admin/IT rather than turned into access
   // here. `bidding.publish` is what admits them to this queue.
   bacSecretariat: [
+    "template.view", "template.manage", "document.generate", "document.publish", "document.void",
     "planning.view",
     "app.view", "app.consolidate", "app.revise",
     // The Secretariat prepares and documents; it does not decide. The GPM is
@@ -478,6 +523,7 @@ export const ROLE_PERMISSIONS = {
   // rather than by permission; this role is what makes that designation
   // meaningful out of the box, and gives an office head somewhere to work.
   headOfOffice: [
+    "document.generate",
     "planning.view",
     "budget.proposeBudget", "budget.view",
     "app.view", "app.create", "app.submit", "app.revise",
@@ -486,6 +532,7 @@ export const ROLE_PERMISSIONS = {
   ],
 
   departmentRequester: [
+    "document.generate",
     // An office prepares its own budget request (step 6) using the same account
     // it uses to file its PPMP lines and requisitions. The three are the same
     // office's work at three different points in the year.
@@ -586,6 +633,7 @@ export const ROLE_PERMISSIONS = {
   // Section 2.2: full workflow history and logs across all modules, including
   // denied and returned actions.
   internalAuditor: [
+    "template.view",
     "planning.view",
     "app.view", "pr.view", "bidding.view", "contract.view", "budget.view",
     "audit.viewAll", "audit.viewLogs", "audit.export",

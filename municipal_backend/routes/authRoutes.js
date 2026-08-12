@@ -16,13 +16,40 @@ import {
   verifyResetCode,
   resetPassword,
 } from "../controllers/passwordResetController.js";
+import {
+  getMfaStatus,
+  beginEnrollment,
+  confirmEnrollment,
+  regenerateRecoveryCodes,
+  disableMfa,
+  verifyLoginChallenge,
+} from "../controllers/mfaController.js";
 import { rateLimit } from "../middleware/rateLimitMiddleware.js";
+import { requireAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
 router.post("/login", rateLimit({ bucket: "login", max: 10 }), login);
 router.post("/logout", logout);
 router.get("/me", me);
+
+// ── Two-factor authentication ────────────────────────────────────────────────
+// The sign-in challenge is deliberately NOT behind requireAuth: at this point
+// the caller has proved the password but has no session, which is the whole
+// point. It is guarded instead by the pending state in the session and a tight
+// rate limit — six digits is a small enough space that unlimited guessing would
+// defeat it in an afternoon.
+router.post("/mfa/challenge", rateLimit({ bucket: "mfaChallenge", max: 12 }), verifyLoginChallenge);
+
+// Everything below manages a *signed-in* user's own second factor.
+router.get("/mfa", requireAuth, getMfaStatus);
+router.post("/mfa/enroll", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20 }), beginEnrollment);
+router.post("/mfa/enroll/confirm", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20 }), confirmEnrollment);
+router.post("/mfa/recovery-codes", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20 }), regenerateRecoveryCodes);
+
+// Switching it off needs the password *and* a current code — either alone would
+// let whoever is standing at an unlocked screen remove the protection.
+router.post("/mfa/disable", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20 }), disableMfa);
 
 // Personal display settings — theme and sidebar state. Rate limited only
 // lightly: toggling a theme is cheap and legitimate to do repeatedly.

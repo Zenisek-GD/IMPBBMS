@@ -68,6 +68,7 @@ export const getSettings = async (req, res) => {
 export const updateSettings = async (req, res) => {
   const {
     name,
+    address,
     lguType,
     incomeClass,
     capitalizationThreshold,
@@ -98,6 +99,7 @@ export const updateSettings = async (req, res) => {
 
   const updates = [
     [SETTING_KEYS.LGU_NAME, name?.trim()],
+    [SETTING_KEYS.LGU_ADDRESS, address?.trim()],
     [SETTING_KEYS.LGU_TYPE, lguType],
     [SETTING_KEYS.LGU_INCOME_CLASS, incomeClass],
     [

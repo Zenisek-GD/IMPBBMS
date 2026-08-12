@@ -4,7 +4,14 @@ import { Role } from "../models/roleModel.js";
 import { Department } from "../models/departmentModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
-import { Announcement, acceptsRegistrations } from "../models/announcementModel.js";
+import {
+  Announcement,
+  acceptsRegistrations,
+  submissionsClosed,
+  isPubliclyVisible,
+  isPubliclyArchived,
+  releaseScheduledAnnouncements,
+} from "../models/announcementModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import {
   listPublicProjects,
@@ -354,15 +361,53 @@ const daysUntil = (date, now) =>
 // The public view of an authored notice. Explicitly serialised, per rule 3
 // above: `status`, the author, the publisher and the withdrawal reason all exist
 // on the row and none of them belongs on a public page.
-const publicAnnouncement = (announcement, now) => ({
+// The public rendering of an authored notice, including the Invitation to Bid
+// particulars a prospective bidder needs to act on it.
+//
+// Exported so the authoring console's *preview* can call this exact function.
+// Rendering a preview through a second, parallel serialiser would show the
+// officer something the public will never see, which is worse than offering no
+// preview at all.
+//
+// It deliberately omits author, publisher, draft state and withdrawal history —
+// everything the internal serialiser carries and the public must not.
+export const publicAnnouncement = (announcement, now) => ({
   source: "announcement",
   id: announcement.id,
   title: announcement.title,
   body: announcement.body,
+  // The rich body when the office wrote one; `body` remains the plain-text
+  // fallback, so a portal that renders only text still works.
+  bodyHtml: announcement.bodyHtml ?? null,
   category: announcement.category,
   referenceNo: announcement.referenceNo,
   pinned: announcement.pinned,
   publishedAt: announcement.publishedAt,
+  archivedAt: announcement.archivedAt ?? null,
+
+  // ── Invitation to Bid particulars ─────────────────────────────────────────
+  // Shown whether or not bidding is still open: after the deadline these are
+  // the record of what was advertised, which is the whole point of keeping
+  // closed notices readable.
+  abc: announcement.abc === null || announcement.abc === undefined ? null : num(announcement.abc),
+  fundSource: announcement.fundSource ?? null,
+  procurementMethod: announcement.procurementMethod ?? null,
+  procurementMethodCitation: announcement.procurementMethodCitation ?? null,
+  prebidAt: announcement.prebidAt ?? null,
+  submissionDeadline: announcement.submissionDeadline ?? null,
+  submissionClosesInDays: daysUntil(announcement.submissionDeadline, now),
+  bidOpeningAt: announcement.bidOpeningAt ?? null,
+  venue: announcement.venue ?? null,
+
+  // Contact details are published on purpose — an invitation a reader cannot
+  // follow up is not an invitation. These are the office's own published
+  // contacts, not personal data of a third party.
+  contactPerson: announcement.contactPerson ?? null,
+  contactEmail: announcement.contactEmail ?? null,
+  contactPhone: announcement.contactPhone ?? null,
+
+  submissionsClosed: submissionsClosed(announcement, now),
+  isArchived: isPubliclyArchived(announcement, now),
 
   // Present only while the call is genuinely open. A closed deadline is dropped
   // rather than shown greyed out, because the sort below treats a null deadline
@@ -380,6 +425,11 @@ const publicAnnouncement = (announcement, now) => ({
 
 export const listAnnouncements = async (req, res) => {
   const now = new Date();
+
+  // A notice scheduled for today goes live on the first request after its time,
+  // whether or not anyone wired up a scheduler. Doing it here rather than only
+  // in a cron job means a schedule cannot silently never fire.
+  await releaseScheduledAnnouncements(now);
 
   // Assembled in one pass rather than re-fetching each project: this endpoint
   // is unauthenticated, so a per-row query would be a cheap way to load the
@@ -426,13 +476,157 @@ export const listAnnouncements = async (req, res) => {
     }
   }
 
-  // Pinned first, then newest. A bidding calendar the office wants read stays at
-  // the top; everything else falls back to recency, which is what a reader
-  // checking "what is new" expects.
-  entries.sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return new Date(b.publishedAt ?? 0) - new Date(a.publishedAt ?? 0);
+  // ── Search, filter and sort ───────────────────────────────────────────────
+  // Applied after the two sources are merged, because a reader searching the
+  // portal is searching *notices*, not one table or the other. Doing it in SQL
+  // would only cover the authored half and silently miss every derived
+  // solicitation.
+  const filtered = applyPublicFilters(entries, req.query, now);
+
+  res.json(filtered);
+};
+
+// Shared by the current and archived listings so the two cannot drift.
+const applyPublicFilters = (entries, query = {}, now = new Date()) => {
+  let rows = entries;
+
+  const search = String(query.search ?? "").trim().toLowerCase();
+  if (search) {
+    rows = rows.filter((entry) =>
+      [entry.title, entry.referenceNo, entry.projectTitle, entry.body, entry.procurementMethod]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(search))
+    );
+  }
+
+  if (query.category) rows = rows.filter((entry) => entry.category === query.category);
+
+  // "Open" means a bidder can still act on it. Derived rather than stored,
+  // so it stays true as deadlines pass without anything having to update rows.
+  if (query.status === "open") {
+    rows = rows.filter((entry) => !entry.submissionsClosed && !entry.isArchived);
+  } else if (query.status === "closed") {
+    rows = rows.filter((entry) => entry.submissionsClosed || entry.isArchived);
+  }
+
+  if (query.acceptingRegistrations === "true") {
+    rows = rows.filter((entry) => Boolean(entry.registrationDeadline));
+  }
+
+  const direction = query.order === "asc" ? 1 : -1;
+  const sorters = {
+    // Pinned first, then newest. A bidding calendar the office wants read stays
+    // at the top; everything else falls back to recency, which is what a reader
+    // checking "what is new" expects.
+    published: (a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return direction * (new Date(a.publishedAt ?? 0) - new Date(b.publishedAt ?? 0));
+    },
+    // Soonest deadline first, with notices that carry no deadline last rather
+    // than sorted as if they were due in 1970.
+    deadline: (a, b) => {
+      const left = a.submissionDeadline ?? a.closingDate;
+      const right = b.submissionDeadline ?? b.closingDate;
+      if (!left && !right) return 0;
+      if (!left) return 1;
+      if (!right) return -1;
+      return direction * (new Date(left) - new Date(right));
+    },
+    abc: (a, b) => direction * ((a.abc ?? 0) - (b.abc ?? 0)),
+    title: (a, b) => direction * String(a.title ?? "").localeCompare(String(b.title ?? "")),
+  };
+
+  return [...rows].sort(sorters[query.sort] ?? sorters.published);
+};
+
+// ── The archive ──────────────────────────────────────────────────────────────
+// Notices the office archived, and published notices that have simply expired.
+// Kept publicly readable on purpose: a procurement that vanishes from the record
+// once it closes is the opposite of transparency, and the archive is what lets a
+// citizen check what was advertised months later.
+export const listArchivedAnnouncements = async (req, res) => {
+  const now = new Date();
+
+  const rows = await Announcement.findAll({
+    where: {
+      [Op.or]: [
+        // Archived by hand — but only if it was ever published. A draft that was
+        // archived was never public and must not become public now.
+        { status: "archived", publishedAt: { [Op.ne]: null } },
+        { status: "published", expiresAt: { [Op.ne]: null, [Op.lte]: now } },
+      ],
+    },
+    include: [{ model: AppEntry, as: "project", attributes: ["id", "projectTitle"] }],
+    order: [["publishedAt", "DESC"]],
+    limit: Math.min(Number(req.query.limit) || 200, 500),
   });
 
-  res.json(entries);
+  res.json(applyPublicFilters(rows.map((row) => publicAnnouncement(row, now)), req.query, now));
+};
+
+// ── Attachments on a published notice ────────────────────────────────────────
+// The bidding documents, terms of reference and specifications a prospective
+// bidder needs. Unauthenticated by design — that is what "public posting" means.
+const publiclyReadableNotice = async (id, now) => {
+  const announcement = await Announcement.findByPk(Number(id));
+  if (!announcement) return null;
+  // Readable if it is live *or* archived: the papers behind a closed
+  // procurement remain part of the public record.
+  return isPubliclyVisible(announcement, now) || isPubliclyArchived(announcement, now)
+    ? announcement
+    : null;
+};
+
+export const listPublicAnnouncementAttachments = async (req, res) => {
+  const announcement = await publiclyReadableNotice(req.params.id, new Date());
+  if (!announcement) {
+    return res.status(404).json({ message: "That notice is not published, or does not exist." });
+  }
+
+  const files = await Document.findAll({
+    where: { entityRef: "announcement", entityId: announcement.id },
+    attributes: DOCUMENT_METADATA_ATTRIBUTES,
+    order: [["uploadedAt", "ASC"]],
+  });
+
+  res.json(
+    files.map((file) => ({
+      id: file.id,
+      filename: file.filename,
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+      // Published so a downloader can confirm the file was not altered.
+      checksum: file.checksum,
+      label: file.label,
+      uploadedAt: file.uploadedAt,
+      downloadUrl: `/api/public/announcements/${announcement.id}/attachments/${file.id}`,
+    }))
+  );
+};
+
+export const downloadPublicAnnouncementAttachment = async (req, res) => {
+  const announcement = await publiclyReadableNotice(req.params.id, new Date());
+  if (!announcement) {
+    return res.status(404).json({ message: "That notice is not published, or does not exist." });
+  }
+
+  // Scoped to this notice, so an id from an unpublished notice cannot be
+  // fetched by pairing it with a published one.
+  const file = await Document.findOne({
+    where: {
+      id: Number(req.params.documentId),
+      entityRef: "announcement",
+      entityId: announcement.id,
+    },
+  });
+  if (!file) return res.status(404).json({ message: "That attachment does not exist." });
+
+  // Same hardening the authenticated attachment route applies: never inline,
+  // never sniffed, never able to execute in this origin.
+  res.setHeader("Content-Type", file.mimeType);
+  res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+  res.setHeader("X-Checksum-SHA256", file.checksum);
+  res.send(file.content);
 };
