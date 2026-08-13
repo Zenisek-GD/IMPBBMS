@@ -723,10 +723,30 @@ export const abstractOfBids = async (req, res) => {
   // other surface — the abstract does not become a way around the blind.
   const blind = isBlindStage(rfq);
 
-  const observers = await ObserverInvitation.findAll({
+  // Observers are invited to each stage separately (pre-bid conference,
+  // eligibility checking, preliminary examination, evaluation, post-
+  // qualification), so a body that attended all five has five invitation rows.
+  // Listing them per row printed the same witness five times on the abstract —
+  // a document observers sign. Collapsed to one entry per organisation, naming
+  // the stages it actually attended, so nothing is hidden by the deduplication.
+  const observerRows = await ObserverInvitation.findAll({
     where: { rfqId: rfq.id, attendance: "attended" },
     include: [{ model: ObserverOrganization, as: "organization" }],
+    order: [["scheduledAt", "ASC"]],
   });
+
+  const observers = [];
+  const seenOrganizations = new Map();
+  for (const row of observerRows) {
+    const key = row.observerOrganizationId ?? row.organization?.name ?? Symbol();
+    if (seenOrganizations.has(key)) {
+      seenOrganizations.get(key).stages.push(row.stage);
+      continue;
+    }
+    const entry = { row, stages: [row.stage] };
+    seenOrganizations.set(key, entry);
+    observers.push(entry);
+  }
 
   res.json({
     referenceNo: rfq.referenceNo,
@@ -757,10 +777,11 @@ export const abstractOfBids = async (req, res) => {
       submittedAt: bid.submittedAt,
     })),
     // Sec. 43 — the observers who attended and may sign as witnesses.
-    witnesses: observers.map((invitation) => ({
-      organization: invitation.organization?.name ?? null,
-      sector: invitation.organization?.sector ?? null,
-      representative: invitation.representativeName,
+    witnesses: observers.map(({ row, stages }) => ({
+      organization: row.organization?.name ?? null,
+      sector: row.organization?.sector ?? null,
+      representative: row.representativeName,
+      stagesAttended: stages,
     })),
   });
 };

@@ -27,9 +27,13 @@ const SECTIONS = [
   { key: 'home', label: 'Home', to: '/' },
   { key: 'projects', label: 'Projects', to: '/?view=projects' },
   { key: 'announcements', label: 'Announcements', to: '/?view=announcements' },
+  { key: 'officials', label: 'Officials', to: '/?view=officials' },
   { key: 'about', label: 'About', to: '/?view=about' },
-  { key: 'contact', label: 'Contact', to: '/?view=contact' },
 ]
+// Contact is no longer a section of its own: writing to the municipality is
+// something a reader decides to do *after* reading what the portal is and who
+// runs it, so the form now sits at the foot of About rather than competing with
+// it in the nav. `?view=contact` still resolves — it redirects into About.
 
 export default function PublicHeader({ lguName, systemName }) {
   const { user, logout } = useAuth()

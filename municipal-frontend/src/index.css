@@ -325,26 +325,16 @@ select option {
    All of it sits on the brand colour, which stays dark in both themes, so none
    of it needs a light and dark variant. */
 
-/* ── The public portal's page texture ────────────────────────────────────────
-   A faint dot field behind the landing page. It does the same job the tinted
-   canvas does inside the application — stops a very light page reading as an
-   empty sheet — but at a scale that survives being seen at arm's length on a
-   phone. Deliberately weak: at any strength you can actually *notice* it starts
-   competing with the cards sitting on it.
-
-   It sits on the canvas colour rather than replacing it, so the light and dark
-   themes both work from one definition. */
-.pattern-dots {
-  background-image: radial-gradient(var(--color-border-muted) 1px, transparent 1px);
-  background-size: 22px 22px;
-  background-position: -1px -1px;
-}
+/* The `.pattern-dots` dot field that used to sit behind the landing page was
+   removed in both themes: at the size it needed to be to register at all, it
+   read as speckling on the canvas rather than as texture, and the page has
+   enough hairline structure now to not read as an empty sheet. */
 
 /* ── Glass ───────────────────────────────────────────────────────────────────
    The floating header and its nav pill. Translucency plus a blur, so the page
-   scrolling underneath is felt rather than seen — the effect only reads as glass
-   if there is something behind it to diffuse, which is what the dot field above
-   provides.
+   scrolling underneath is felt rather than seen. The effect needs something
+   behind it to diffuse; with the dot field gone that is the page content
+   itself, which is why the bar only reads as glass once you scroll.
 
    `saturate` matters more than it looks: a plain blur over a near-white page
    leaves the glass looking grey and dead, and lifting saturation puts the colour

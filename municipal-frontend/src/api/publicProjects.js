@@ -23,6 +23,11 @@ export const fetchProjectTimeline = (id) =>
 export const fetchProjectDocuments = (id) =>
   apiClient.get(`${PUBLIC}/projects/${id}/documents`).then((res) => res.data)
 
+// Names and offices of the officials accountable for these records. Carries no
+// contact details by design — see listPublicOfficials in the backend.
+export const fetchPublicOfficials = () =>
+  apiClient.get(`${PUBLIC}/officials`).then((res) => res.data)
+
 // Written notices and currently-open solicitations, merged. Each entry carries
 // a `source` of 'announcement' or 'solicitation'.
 export const fetchAnnouncements = () =>

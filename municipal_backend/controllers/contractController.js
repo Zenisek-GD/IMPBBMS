@@ -47,6 +47,18 @@ const serialize = (contract) => ({
   referenceNo: contract.award?.rfq?.referenceNo ?? null,
   projectTitle: contract.award?.rfq?.title ?? null,
   draftedByName: contract.draftedBy?.name ?? null,
+
+  // Variation and termination state. Added so the contracts screen can show the
+  // Sec. 71 headroom *before* an officer drafts a variation order rather than
+  // after the API refuses it — the ceiling is ten percent of the ORIGINAL price,
+  // which is not derivable from `amount` alone once a variation has moved it.
+  category: contract.category,
+  variationTotal: Number(contract.variationTotal ?? 0),
+  originalAmount: originalAmountOf(contract),
+  actualCompletionAt: contract.actualCompletionAt,
+  terminatedAt: contract.terminatedAt,
+  terminationGround: contract.terminationGround,
+
   deliveries: (contract.deliveries ?? []).map((delivery) => ({
     id: delivery.id,
     deliveredAt: delivery.deliveredAt,

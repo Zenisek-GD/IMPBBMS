@@ -1,6 +1,7 @@
 import { Op } from "sequelize";
 import { AuditLog } from "../models/auditLogModel.js";
 import { Role } from "../models/roleModel.js";
+import { User } from "../models/userModel.js";
 import { Department } from "../models/departmentModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
@@ -629,4 +630,73 @@ export const downloadPublicAnnouncementAttachment = async (req, res) => {
   res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
   res.setHeader("X-Checksum-SHA256", file.checksum);
   res.send(file.content);
+};
+
+// ── OFFICIALS ────────────────────────────────────────────────────────────────
+// Who is accountable for the records on this portal.
+//
+// RA 12009 makes procurement decisions attributable to named officials, and a
+// transparency portal that publishes a Notice of Award without publishing who
+// signs such notices only tells half the story. This lists the offices and the
+// people holding them — nothing more.
+//
+// What is deliberately NOT published: email addresses, telephone numbers,
+// account status, last sign-in, or any other operational field. A citizen needs
+// to know who holds a position; publishing a working official's contact record
+// invites harassment and is not what accountability requires. Correspondence
+// goes through the contact form, which routes by subject.
+//
+// Only `active` accounts appear. A deactivated or pending-activation account is
+// not a person currently holding the office.
+// Keys as seeded in seed.js — `hope` is the Head of the Procuring Entity.
+// Observers are deliberately absent: IRR Sec. 43 seats them from civil society
+// and professional bodies, so they are private persons attending in a watchdog
+// capacity, not officers of this LGU. Publishing their names is not this
+// portal's to do.
+const PUBLISHED_ROLE_KEYS = [
+  "hope",
+  "bacChairperson",
+  "bacViceChairperson",
+  "bacMember",
+  "bacSecretariat",
+  "twgMember",
+  "budgetOfficer",
+  "municipalAccountant",
+  "municipalTreasurer",
+  "planningOfficer",
+  "internalAuditor",
+];
+
+// Presentation order: the committee first, then the finance and planning
+// offices. Sorting by role rather than by name keeps the list reading as an
+// organisation chart instead of a directory.
+const ROLE_RANK = new Map(PUBLISHED_ROLE_KEYS.map((key, index) => [key, index]));
+
+export const listPublicOfficials = async (_req, res) => {
+  const officials = await User.findAll({
+    where: { status: "active" },
+    attributes: ["id", "name"],
+    include: [
+      { model: Role, attributes: ["key", "name"], where: { key: PUBLISHED_ROLE_KEYS }, required: true },
+      { model: Department, attributes: ["name", "code"], required: false },
+    ],
+    order: [["name", "ASC"]],
+  });
+
+  const serialised = officials
+    .map((official) => ({
+      id: official.id,
+      name: official.name,
+      roleKey: official.Role.key,
+      roleName: official.Role.name,
+      office: official.Department?.name ?? null,
+      officeCode: official.Department?.code ?? null,
+    }))
+    .sort(
+      (a, b) =>
+        (ROLE_RANK.get(a.roleKey) ?? 99) - (ROLE_RANK.get(b.roleKey) ?? 99) ||
+        a.name.localeCompare(b.name)
+    );
+
+  res.json(serialised);
 };

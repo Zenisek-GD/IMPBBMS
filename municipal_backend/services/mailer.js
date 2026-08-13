@@ -126,9 +126,15 @@ const layout = ({ heading, bodyHtml, footerNote }) => `
 const paragraph = (text) =>
   `<p style="margin:0 0 12px;font-size:14px;line-height:1.65;color:#334155;">${text}</p>`;
 
+// Official correspondence register: addressed by name where the record supplies
+// one, and "Sir/Madam" where it does not. Never a bare greeting — these messages
+// are notices from a procuring entity, not notifications from an app.
+const salutation = (name) => (name ? `Dear ${name},` : "Dear Sir/Madam,");
+
 const AUTOMATED_FOOTER =
-  "This message was sent automatically by the Procurenance procurement system. " +
-  "Please do not reply to it. If you were not expecting this message, contact the BAC Secretariat.";
+  "This is a system-generated message from the Procurenance Municipal Procurement System. " +
+  "Please do not reply to this address. Should you have received this message in error, " +
+  "kindly notify the Bids and Awards Committee Secretariat.";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Workflow requirement 3: the invitation an approved bidder receives once an
@@ -142,61 +148,72 @@ export const sendActivationInvitation = async ({
   expiresInHours,
   invitedBy,
 }) => {
-  const subject = "Activate your Procurenance bidder account";
+  const subject = "Activation of your Procurenance bidder account";
 
   const text = [
-    `Good day${contactName ? `, ${contactName}` : ""},`,
+    salutation(contactName),
     "",
-    `Your bidder registration for ${businessName} has been reviewed and approved, and an`,
-    "account has been created for you in the Procurenance municipal procurement system.",
+    `This is to inform you that the bidder registration submitted on behalf of ${businessName}`,
+    "has been reviewed and approved. Accordingly, an account has been created for you in the",
+    "Procurenance Municipal Procurement System.",
     "",
-    "To activate it, open the link below and set your own password:",
+    "To activate the account, please access the link below and set your own password:",
     "",
     activationUrl,
     "",
-    `This link can be used once and expires in ${expiresInHours} hours.`,
+    `The link may be used only once and shall expire ${expiresInHours} hours from issuance.`,
     "",
-    "After you set your password we will email you a 6-digit verification code to",
-    "confirm this address. Entering that code completes the activation.",
+    "Once your password has been set, a six-digit verification code will be sent to this",
+    "address for confirmation. Entry of that code completes the activation.",
     "",
     invitedBy ? `Account created by: ${invitedBy}` : "",
     "",
-    "If you did not submit a bidder registration, please ignore this message and",
-    "notify the BAC Secretariat.",
-  ]
-    .filter((line) => line !== null)
-    .join("\n");
+    "Should you not have submitted a bidder registration, kindly disregard this message and",
+    "notify the Bids and Awards Committee Secretariat.",
+    "",
+    "Respectfully,",
+    "Bids and Awards Committee Secretariat",
+  ].join("\n");
 
   const html = layout({
-    heading: "Activate your bidder account",
+    heading: "Activation of your bidder account",
     bodyHtml: [
-      paragraph(`Good day${contactName ? `, ${escapeHtml(contactName)}` : ""},`),
+      paragraph(salutation(contactName ? escapeHtml(contactName) : null)),
       paragraph(
-        `Your bidder registration for <strong>${escapeHtml(businessName)}</strong> has been reviewed and approved. ` +
-          "An account has been created for you in the Procurenance municipal procurement system."
+        "This is to inform you that the bidder registration submitted on behalf of " +
+          `<strong>${escapeHtml(businessName)}</strong> has been reviewed and approved. ` +
+          "Accordingly, an account has been created for you in the Procurenance Municipal " +
+          "Procurement System."
       ),
-      paragraph("Open the link below to set your own password and activate the account."),
+      paragraph(
+        "To activate the account, please access the link below and set your own password."
+      ),
       `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px 0 20px;">
          <tr><td style="border-radius:6px;background:#0f2740;">
            <a href="${escapeHtml(activationUrl)}" style="display:inline-block;padding:11px 22px;font-size:13px;font-weight:600;letter-spacing:0.02em;color:#ffffff;text-decoration:none;">ACTIVATE MY ACCOUNT</a>
          </td></tr>
        </table>`,
       `<p style="margin:0 0 12px;font-size:12px;line-height:1.6;color:#64748b;">
-         If the button does not work, copy this address into your browser:<br>
+         Should the button above not function, kindly copy the following address into your browser:<br>
          <span style="word-break:break-all;color:#0f2740;">${escapeHtml(activationUrl)}</span>
        </p>`,
       `<div style="margin:18px 0;padding:12px 14px;background:#fffbeb;border-left:3px solid #d97706;">
          <p style="margin:0;font-size:12.5px;line-height:1.6;color:#78350f;">
-           This link works <strong>once</strong> and expires in <strong>${expiresInHours} hours</strong>.
-           After you set a password we will email a 6-digit code to this address to confirm it is yours.
+           This link may be used <strong>only once</strong> and shall expire
+           <strong>${expiresInHours} hours</strong> from issuance. Once your password has been set,
+           a six-digit verification code will be sent to this address for confirmation.
          </p>
        </div>`,
       invitedBy
-        ? `<p style="margin:0;font-size:12px;color:#64748b;">Account created by ${escapeHtml(invitedBy)}.</p>`
+        ? `<p style="margin:0 0 12px;font-size:12px;color:#64748b;">Account created by ${escapeHtml(invitedBy)}.</p>`
         : "",
+      `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#334155;">
+         Respectfully,<br><strong>Bids and Awards Committee Secretariat</strong>
+       </p>`,
     ].join(""),
     footerNote:
-      "If you did not submit a bidder registration to this LGU, ignore this message and notify the BAC Secretariat. " +
+      "Should you not have submitted a bidder registration to this Local Government Unit, kindly " +
+      "disregard this message and notify the Bids and Awards Committee Secretariat. " +
       AUTOMATED_FOOTER,
   });
 
@@ -208,49 +225,57 @@ export const sendActivationInvitation = async ({
 // step-up confirmation of sensitive actions.
 // ─────────────────────────────────────────────────────────────────────────────
 const OTP_INTROS = {
-  accountActivation: "to finish activating your bidder account",
+  accountActivation: "to complete the activation of your bidder account",
   passwordReset: "to reset the password on your account",
   passwordChange: "to confirm the change to your password",
   profileUpdate: "to confirm the changes to your profile",
-  bidSubmission: "to confirm your bid submission",
+  bidSubmission: "to confirm the submission of your bid",
 };
 
 export const sendOtpEmail = async ({ to, name, code, purpose, purposeLabel, expiresInMinutes }) => {
   const reason = OTP_INTROS[purpose] ?? `to confirm your ${purposeLabel}`;
-  const subject = `Your Procurenance verification code: ${code}`;
+  const subject = `Procurenance verification code: ${code}`;
 
   const text = [
-    `Good day${name ? `, ${name}` : ""},`,
+    salutation(name),
     "",
-    `Use this code ${reason}:`,
+    `Please enter the verification code indicated below ${reason}:`,
     "",
     `    ${code}`,
     "",
-    `The code expires in ${expiresInMinutes} minutes and can be used once.`,
+    `The code shall expire in ${expiresInMinutes} minutes and may be used only once.`,
     "",
-    "Nobody from the LGU or the BAC will ever ask you for this code. If you did not",
-    `request a ${purposeLabel}, do not enter it — and tell the BAC Secretariat, because`,
-    "someone else may know your password.",
+    "No representative of the Local Government Unit or of the Bids and Awards Committee",
+    `will request this code from you. If you did not request a ${purposeLabel}, kindly do`,
+    "not enter the code and notify the Bids and Awards Committee Secretariat immediately,",
+    "as your account credentials may have been compromised.",
+    "",
+    "Respectfully,",
+    "Bids and Awards Committee Secretariat",
   ].join("\n");
 
   const html = layout({
-    heading: "Your verification code",
+    heading: "Verification code",
     bodyHtml: [
-      paragraph(`Good day${name ? `, ${escapeHtml(name)}` : ""},`),
-      paragraph(`Enter this code ${escapeHtml(reason)}:`),
+      paragraph(salutation(name ? escapeHtml(name) : null)),
+      paragraph(`Please enter the verification code indicated below ${escapeHtml(reason)}:`),
       `<div style="margin:18px 0;padding:18px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;text-align:center;">
          <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:31px;font-weight:600;letter-spacing:0.28em;color:#0f2740;">${escapeHtml(code)}</span>
        </div>`,
       paragraph(
-        `The code expires in <strong>${expiresInMinutes} minutes</strong> and can be used once.`
+        `The code shall expire in <strong>${expiresInMinutes} minutes</strong> and may be used only once.`
       ),
       `<div style="margin:18px 0 0;padding:12px 14px;background:#fef2f2;border-left:3px solid #dc2626;">
          <p style="margin:0;font-size:12.5px;line-height:1.6;color:#7f1d1d;">
-           Nobody from the LGU or the Bids and Awards Committee will ever ask you for this code.
-           If you did not request a ${escapeHtml(purposeLabel)}, do not enter it — and tell the BAC
-           Secretariat, because someone else may know your password.
+           No representative of the Local Government Unit or of the Bids and Awards Committee will
+           request this code from you. If you did not request a ${escapeHtml(purposeLabel)}, kindly
+           do not enter the code and notify the BAC Secretariat immediately, as your account
+           credentials may have been compromised.
          </p>
        </div>`,
+      `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#334155;">
+         Respectfully,<br><strong>Bids and Awards Committee Secretariat</strong>
+       </p>`,
     ].join(""),
     footerNote: AUTOMATED_FOOTER,
   });
@@ -263,30 +288,38 @@ export const sendOtpEmail = async ({ to, name, code, purpose, purposeLabel, expi
 // made by someone other than the account holder does not go unnoticed.
 // ─────────────────────────────────────────────────────────────────────────────
 export const sendActivationCompleteEmail = async ({ to, name, businessName }) => {
-  const subject = "Your Procurenance bidder account is now active";
+  const subject = "Confirmation of activation of your Procurenance bidder account";
 
   const text = [
-    `Good day${name ? `, ${name}` : ""},`,
+    salutation(name),
     "",
-    `The bidder account for ${businessName} is now active. You can sign in with this`,
-    "email address and the password you just set.",
+    `This is to confirm that the bidder account for ${businessName} is now active. You may`,
+    "sign in using this email address and the password you have set.",
     "",
-    "Keep this address current — it is the official channel for invitations to bid,",
-    "notices of award, and every other procurement communication from this LGU.",
+    "Kindly ensure that this address remains active and regularly monitored, as it serves",
+    "as the official channel for invitations to bid, notices of award, and all other",
+    "procurement communications from this Local Government Unit.",
+    "",
+    "Respectfully,",
+    "Bids and Awards Committee Secretariat",
   ].join("\n");
 
   const html = layout({
-    heading: "Your account is active",
+    heading: "Confirmation of account activation",
     bodyHtml: [
-      paragraph(`Good day${name ? `, ${escapeHtml(name)}` : ""},`),
+      paragraph(salutation(name ? escapeHtml(name) : null)),
       paragraph(
-        `The bidder account for <strong>${escapeHtml(businessName)}</strong> is now active. ` +
-          "You can sign in with this email address and the password you just set."
+        `This is to confirm that the bidder account for <strong>${escapeHtml(businessName)}</strong> ` +
+          "is now active. You may sign in using this email address and the password you have set."
       ),
       paragraph(
-        "Keep this address current — it is the official channel for invitations to bid, " +
-          "notices of award, and every other procurement communication from this LGU."
+        "Kindly ensure that this address remains active and regularly monitored, as it serves as " +
+          "the official channel for invitations to bid, notices of award, and all other procurement " +
+          "communications from this Local Government Unit."
       ),
+      `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#334155;">
+         Respectfully,<br><strong>Bids and Awards Committee Secretariat</strong>
+       </p>`,
     ].join(""),
     footerNote: AUTOMATED_FOOTER,
   });
@@ -305,32 +338,39 @@ export const sendPasswordChangedEmail = async ({ to, name, at, ipAddress, wasRes
   });
 
   const text = [
-    `Good day${name ? `, ${name}` : ""},`,
+    salutation(name),
     "",
-    `The password on your Procurenance account was ${what} on ${when}`,
-    ipAddress ? `from IP address ${ipAddress}.` : ".",
+    `This is to notify you that the password on your Procurenance account was ${what} on`,
+    `${when}${ipAddress ? `, from IP address ${ipAddress}` : ""}.`,
     "",
-    "If this was you, nothing further is needed.",
+    "If you authorized this change, no further action is required on your part.",
     "",
-    "If it was not, contact the BAC Secretariat immediately — someone else has access",
-    "to this mailbox or to your account.",
+    "If you did not authorize it, kindly contact the Bids and Awards Committee Secretariat",
+    "immediately, as this may indicate unauthorized access to this mailbox or to your account.",
+    "",
+    "Respectfully,",
+    "Bids and Awards Committee Secretariat",
   ].join("\n");
 
   const html = layout({
-    heading: `Your password was ${what}`,
+    heading: `Notice: your password was ${what}`,
     bodyHtml: [
-      paragraph(`Good day${name ? `, ${escapeHtml(name)}` : ""},`),
+      paragraph(salutation(name ? escapeHtml(name) : null)),
       paragraph(
-        `The password on your Procurenance account was ${what} on <strong>${escapeHtml(when)}</strong>` +
-          (ipAddress ? ` from IP address <strong>${escapeHtml(ipAddress)}</strong>.` : ".")
+        `This is to notify you that the password on your Procurenance account was ${what} on ` +
+          `<strong>${escapeHtml(when)}</strong>` +
+          (ipAddress ? `, from IP address <strong>${escapeHtml(ipAddress)}</strong>.` : ".")
       ),
-      paragraph("If this was you, nothing further is needed."),
+      paragraph("If you authorized this change, no further action is required on your part."),
       `<div style="margin:18px 0 0;padding:12px 14px;background:#fef2f2;border-left:3px solid #dc2626;">
          <p style="margin:0;font-size:12.5px;line-height:1.6;color:#7f1d1d;">
-           If it was not you, contact the BAC Secretariat immediately — someone else has
-           access to this mailbox or to your account.
+           If you did not authorize it, kindly contact the BAC Secretariat immediately, as this
+           may indicate unauthorized access to this mailbox or to your account.
          </p>
        </div>`,
+      `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#334155;">
+         Respectfully,<br><strong>Bids and Awards Committee Secretariat</strong>
+       </p>`,
     ].join(""),
     footerNote: AUTOMATED_FOOTER,
   });
@@ -348,45 +388,53 @@ export const sendIntakeAcknowledgementEmail = async ({
   contactName,
   referenceCode,
 }) => {
-  const subject = `Bidder requirements received — ${referenceCode}`;
+  const subject = `Acknowledgement of bidder requirements — ${referenceCode}`;
 
   const text = [
-    `Good day${contactName ? `, ${contactName}` : ""},`,
+    salutation(contactName),
     "",
-    `We have received the eligibility and accreditation requirements submitted for`,
-    `${businessName}.`,
+    "This is to acknowledge receipt of the eligibility and accreditation requirements",
+    `submitted on behalf of ${businessName}.`,
     "",
     `Reference: ${referenceCode}`,
     "",
-    "The BAC Secretariat will review your submission. No account exists yet — this",
-    "system has no public sign-up. If your registration is approved, an authorized",
-    "official will create your account and send an activation link to this address.",
+    "The Bids and Awards Committee Secretariat shall review the submission. Please note",
+    "that no account has yet been created, as this system does not provide for public",
+    "registration. Should the registration be approved, an authorized official shall",
+    "create your account and transmit an activation link to this address.",
     "",
-    "Because every future procurement notice will be sent here, make sure this",
-    "mailbox stays active and monitored.",
+    "As all subsequent procurement notices shall be sent to this address, kindly ensure",
+    "that the mailbox remains active and regularly monitored.",
+    "",
+    "Respectfully,",
+    "Bids and Awards Committee Secretariat",
   ].join("\n");
 
   const html = layout({
-    heading: "We have your requirements",
+    heading: "Acknowledgement of receipt",
     bodyHtml: [
-      paragraph(`Good day${contactName ? `, ${escapeHtml(contactName)}` : ""},`),
+      paragraph(salutation(contactName ? escapeHtml(contactName) : null)),
       paragraph(
-        "We have received the eligibility and accreditation requirements submitted for " +
-          `<strong>${escapeHtml(businessName)}</strong>.`
+        "This is to acknowledge receipt of the eligibility and accreditation requirements " +
+          `submitted on behalf of <strong>${escapeHtml(businessName)}</strong>.`
       ),
       `<div style="margin:16px 0;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
          <p style="margin:0;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">Reference</p>
          <p style="margin:4px 0 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;color:#0f2740;">${escapeHtml(referenceCode)}</p>
        </div>`,
       paragraph(
-        "The BAC Secretariat will review your submission. <strong>No account exists yet</strong> — " +
-          "this system has no public sign-up. If your registration is approved, an authorized " +
-          "official will create your account and send an activation link to this address."
+        "The Bids and Awards Committee Secretariat shall review the submission. Please note that " +
+          "<strong>no account has yet been created</strong>, as this system does not provide for " +
+          "public registration. Should the registration be approved, an authorized official shall " +
+          "create your account and transmit an activation link to this address."
       ),
       paragraph(
-        "Because every future procurement notice will be sent here, make sure this mailbox " +
-          "stays active and monitored."
+        "As all subsequent procurement notices shall be sent to this address, kindly ensure that " +
+          "the mailbox remains active and regularly monitored."
       ),
+      `<p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:#334155;">
+         Respectfully,<br><strong>Bids and Awards Committee Secretariat</strong>
+       </p>`,
     ].join(""),
     footerNote: AUTOMATED_FOOTER,
   });
@@ -400,12 +448,17 @@ export const sendIntakeAcknowledgementEmail = async ({
 export const sendPasswordResetEmail = async ({ to, resetUrl, expiresInMinutes }) =>
   deliver({
     to,
-    subject: "Reset your Procurenance password",
-    text: `Open this link to reset your password (valid ${expiresInMinutes} minutes):\n\n${resetUrl}\n`,
+    subject: "Reset of your Procurenance password",
+    text:
+      `Please access the link below to reset your password. It shall remain valid for ` +
+      `${expiresInMinutes} minutes.\n\n${resetUrl}\n`,
     html: layout({
-      heading: "Reset your password",
+      heading: "Reset of your password",
       bodyHtml: [
-        paragraph(`Open the link below to set a new password. It is valid for ${expiresInMinutes} minutes.`),
+        paragraph(
+          "Please access the link below to set a new password. It shall remain valid for " +
+            `${expiresInMinutes} minutes.`
+        ),
         paragraph(`<a href="${escapeHtml(resetUrl)}" style="color:#0f2740;">${escapeHtml(resetUrl)}</a>`),
       ].join(""),
       footerNote: AUTOMATED_FOOTER,

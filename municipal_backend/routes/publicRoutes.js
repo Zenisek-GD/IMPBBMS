@@ -18,6 +18,7 @@ import {
   listArchivedAnnouncements,
   listPublicAnnouncementAttachments,
   downloadPublicAnnouncementAttachment,
+  listPublicOfficials,
 } from "../controllers/publicProjectController.js";
 import { submitPublicMessage } from "../controllers/publicMessageController.js";
 import {
@@ -84,6 +85,10 @@ router.get("/transparency/awards", listPublishedAwards);
 router.get("/projects", listProjects);
 router.get("/projects/filters", getPublicFilters);
 router.get("/projects/overview", getPublicOverview);
+// Names and offices only — no contact details. See the controller for what is
+// withheld and why.
+router.get("/officials", listPublicOfficials);
+
 router.get("/announcements", listAnnouncements);
 
 // The archive: notices the office retired, and published notices that have

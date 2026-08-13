@@ -94,15 +94,64 @@ const run = async () => {
   await sequelize.authenticate();
 
   if (mode === "check") {
-    // A dry run: collect the SQL `alter` would issue without committing to it,
-    // so drift can be reported in CI without changing anything.
-    const queries = [];
-    await sequelize.sync({ alter: true, logging: (sql) => queries.push(sql) });
-    const changes = queries.filter((q) => /ALTER TABLE|CREATE TABLE/i.test(q));
-    console.log(changes.length === 0 ? "✅ schema is up to date" : `⚠️  ${changes.length} statement(s) applied:`);
-    changes.slice(0, 40).forEach((q) => console.log("   " + q.slice(0, 160)));
+    // ── A REAL DRY RUN ───────────────────────────────────────────────────────
+    // This used to call `sequelize.sync({ alter: true, logging: collect })` and
+    // describe itself as "without committing to it". That was wrong, and wrong
+    // in the most expensive way: the logging callback only *observes* the SQL —
+    // Sequelize still executes every statement. So `--check`, the one mode
+    // documented to write nothing, altered the schema exactly like `--alter`.
+    //
+    // It cannot be fixed by wrapping the sync in a transaction either: MySQL
+    // gives DDL an implicit commit, so ALTER TABLE cannot be rolled back. A
+    // dry run therefore has to *compare* rather than *apply*.
+    //
+    // What this compares: every model's table exists, and every attribute has a
+    // column. Type-level drift is deliberately not reported — Sequelize's
+    // dialect types and MySQL's reported types differ cosmetically often enough
+    // (INTEGER vs INT(11), ENUM ordering) that flagging them trains you to
+    // ignore the output, which is how the missing tables went unnoticed.
+    const queryInterface = sequelize.getQueryInterface();
+    const tables = new Set(
+      (await queryInterface.showAllTables()).map((name) =>
+        (typeof name === "string" ? name : name.tableName).toLowerCase()
+      )
+    );
+
+    const missingTables = [];
+    const missingColumns = [];
+
+    for (const model of Object.values(sequelize.models)) {
+      const tableName = model.getTableName();
+      const plain = typeof tableName === "string" ? tableName : tableName.tableName;
+
+      if (!tables.has(plain.toLowerCase())) {
+        missingTables.push(plain);
+        continue;
+      }
+
+      const described = await queryInterface.describeTable(plain);
+      const columns = new Set(Object.keys(described).map((c) => c.toLowerCase()));
+
+      for (const attribute of Object.values(model.getAttributes())) {
+        const field = attribute.field ?? attribute.fieldName;
+        if (field && !columns.has(field.toLowerCase())) {
+          missingColumns.push(`${plain}.${field}`);
+        }
+      }
+    }
+
+    const drifted = missingTables.length + missingColumns.length;
+    if (drifted === 0) {
+      console.log("✅ schema is up to date — every model has its table and columns");
+    } else {
+      console.log(`⚠️  ${drifted} item(s) missing from the database:`);
+      missingTables.forEach((t) => console.log(`   table  ${t}`));
+      missingColumns.forEach((c) => console.log(`   column ${c}`));
+      console.log("\n   Run `node migrate.js --alter` to add them. Nothing was changed by this check.");
+    }
+
     await sequelize.close();
-    process.exit(changes.length === 0 ? 0 : 1);
+    process.exit(drifted === 0 ? 0 : 1);
   }
 
   if (mode === "force") {

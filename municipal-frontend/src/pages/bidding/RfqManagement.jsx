@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Megaphone, Plus, Inbox, Info } from 'lucide-react'
+import { Megaphone, Plus, Inbox, Info, Table2 } from 'lucide-react'
 import * as biddingApi from '../../api/bidding'
 import { RFQ_STATUS_LABELS, RFQ_STATUS_TONES } from '../../api/bidding'
 import { fetchPrs } from '../../api/purchaseRequisitions'
@@ -132,10 +132,162 @@ function CreateRfqModal({ onClose, onCreated }) {
   )
 }
 
+// ── ABSTRACT OF BIDS (RA 12009 IRR Sec. 43) ──────────────────────────────────
+// The tabulation of who responded and at what — one of the documents observers
+// are entitled to demand, and the one they sign as witnesses.
+//
+// Two things this screen must not do, both enforced by the API and reflected
+// here rather than worked around:
+//
+//   · While evaluation is blind, bidders appear as their blind label and prices
+//     are withheld. Showing a name here would defeat the point of the labels.
+//   · A financial envelope stays sealed until the technical component passes
+//     (Sec. 58), so a bid can legitimately have no price to show yet. That is
+//     rendered as "sealed", not as a blank, because the two mean different
+//     things to anyone reading the abstract.
+function AbstractOfBidsModal({ rfq, onClose }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    biddingApi
+      .fetchAbstractOfBids(rfq.id)
+      .then((result) => {
+        if (!cancelled) setData(result)
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setError(err.response?.data?.message ?? 'Could not load the Abstract of Bids.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [rfq.id])
+
+  return (
+    <Modal title={`Abstract of Bids — ${rfq.referenceNo}`} onClose={onClose}>
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {!error && !data && <p className="text-[13px] text-text-faint">Loading…</p>}
+
+      {data && (
+        <>
+          <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded border border-border-muted bg-sidebar px-4 py-3 text-[12.5px]">
+            <dt className="text-text-secondary">Project</dt>
+            <dd className="text-right font-medium text-navy">{data.title}</dd>
+            <dt className="text-text-secondary">Approved Budget (ABC)</dt>
+            <dd className="text-right font-medium text-navy">{peso(data.abc)}</dd>
+            <dt className="text-text-secondary">Mode</dt>
+            <dd className="text-right text-navy">{data.mode ?? '—'}</dd>
+            <dt className="text-text-secondary">Bids opened</dt>
+            <dd className="text-right text-navy">
+              {data.openedAt ? new Date(data.openedAt).toLocaleString('en-PH') : 'Not yet opened'}
+              {data.openedByName && (
+                <span className="block text-[11.5px] text-text-faint">by {data.openedByName}</span>
+              )}
+            </dd>
+          </dl>
+
+          {data.blind && (
+            <p className="mb-3 rounded border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
+              Evaluation is blind. Bidders are shown by their label and prices are withheld until
+              the committee has scored the technical component.
+            </p>
+          )}
+
+          <div className="overflow-x-auto rounded border border-border-muted">
+            <table className="w-full text-left">
+              <thead className="bg-sidebar">
+                <tr>
+                  <Th>Bidder</Th>
+                  <Th>Bid price</Th>
+                  <Th>Rating</Th>
+                  <Th>Status</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.entries.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-[13px] text-text-faint">
+                      No bids were received.
+                    </td>
+                  </tr>
+                ) : (
+                  data.entries.map((entry) => (
+                    <tr key={entry.blindLabel} className="border-t border-border-muted">
+                      <td className="px-4 py-2.5 text-[13px] text-navy">
+                        {entry.bidderName ?? entry.blindLabel}
+                        {!data.blind && entry.blindLabel && (
+                          <span className="ml-1.5 font-mono text-[11px] text-text-faint">
+                            {entry.blindLabel}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-[13px] whitespace-nowrap text-navy">
+                        {entry.totalBidPrice === null ? (
+                          <span className="text-text-faint">Sealed</span>
+                        ) : (
+                          peso(entry.totalBidPrice)
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-[13px] text-text-secondary">
+                        {entry.rating ?? '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-[12px] text-text-secondary">{entry.status}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mt-3 text-[12px] text-text-faint">
+            {data.bidsReceived} bid{data.bidsReceived === 1 ? '' : 's'} received, closing{' '}
+            {data.closingDate ? new Date(data.closingDate).toLocaleDateString('en-PH') : '—'}.
+          </p>
+
+          <h4 className="mt-5 text-[13px] font-semibold text-navy">Witnesses (Sec. 43)</h4>
+          {data.witnesses.length === 0 ? (
+            <p className="mt-1.5 text-[12.5px] text-text-faint">
+              No observer attended this opening. The abstract records that as a fact — the bidding
+              is not invalidated by non-attendance, but the absence is part of the record.
+            </p>
+          ) : (
+            <ul className="mt-2 divide-y divide-border-muted border-t border-border-muted">
+              {data.witnesses.map((witness, index) => (
+                <li key={index} className="flex items-baseline justify-between gap-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-navy">{witness.representative ?? '—'}</p>
+                    <p className="text-[11.5px] text-text-faint">{witness.organization}</p>
+                    {witness.stagesAttended?.length > 0 && (
+                      <p className="mt-0.5 text-[11px] text-text-faint">
+                        Attended: {witness.stagesAttended.length} stage
+                        {witness.stagesAttended.length === 1 ? '' : 's'}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-[11.5px] text-text-secondary">{witness.sector}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      <div className="mt-5 flex justify-end">
+        <Button variant="secondary" onClick={onClose}>
+          CLOSE
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
 export default function RfqManagement() {
   const [rfqs, setRfqs] = useState([])
   const [creating, setCreating] = useState(false)
   const [opening, setOpening] = useState(null)
+  const [abstractFor, setAbstractFor] = useState(null)
   const [witnesses, setWitnesses] = useState('')
   const [actionError, setActionError] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
@@ -291,6 +443,19 @@ export default function RfqManagement() {
                             <Inbox size={12} /> OPEN BIDS
                           </button>
                         )}
+
+                        {/* The abstract is prepared after submission closes, so
+                            it is offered from that point on — including after
+                            award, since it stays part of the record. */}
+                        {rfq.status !== 'draft' && rfq.status !== 'published' && (
+                          <button
+                            type="button"
+                            onClick={() => setAbstractFor(rfq)}
+                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                          >
+                            <Table2 size={12} /> ABSTRACT OF BIDS
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -303,6 +468,10 @@ export default function RfqManagement() {
       </Card>
 
       {creating && <CreateRfqModal onClose={() => setCreating(false)} onCreated={refresh} />}
+
+      {abstractFor && (
+        <AbstractOfBidsModal rfq={abstractFor} onClose={() => setAbstractFor(null)} />
+      )}
 
       {opening && (
         <Modal title={`Open bids — ${opening.referenceNo}`} onClose={() => setOpening(null)}>
