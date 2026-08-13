@@ -292,6 +292,14 @@ export const AUDIT_ACTIONS = {
   OTP_VERIFIED: "otp.verified",
   OTP_FAILED: "otp.failed",
 
+  // ── Security monitoring ───────────────────────────────────────────────────
+  // The scans themselves are audited. An attacker who reached the database
+  // would want monitoring switched off, so a *gap* in the record of scans is
+  // itself a signal worth having.
+  SECURITY_SCAN_RUN: "security.scan.run",
+  SECURITY_ALERT_UPDATED: "security.alert.updated",
+  SECURITY_BASELINE_RESET: "security.baseline.reset",
+
   // ── Two-factor authentication ─────────────────────────────────────────────
   // Every change to somebody's second factor is logged, because each one is a
   // change to who can get into an account. The administrator reset is the one

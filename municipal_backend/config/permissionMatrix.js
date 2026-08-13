@@ -331,6 +331,21 @@ export const PERMISSIONS = [
   { key: "audit.viewAll", module: "audit", description: "View full workflow history across modules" },
   { key: "audit.viewPublished", module: "audit", description: "View published transparency records only" },
   { key: "audit.export", module: "audit", description: "Export audit records" },
+
+  // Security monitoring. Deliberately separate from `audit.*`: reading the
+  // history of what the system did is a different power from being told what
+  // the system thinks went wrong, and the second one carries the ability to
+  // close an alert.
+  {
+    key: "security.view",
+    module: "security",
+    description: "View security alerts and integrity monitoring status",
+  },
+  {
+    key: "security.manage",
+    module: "security",
+    description: "Run scans, acknowledge and resolve security alerts, reset the integrity baseline",
+  },
 ];
 
 // Role key → permission keys. Mirrors the Section 2.3 grid row by row; an em
@@ -348,6 +363,7 @@ export const ROLE_PERMISSIONS = {
     // System updates and maintenance notices are the administrator's to post.
     "announcements.manage",
     "audit.viewLogs",
+    "security.view", "security.manage",
   ],
 
   hope: [
@@ -637,5 +653,6 @@ export const ROLE_PERMISSIONS = {
     "planning.view",
     "app.view", "pr.view", "bidding.view", "contract.view", "budget.view",
     "audit.viewAll", "audit.viewLogs", "audit.export",
+    "security.view", "security.manage",
   ],
 };

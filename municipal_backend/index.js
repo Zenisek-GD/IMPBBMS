@@ -90,6 +90,38 @@ app.use("/", router);
 // Must be last: Express selects the error handler by position.
 app.use(errorHandler);
 
+// ── Integrity monitoring ─────────────────────────────────────────────────────
+// Hooks must be attached before the first request, because a write that happens
+// without them leaves no fingerprint and will later look like an unauthorised
+// insert. Failure to attach is logged loudly rather than swallowed: the system
+// still works, but it is no longer watching, and that must not be silent.
+import { attachIntegrityHooks } from "./services/integrityMonitor.js";
+import { runSecurityScan } from "./controllers/securityController.js";
+
+await attachIntegrityHooks().catch((err) =>
+  console.error("[integrity] hooks NOT attached — out-of-band changes will go undetected:", err.message)
+);
+
+// A sweep on a timer, because the whole point is catching a change nobody
+// reported. Waiting for an administrator to remember to press a button would
+// mean tampering sits undetected for as long as nobody thinks to look.
+const SCAN_MINUTES = Number(process.env.SECURITY_SCAN_MINUTES ?? 30);
+if (!process.env.ELECTRON && SCAN_MINUTES > 0) {
+  const scan = () =>
+    runSecurityScan(null, null)
+      .then((result) => {
+        if (result.findings > 0) {
+          console.warn(`[security] scan found ${result.findings} issue(s), ${result.newAlerts} new`);
+        }
+      })
+      .catch((err) => console.error("[security] scheduled scan failed:", err.message));
+
+  // First pass shortly after boot rather than immediately, so the connection
+  // pool and model registry are settled before it walks every watched table.
+  setTimeout(scan, 60_000).unref?.();
+  setInterval(scan, SCAN_MINUTES * 60_000).unref?.();
+}
+
 export default app;
 
 if (!process.env.ELECTRON) {

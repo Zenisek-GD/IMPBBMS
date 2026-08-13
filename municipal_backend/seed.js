@@ -449,6 +449,15 @@ try {
   }
   console.log(`✅ ${DEFAULT_TEMPLATES.length} document templates registered`);
 
+  // ── Integrity baseline ────────────────────────────────────────────────────
+  // Must come last, after every row above exists. The monitor treats a row with
+  // no fingerprint as an unauthorised insert, so seeding without this would make
+  // the first scan report the entire seeded database as tampering.
+  const { rebaseline } = await import("./services/integrityMonitor.js");
+  const counts = await rebaseline();
+  const fingerprinted = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  console.log(`✅ integrity baseline set over ${fingerprinted} records`);
+
   console.log(`\nAll seed accounts use the password: ${SEED_PASSWORD}`);
   console.log("Dev-only — do not reuse these accounts or password outside local development.");
 } catch (err) {

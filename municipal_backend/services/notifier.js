@@ -35,6 +35,11 @@ export const NOTIFICATION_EVENTS = {
   // office that publishes is not the office that approved — so it has to be told.
   DOCUMENT_STATUS: "document.status",
 
+  // Reaches administrators AND the internal auditor. The case this guards
+  // against includes an administrator acting improperly, and an alert that only
+  // reaches the suspect is worthless.
+  SECURITY_ALERT: "security.alert",
+
   AIP_STATUS: "aip.status",
   BUDGET_CALL: "budget.call",
   BUDGET_STATUS: "budget.status",

@@ -91,6 +91,13 @@ export { Contract, Delivery } from "./contractModel.js";
 export { Invoice, Payment } from "./paymentModel.js";
 export { PendingItem } from "./pendingItemModel.js";
 export { AuditLog } from "./auditLogModel.js";
+export {
+  RecordFingerprint,
+  SecurityAlert,
+  ALERT_TYPES,
+  ALERT_TYPE_LABELS,
+  ALERT_SEVERITIES,
+} from "./integrityModel.js";
 export { Document } from "./documentModel.js";
 export {
   DocumentTemplate,

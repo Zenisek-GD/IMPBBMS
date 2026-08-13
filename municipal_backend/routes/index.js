@@ -47,6 +47,7 @@ import insightRoutes from "./insightRoutes.js";
 import documentRoutes from "./documentRoutes.js";
 import documentTemplateRoutes from "./documentTemplateRoutes.js";
 import announcementRoutes from "./announcementRoutes.js";
+import securityRoutes from "./securityRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import { requireMfaEnrollment } from "../middleware/mfaMiddleware.js";
 
@@ -111,6 +112,10 @@ router.use("/api/documents", documentRoutes);
 router.use("/api/doc-generation", documentTemplateRoutes);
 router.use("/api/announcements", announcementRoutes);
 router.use("/api", insightRoutes);
+
+// Integrity monitoring and the alert console. Restricted to the administrator
+// and the internal auditor — see config/permissionMatrix.js for why both.
+router.use("/api/security", securityRoutes);
 
 // No session required beyond this point — see publicRoutes.js.
 router.use("/api/public", publicRoutes);

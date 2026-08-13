@@ -31,6 +31,7 @@ import {
   ListTree,
   Scale,
   Eye,
+  ShieldAlert,
 } from 'lucide-react'
 
 // One nav config per role from the system design doc, Section 2.1 / Section 11.
@@ -88,6 +89,7 @@ export const ROLE_NAV = {
         heading: 'Oversight',
         items: [
           { label: 'Audit Trail', href: '/audit-log', icon: FileClock, shortcut: 'Alt+8' },
+          { label: 'Security Monitoring', href: '/admin/security', icon: ShieldAlert },
           { label: 'Public Messages', href: '/messages', icon: Mail, shortcut: 'Alt+9' },
           { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe, shortcut: 'Alt+0' },
         ],
@@ -575,6 +577,7 @@ export const ROLE_NAV = {
         heading: 'Audit',
         items: [
           { label: 'Audit Log', href: '/audit-log', icon: ScrollText, shortcut: 'Alt+2' },
+          { label: 'Security Monitoring', href: '/admin/security', icon: ShieldAlert },
           { label: 'Decision Support', href: '/dss', icon: BarChart3, shortcut: 'Alt+3' },
         ],
       },

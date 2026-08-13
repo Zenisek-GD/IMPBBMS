@@ -33,6 +33,7 @@ import UnexpendedMonitor from './pages/finance/UnexpendedMonitor'
 import Appropriations from './pages/finance/Appropriations'
 import PendingItems from './pages/finance/PendingItems'
 import AuditLog from './pages/audit/AuditLog'
+import SecurityConsole from './pages/audit/SecurityConsole'
 import DssDashboard from './pages/insights/DssDashboard'
 import TransparencyPortal from './pages/insights/TransparencyPortal'
 import PublicTransparency from './pages/public/PublicTransparency'
@@ -327,6 +328,14 @@ function App() {
               Administrator sees system logs (Section 2.3). */}
           <Route element={<RoleRoute allow={['internalAuditor', 'systemAdministrator']} />}>
             <Route path="/audit-log" element={<AuditLog />} />
+          </Route>
+
+          {/* Security monitoring. The same two roles as the audit log, and for
+              the same reason the notifications go to both: the administrator is
+              the one person able to make an unauthorised database change and to
+              suppress the alert about it, so the auditor sees this too. */}
+          <Route element={<RoleRoute allow={['internalAuditor', 'systemAdministrator']} />}>
+            <Route path="/admin/security" element={<SecurityConsole />} />
           </Route>
 
           {/* DSS: Section 7.8 grants read access to HOPE, Budget Officer and

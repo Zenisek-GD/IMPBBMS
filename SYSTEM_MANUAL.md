@@ -186,6 +186,37 @@ How it behaves:
 
 Every change to a second factor is audit-logged: enrolment, failures, recovery-code use, regeneration, disabling and the administrator reset.
 
+### Integrity monitoring and anomaly detection
+The audit log proves that nothing **recorded** has been altered. It cannot notice a change that was never recorded in the first place — and that is the real threat. Somebody with a MySQL client can raise an appropriation, grant themselves a permission or delete an award, and the application will never know. The chain stays perfectly intact and perfectly silent, because nothing asked it to write anything.
+
+`services/integrityMonitor.js` closes that gap by exploiting one asymmetry: **every legitimate change goes through the application, and the application fingerprints the row as it writes it.** Three conditions then each mean the same thing:
+
+| Condition | Meaning |
+| --- | --- |
+| Row present, fingerprint no longer matches | altered outside the system |
+| Row present, no fingerprint at all | inserted outside the system |
+| Fingerprint present, row gone | deleted outside the system |
+
+Ten tables are watched by their *material* columns — the ones whose alteration changes what the record means: appropriations, obligations, requisitions, awards, bids, contracts, payments, users (including the password hash), vendors and APP entries. `updatedAt` is deliberately excluded; it moves on every save and would make the fingerprint useless.
+
+Role grants are fingerprinted separately, one per role over its sorted permission set, so a raw `INSERT INTO rolepermissions` is caught. That is the highest-value silent attack on this system: it steals nothing directly, it makes everything else stealable.
+
+`services/anomalyDetector.js` adds eight behavioural rules over the audit log — chain verification, sign-in failure clustering, second-factor failures (distinguishing wrong codes from **reused** ones, which indicate interception), privilege changes, administrator second-factor resets, off-hours consequential acts, bulk downloads, identical bid documents, and bid IP clustering. Each rule is isolated, so one failing rule does not stop the rest.
+
+Findings become alerts with a severity, deduplicated so a recurring finding increments a counter rather than burying the new ones. Nothing is ever deleted, and closing an alert requires a written reason — an alert closed silently tells the next reviewer nothing.
+
+**Who is told.** Critical and high findings notify holders of `security.view`: the System Administrator and the Internal Auditor, and nobody else. The narrowness is deliberate. `audit.viewAll` would have been the obvious choice and is held by almost every officer — a finding like *"the appropriations table was altered in raw SQL"* would then reach nineteen inboxes, one of which may belong to whoever did it. The auditor is included precisely because the administrator is the one person with both the database access to make such a change and the motive to suppress the alert.
+
+Scans run every 30 minutes (`SECURITY_SCAN_MINUTES`) and on demand from the console at `/admin/security`. The console reports when the last scan ran and warns after two hours of silence — a monitor that has stopped reports "no findings" exactly like a clean system does.
+
+**Proving it works.** `services/integrityMonitor.proof.mjs` makes four unauthorised changes in raw SQL — inflates an appropriation by ₱5,000,000, grants `payment.release` to the Vendor role, deletes a bid, inserts a fabricated ₱750,000 payment — shows that **zero** audit entries resulted, then shows the scan catching all four and notifying the administrator. It restores the database afterwards.
+
+```bash
+node municipal_backend/services/integrityMonitor.proof.mjs
+```
+
+Pass `--keep` to leave the alerts standing so the console can be demonstrated; it then prints the SQL to undo each change.
+
 ### Backend security
 The backend uses session-based authentication and permission checks:
 - `requireAuth` blocks unauthenticated requests.
@@ -978,6 +1009,8 @@ This is the practical route map for the backend.
 - `GET /api/finance/budget-monitor`, `POST /api/finance/budget-monitor/alerts`
 - `GET /api/audit`, `GET /api/audit/export`, `GET /api/audit/timeline/:entityRef/:entityId`
 - `GET /api/dss`
+- `GET /api/security/overview`, `GET /api/security/alerts` — `security.view`
+- `POST /api/security/scan`, `PATCH /api/security/alerts/:id`, `POST /api/security/rebaseline` — `security.manage`
 - `GET /api/transparency/*`
 - `GET /api/notifications`, `POST /api/notifications/:id/read`, `POST /api/notifications/read-all`
 - `POST /api/documents`, `GET /api/documents`, `GET /api/documents/:id/download`, `DELETE /api/documents/:id`
