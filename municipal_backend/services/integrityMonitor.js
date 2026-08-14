@@ -181,6 +181,30 @@ export const attachIntegrityHooks = async () => {
     model.addHook("afterBulkCreate", (rows) =>
       Promise.all(rows.map((row) => recordFingerprint(entityRef, row)))
     );
+
+    // ── The same problem, in the other direction ──────────────────────────────
+    // `Model.update(values, { where })` and `Model.destroy({ where })` fire only
+    // the *bulk* hooks. The per-row hooks above never run, so the rows change
+    // and their fingerprints do not — and the next sweep reports legitimate work
+    // as tampering.
+    //
+    // This is not hypothetical. Approving an award runs
+    // `Bid.update({ status: "lost" }, { where: { rfqId, ... } })`, so every
+    // losing bid in the round would be flagged "altered outside the system"
+    // after every single award. `AppEntry.update` and `Obligation.update` do the
+    // same. False alarms on the core workflow are how a monitor gets ignored,
+    // which costs more than never having built it.
+    //
+    // Asking Sequelize for `individualHooks` makes it load the affected rows and
+    // run the per-row hooks, so one correct path handles every kind of write.
+    // It costs an extra SELECT on bulk operations, which here touch a handful of
+    // rows at a time and are rare.
+    model.addHook("beforeBulkUpdate", (options) => {
+      options.individualHooks = true;
+    });
+    model.addHook("beforeBulkDestroy", (options) => {
+      options.individualHooks = true;
+    });
   }
 
   // Role grants are re-fingerprinted whenever a role's permission set is

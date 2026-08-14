@@ -201,6 +201,12 @@ Ten tables are watched by their *material* columns — the ones whose alteration
 
 Role grants are fingerprinted separately, one per role over its sorted permission set, so a raw `INSERT INTO rolepermissions` is caught. That is the highest-value silent attack on this system: it steals nothing directly, it makes everything else stealable.
 
+**Bulk writes need care.** `Model.update(values, { where })` and `Model.destroy({ where })` fire only Sequelize's *bulk* hooks, so the per-row fingerprint hooks never run and the rows change while their fingerprints do not. Approving an award does exactly this — `Bid.update({ status: "lost" }, { where: { rfqId } })` — so every losing bid would have been flagged after every award. A `beforeBulkUpdate`/`beforeBulkDestroy` hook asks Sequelize for `individualHooks`, so one correct path handles every kind of write. False alarms on the core workflow are how a monitor gets ignored, which costs more than never having built it. Guarded by a regression test:
+
+```bash
+node municipal_backend/services/integrityMonitor.test.mjs
+```
+
 `services/anomalyDetector.js` adds eight behavioural rules over the audit log — chain verification, sign-in failure clustering, second-factor failures (distinguishing wrong codes from **reused** ones, which indicate interception), privilege changes, administrator second-factor resets, off-hours consequential acts, bulk downloads, identical bid documents, and bid IP clustering. Each rule is isolated, so one failing rule does not stop the rest.
 
 Findings become alerts with a severity, deduplicated so a recurring finding increments a counter rather than burying the new ones. Nothing is ever deleted, and closing an alert requires a written reason — an alert closed silently tells the next reviewer nothing.
