@@ -166,6 +166,13 @@ export default function EvaluationWorkspace() {
   const canChair = permissions.has('bidding.chairEvaluation')
   const canApproveAward = permissions.has('bidding.award')
 
+  // Once any bid in this RFQ has been awarded, the award is decided — no other
+  // post-qualified bidder may still be "recommended". The RECOMMEND AWARD
+  // button was gated only on the individual bid's own status, so every other
+  // post-qualified bid kept an active button after one had already won, letting
+  // the Chair recommend a second award against an RFQ that already had one.
+  const rfqAlreadyAwarded = Boolean(bidData?.bids?.some((bid) => bid.status === 'awarded'))
+
   // The procurement picker. It is a row of buttons rather than a table, but it
   // is a list that grows with the LGU's workload and it needed the same search
   // and filter as everything else — a Mayor approving awards should not have to
@@ -337,7 +344,7 @@ export default function EvaluationWorkspace() {
                             POST-QUALIFY
                           </button>
                         )}
-                        {!bidData.blind && canChair && bid.status === 'postQualified' && (
+                        {!bidData.blind && canChair && bid.status === 'postQualified' && !rfqAlreadyAwarded && (
                           <button
                             type="button"
                             onClick={() => run(() => biddingApi.recommendAward(bid.id))}

@@ -127,6 +127,9 @@ export const ROLE_NAV = {
         items: [
           { label: 'Decision Support', href: '/dss', icon: BarChart3, shortcut: 'Alt+7' },
           { label: 'Budget Utilisation', href: '/budget/unexpended', icon: PiggyBank, shortcut: 'Alt+8' },
+          // The Mayor holds audit.viewAll: every administrator action is logged,
+          // and this is where the office that can alter the database is watched.
+          { label: 'Audit Trail', href: '/audit-log', icon: FileClock },
           // Complaints about a procurement route to the HoPE.
           { label: 'Public Messages', href: '/messages', icon: Mail, shortcut: 'Alt+9' },
           { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe, shortcut: 'Alt+0' },
@@ -170,6 +173,12 @@ export const ROLE_NAV = {
         heading: 'Contracts',
         items: [{ label: 'Contracts', href: '/contracts', icon: FileSignature, shortcut: 'Alt+7' }],
       },
+      {
+        // The Chair holds audit.viewAll — the committee's decisions are on the
+        // record, and so is everyone else's.
+        heading: 'Oversight',
+        items: [{ label: 'Audit Trail', href: '/audit-log', icon: FileClock, shortcut: 'Alt+8' }],
+      },
     ],
   },
 
@@ -205,6 +214,10 @@ export const ROLE_NAV = {
       {
         heading: 'Contracts',
         items: [{ label: 'Contracts', href: '/contracts', icon: FileSignature, shortcut: 'Alt+8' }],
+      },
+      {
+        heading: 'Oversight',
+        items: [{ label: 'Audit Trail', href: '/audit-log', icon: FileClock, shortcut: 'Alt+9' }],
       },
     ],
   },
@@ -316,6 +329,10 @@ export const ROLE_NAV = {
           { label: 'Appropriation Register', href: '/budget/appropriations', icon: ScrollText, shortcut: 'Alt+5' },
         ],
       },
+      {
+        heading: 'Oversight',
+        items: [{ label: 'Audit Trail', href: '/audit-log', icon: FileClock, shortcut: 'Alt+6' }],
+      },
     ],
   },
 
@@ -341,6 +358,7 @@ export const ROLE_NAV = {
         items: [
           { label: 'Appropriation Register', href: '/budget/appropriations', icon: ScrollText, shortcut: 'Alt+4' },
           { label: 'Transparency Portal', href: '/transparency-portal', icon: Globe, shortcut: 'Alt+5' },
+          { label: 'Audit Trail', href: '/audit-log', icon: FileClock, shortcut: 'Alt+6' },
         ],
       },
     ],
@@ -439,6 +457,7 @@ export const ROLE_NAV = {
         heading: 'Oversight',
         items: [
           { label: 'Decision Support', href: '/dss', icon: BarChart3, shortcut: 'Alt+8' },
+          { label: 'Audit Trail', href: '/audit-log', icon: FileClock },
           { label: 'Pending Items', href: '/pending-items', icon: Package, shortcut: 'Alt+9' },
         ],
       },
@@ -469,6 +488,7 @@ export const ROLE_NAV = {
         items: [
           { label: 'Contracts', href: '/contracts', icon: FileSignature, shortcut: 'Alt+4' },
           { label: 'Budget Utilisation', href: '/budget/unexpended', icon: TrendingUp, shortcut: 'Alt+5' },
+          { label: 'Audit Trail', href: '/audit-log', icon: FileClock },
         ],
       },
     ],
@@ -505,6 +525,7 @@ export const ROLE_NAV = {
         items: [
           { label: 'Contracts', href: '/contracts', icon: FileSignature, shortcut: 'Alt+5' },
           { label: 'Budget Utilisation', href: '/budget/unexpended', icon: TrendingUp, shortcut: 'Alt+6' },
+          { label: 'Audit Trail', href: '/audit-log', icon: FileClock },
         ],
       },
     ],

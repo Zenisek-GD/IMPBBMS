@@ -7,6 +7,7 @@ import { User } from "../models/userModel.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { computeDeductions } from "../services/deductions.js";
+import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 
 const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
@@ -108,6 +109,23 @@ export const submitInvoice = async (req, res) => {
     return res.status(400).json({ message: "A positive invoice amount is required." });
   }
 
+  // Payment must track what was actually delivered. When the inspecting officer
+  // certified a value for this delivery, the invoice cannot exceed it — without
+  // this a supplier could bill the whole contract against one small acceptance.
+  // Deliveries with no certified value (older records) fall through to the
+  // contract-level ceiling below, preserving prior behaviour.
+  if (delivery.acceptedValue != null) {
+    const certified = Number(delivery.acceptedValue);
+    if (value > certified + 0.005) {
+      return res.status(400).json({
+        message:
+          `Invoice ₱${value.toLocaleString()} exceeds the ₱${certified.toLocaleString()} ` +
+          `value certified as delivered and accepted for this delivery.`,
+        acceptedValue: certified,
+      });
+    }
+  }
+
   // The ceiling is the contract, and it applies to the *running total*, not to
   // each invoice in isolation. Checking one invoice at a time left the contract
   // open to being billed its full value once per accepted delivery: three
@@ -139,18 +157,19 @@ export const submitInvoice = async (req, res) => {
   }
 
   const year = new Date().getFullYear();
-  const count = await Invoice.count({ where: { invoiceNo: { [Op.like]: `INV-${year}-%` } } });
 
-  const invoice = await Invoice.create({
-    invoiceNo: `INV-${year}-${String(count + 1).padStart(4, "0")}`,
-    supplierInvoiceRef: supplierInvoiceRef ?? null,
-    amount: value,
-    submittedAt: new Date(),
-    contractId: contract.id,
-    deliveryId: delivery.id,
-    vendorId: vendor.id,
-    status: "submitted",
-  });
+  const invoice = await withSequenceRetry(async () =>
+    Invoice.create({
+      invoiceNo: await nextSequenceNo(Invoice, "invoiceNo", "INV", year),
+      supplierInvoiceRef: supplierInvoiceRef ?? null,
+      amount: value,
+      submittedAt: new Date(),
+      contractId: contract.id,
+      deliveryId: delivery.id,
+      vendorId: vendor.id,
+      status: "submitted",
+    })
+  );
 
   // Goes to the Accountant, who acts on it next. The Treasurer has nothing to
   // do until a voucher has been certified.
@@ -197,7 +216,6 @@ export const certifyInvoice = async (req, res) => {
   }
 
   const year = new Date().getFullYear();
-  const count = await Payment.count({ where: { disbursementNo: { [Op.like]: `DV-${year}-%` } } });
 
   // The voucher is computed here, at certification, because certification is
   // the act of saying what is properly payable. The Treasurer later releases
@@ -208,11 +226,12 @@ export const certifyInvoice = async (req, res) => {
     contract: invoice.contract,
   });
 
-  await sequelize.transaction(async (transaction) => {
-    await invoice.update({ status: "certified", remarks: remarks?.trim() ?? null }, { transaction });
-    await Payment.create(
+  await withSequenceRetry(() =>
+    sequelize.transaction(async (transaction) => {
+      await invoice.update({ status: "certified", remarks: remarks?.trim() ?? null }, { transaction });
+      await Payment.create(
       {
-        disbursementNo: `DV-${year}-${String(count + 1).padStart(4, "0")}`,
+        disbursementNo: await nextSequenceNo(Payment, "disbursementNo", "DV", year, { transaction }),
         grossAmount: deductions.grossAmount,
         ewtAmount: deductions.ewtAmount,
         vatWithheldAmount: deductions.vatWithheldAmount,
@@ -226,10 +245,11 @@ export const certifyInvoice = async (req, res) => {
         preparedById: req.currentUser.id,
         preparedAt: new Date(),
         status: "prepared",
-      },
-      { transaction }
-    );
-  });
+        },
+        { transaction }
+      );
+    })
+  );
 
   await notifyUsers([invoice.vendor?.userId], {
     type: NOTIFICATION_EVENTS.PAYMENT_STATUS,

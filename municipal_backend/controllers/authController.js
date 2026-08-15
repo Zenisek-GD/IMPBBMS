@@ -6,8 +6,18 @@ import { Department } from "../models/departmentModel.js";
 import { validatePassword } from "./passwordResetController.js";
 import { recordAudit, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { clearRateLimit } from "../middleware/rateLimitMiddleware.js";
+import { passwordSessionValid } from "../middleware/permissionMiddleware.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
 import { sendPasswordChangedEmail } from "../services/mailer.js";
+
+// Rotates the session identifier. Called at every point where a session gains or
+// changes privilege, so an attacker who planted a cookie value before sign-in
+// cannot ride that same identifier into an authenticated session (session
+// fixation). Promisified because express-session's API is callback-based.
+export const regenerateSession = (req) =>
+  new Promise((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
 
 // How long a password-verified sign-in may sit waiting for its second factor.
 // Short on purpose: a half-finished sign-in left open on a shared machine
@@ -137,6 +147,9 @@ export const login = async (req, res) => {
   const enrollment = await MfaEnrollment.findOne({ where: { userId: user.id } });
 
   if (enrollment?.status === "active") {
+    // Rotate the identifier the moment the password is accepted, before the
+    // session carries any sign-in state at all.
+    await regenerateSession(req);
     req.session.pendingMfaUserId = user.id;
     // Short-lived on purpose: a half-finished sign-in left open on a shared
     // machine should not still be usable later in the day.
@@ -163,11 +176,19 @@ export const login = async (req, res) => {
     });
   }
 
+  // New session identifier now that the password has been accepted — nothing
+  // carried over from the pre-sign-in request can be used to impersonate this
+  // session (session fixation).
+  await regenerateSession(req);
+
   // Shorten the cookie lifetime for admin-side roles. The global session
   // middleware sets an 8-hour default; overriding it here per-session means
   // vendors keep the full window while officers are logged out sooner.
   req.session.cookie.maxAge = sessionTtlForRole(user.Role.key);
   req.session.userId = user.id;
+  // Stamped so a later password change/reset can invalidate every session that
+  // authenticated before it — see passwordSessionValid.
+  req.session.authAt = Date.now();
 
   // ── Everyone enrols ────────────────────────────────────────────────────────
   // Accounts without a second factor are let in but flagged, and the
@@ -244,6 +265,7 @@ const activeSessionUser = async (req) => {
   if (!req.session.userId) return null;
   const user = await User.findByPk(req.session.userId, { include: [Role] });
   if (!user || user.status !== "active") return null;
+  if (!passwordSessionValid(req, user)) return null;
   return user;
 };
 
@@ -379,6 +401,10 @@ export const changeOwnPassword = async (req, res) => {
   user.password = newPassword; // hashed by the User beforeUpdate hook
   user.passwordChangedAt = now;
   await user.save();
+
+  // Keep THIS session alive past the change it just made — every other session
+  // the account had open authenticated earlier and is now invalidated.
+  req.session.authAt = Date.now();
 
   // Workflow requirement 11: successful password changes. As everywhere else,
   // neither the old nor the new password appears in any form.
@@ -552,6 +578,11 @@ export const me = async (req, res) => {
 
   const user = await User.findByPk(req.session.userId, { include: userIncludes });
   if (!user || user.status !== "active") {
+    return res.status(401).json({ message: "Not authenticated." });
+  }
+  // A session that predates the account's latest password change/reset is no
+  // longer valid, even though its cookie is intact.
+  if (!passwordSessionValid(req, user)) {
     return res.status(401).json({ message: "Not authenticated." });
   }
 

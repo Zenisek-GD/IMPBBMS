@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Plus, Megaphone, Send, Pin, CalendarClock } from 'lucide-react'
 import * as announcementsApi from '../../api/announcements'
+import { clampToWorkHours } from '../../utils/workHours'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
@@ -128,7 +129,10 @@ function DeadlineField({ label, value, onChange, error, hint, name }) {
           type="datetime-local"
           name={name}
           value={value ?? ''}
-          onChange={(event) => onChange(event.target.value)}
+          // Clamp a manually typed time into office hours. The presets already
+          // land on 5pm; this catches the raw input, where an officer could
+          // otherwise set a deadline for 3am (see utils/workHours.js).
+          onChange={(event) => onChange(clampToWorkHours(event.target.value))}
           className="h-9.5 min-w-52 flex-1 rounded-md border border-border-muted bg-surface px-3 text-[13px] text-navy focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none"
         />
         {DEADLINE_PRESETS.map((preset) => (

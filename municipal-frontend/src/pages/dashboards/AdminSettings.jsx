@@ -396,12 +396,12 @@ export default function AdminSettings() {
           <div className="grid gap-5 lg:grid-cols-2">
             <Field
               label="System name"
-              hint="Displayed in the top bar, login page, and public portal header. Defaults to 'Procurenance'."
+              hint="Displayed in the top bar, login page, and public portal header. Defaults to 'ProcureNance'."
             >
               <input
                 type="text"
                 value={brandingForm.systemName}
-                placeholder="Procurenance"
+                placeholder="ProcureNance"
                 onChange={(e) => setBrandingForm({ ...brandingForm, systemName: e.target.value })}
                 className={inputClass}
               />

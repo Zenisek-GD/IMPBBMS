@@ -7,7 +7,7 @@ import { fetchPublicBranding } from '../api/settings'
 // real nav config for these roles until their Figma screens are pulled.
 export default function ComingSoon() {
   const { user, logout } = useAuth()
-  const [systemName, setSystemName] = useState('Procurenance')
+  const [systemName, setSystemName] = useState('ProcureNance')
 
   useEffect(() => {
     let cancelled = false

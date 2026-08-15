@@ -158,6 +158,12 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
       title="Record counter submission"
       subtitle="Documents received in person at the BAC office."
       onClose={onClose}
+      // Widened from the default `md`. This form has five sections and a dozen
+      // fields, most already laid out as `sm:grid-cols-2` pairs — in a ~448px
+      // panel those pairs had no room to sit side by side, so the whole thing
+      // stacked into one tall column. At `xl` the columns breathe and the modal
+      // is roughly half the height.
+      size="xl"
     >
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-5">
         {serverError && (

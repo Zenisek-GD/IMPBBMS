@@ -7,6 +7,7 @@ import {
   VARIATION_ORDER_CEILING_RATE,
 } from "../models/contractModel.js";
 import { Award, Rfq } from "../models/biddingModel.js";
+import { Invoice } from "../models/paymentModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { User } from "../models/userModel.js";
 import {
@@ -18,6 +19,7 @@ import {
 } from "../models/securityModel.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 
 const contractIncludes = {
   include: [
@@ -121,10 +123,10 @@ export const createContract = async (req, res) => {
   const category = award.rfq?.category ?? "goods";
 
   const year = new Date().getFullYear();
-  const count = await Contract.count({ where: { contractNo: { [Op.like]: `CON-${year}-%` } } });
 
-  const contract = await Contract.create({
-    contractNo: `CON-${year}-${String(count + 1).padStart(4, "0")}`,
+  const contract = await withSequenceRetry(async () =>
+    Contract.create({
+    contractNo: await nextSequenceNo(Contract, "contractNo", "CON", year),
     poRef: poRef ?? null,
     amount: award.amount,
     category,
@@ -137,7 +139,8 @@ export const createContract = async (req, res) => {
     vendorId: award.vendorId,
     draftedById: req.currentUser.id,
     status: "draft",
-  });
+    })
+  );
 
   res.status(201).json({
     ...serialize(await Contract.findByPk(contract.id, contractIncludes)),
@@ -443,7 +446,7 @@ export const reportDelivery = async (req, res) => {
 };
 
 export const inspectDelivery = async (req, res) => {
-  const { result, remarks, acceptedQuantityNote } = req.body;
+  const { result, remarks, acceptedQuantityNote, acceptedValue } = req.body;
   const delivery = await Delivery.findByPk(req.params.deliveryId, {
     include: [{ model: Contract, as: "contract", include: [{ model: Vendor, as: "vendor" }] }],
   });
@@ -458,6 +461,31 @@ export const inspectDelivery = async (req, res) => {
     return res.status(400).json({ message: "Remarks are required when rejecting a delivery." });
   }
 
+  // The officer certifies the peso value actually delivered. Optional — left
+  // blank, invoicing falls back to the contract ceiling — but when given it caps
+  // what the supplier may invoice against this delivery, and it cannot exceed
+  // what is still unbilled on the contract.
+  let certifiedValue = null;
+  if (result === "accepted" && acceptedValue !== undefined && acceptedValue !== null && acceptedValue !== "") {
+    certifiedValue = Number(acceptedValue);
+    if (!Number.isFinite(certifiedValue) || certifiedValue <= 0) {
+      return res.status(400).json({ message: "Accepted value must be a positive amount." });
+    }
+    const contractAmount = Number(delivery.contract?.amount ?? 0);
+    const billedElsewhere = Number(
+      (await Invoice.sum("amount", {
+        where: { contractId: delivery.contractId, status: { [Op.notIn]: ["cancelled"] } },
+      })) ?? 0
+    );
+    if (certifiedValue > contractAmount - billedElsewhere + 0.005) {
+      return res.status(400).json({
+        message:
+          `Accepted value ₱${certifiedValue.toLocaleString()} exceeds the ` +
+          `₱${(contractAmount - billedElsewhere).toLocaleString()} still unbilled on this contract.`,
+      });
+    }
+  }
+
   await sequelize.transaction(async (transaction) => {
     await delivery.update(
       {
@@ -466,6 +494,7 @@ export const inspectDelivery = async (req, res) => {
         inspectedAt: new Date(),
         remarks: remarks?.trim() ?? null,
         acceptedQuantityNote: acceptedQuantityNote ?? null,
+        acceptedValue: result === "accepted" ? certifiedValue : null,
       },
       { transaction }
     );

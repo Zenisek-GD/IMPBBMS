@@ -119,7 +119,7 @@ export const exportAuditLog = async (req, res) => {
   // The integrity verdict travels with the export, so a reviewer holding the
   // file knows whether the chain was intact when it was produced.
   const preamble = [
-    `# Procurenance audit log export`,
+    `# ProcureNance audit log export`,
     `# generated: ${new Date().toISOString()}`,
     `# entries: ${verification.entriesChecked}`,
     `# chain intact: ${verification.intact}`,

@@ -2,6 +2,22 @@ import { User } from "../models/userModel.js";
 import { Role } from "../models/roleModel.js";
 import { Permission } from "../models/permissionModel.js";
 
+// A password change or reset must invalidate every *other* session the account
+// had open — otherwise recovering a compromised account leaves the intruder
+// signed in. Each session records when it authenticated (`authAt`); a session
+// that authenticated before the account's most recent password change is no
+// longer trusted. The grace window absorbs the sub-second rounding of the
+// DATETIME column so the very session that just changed the password — which
+// re-stamps its own `authAt` — is never caught by its own change.
+const PW_SESSION_GRACE_MS = 2000;
+
+export const passwordSessionValid = (req, user) => {
+  const changed = user.passwordChangedAt ? new Date(user.passwordChangedAt).getTime() : 0;
+  if (!changed) return true; // never changed (e.g. seeded accounts) — nothing to invalidate against
+  const authAt = req.session?.authAt ?? 0;
+  return authAt >= changed - PW_SESSION_GRACE_MS;
+};
+
 // Loads the caller with their role's permission set. Read fresh per request so
 // revoking a permission takes effect immediately, not at next login.
 export const loadCurrentUser = async (req) => {
@@ -12,6 +28,8 @@ export const loadCurrentUser = async (req) => {
   });
 
   if (!user || user.status !== "active") return null;
+  // Stale session from before a password change/reset — refuse it.
+  if (!passwordSessionValid(req, user)) return null;
   return user;
 };
 

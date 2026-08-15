@@ -10,6 +10,7 @@ import {
 import { fetchAipEntries } from '../../api/planning'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
+import WorkHoursDateTimeInput from '../../components/ui/WorkHoursDateTimeInput'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
@@ -485,8 +486,7 @@ function ProceedingForm({ budget, onClose, onSaved }) {
         </label>
         <label className="text-xs text-text-secondary">
           Held on
-          <input
-            type="datetime-local"
+          <WorkHoursDateTimeInput
             value={values.scheduledAt}
             onChange={(e) => set('scheduledAt', e.target.value)}
             className={`mt-1 ${inputClass}`}

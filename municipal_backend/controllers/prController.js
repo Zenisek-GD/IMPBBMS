@@ -13,6 +13,7 @@ import { Appropriation, Obligation, FUND_LABELS } from "../models/appropriationM
 import { ProcurementMode } from "../models/procurementModeModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import { availableFor, nextObligationNo } from "../services/budgetLedger.js";
+import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 import { suggestProcurementMode } from "../services/procurementThresholds.js";
 import {
   evaluateTransition,
@@ -282,11 +283,8 @@ const validateHeader = ({ dateRequired, isEmergency, justification }, { submitti
   return null;
 };
 
-const nextPrNumber = async () => {
-  const year = new Date().getFullYear();
-  const count = await PrHeader.count({ where: { prNumber: { [Op.like]: `PR-${year}-%` } } });
-  return `PR-${year}-${String(count + 1).padStart(4, "0")}`;
-};
+const nextPrNumber = (transaction) =>
+  nextSequenceNo(PrHeader, "prNumber", "PR", new Date().getFullYear(), { transaction });
 
 export const listPrs = async (req, res) => {
   const { status, search } = req.query;
@@ -370,27 +368,29 @@ export const createPr = async (req, res) => {
     });
   }
 
-  const created = await sequelize.transaction(async (transaction) => {
-    const pr = await PrHeader.create(
-      {
-        ...header,
-        prNumber: await nextPrNumber(),
-        appEntryId,
-        requesterId: req.currentUser.id,
-        departmentId: req.currentUser.departmentId ?? appEntry.implementingUnitId,
-        totalAmount: computed.total,
-        status: "draft",
-      },
-      { transaction }
-    );
+  const created = await withSequenceRetry(() =>
+    sequelize.transaction(async (transaction) => {
+      const pr = await PrHeader.create(
+        {
+          ...header,
+          prNumber: await nextPrNumber(transaction),
+          appEntryId,
+          requesterId: req.currentUser.id,
+          departmentId: req.currentUser.departmentId ?? appEntry.implementingUnitId,
+          totalAmount: computed.total,
+          status: "draft",
+        },
+        { transaction }
+      );
 
-    await PrLineItem.bulkCreate(
-      computed.items.map((item) => ({ ...item, prHeaderId: pr.id })),
-      { transaction }
-    );
+      await PrLineItem.bulkCreate(
+        computed.items.map((item) => ({ ...item, prHeaderId: pr.id })),
+        { transaction }
+      );
 
-    return pr;
-  });
+      return pr;
+    })
+  );
 
   res.status(201).json(serialize(await PrHeader.findByPk(created.id, withIncludes)));
 };

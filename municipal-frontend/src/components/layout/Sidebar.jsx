@@ -14,8 +14,13 @@ import { useAuth } from '../../context/useAuth'
 // ── THE ACCOUNT FOOTER ──────────────────────────────────────────────────────
 // Profile and sign-out used to live in a dropdown in the top bar, which made
 // them the only two destinations in the application that were not in the rail.
-// They are navigation like everything else, so they are here, pinned to the
-// bottom where an account block is conventionally looked for.
+// They are navigation like everything else, so they are here.
+//
+// It sits at the *bottom of the scroll flow*, not pinned below it: `mt-auto`
+// drops it to the foot of the rail when the nav is short, and it scrolls up
+// with the rest when the nav is long. It used to be a `shrink-0` block outside
+// the scroll container, which held it fixed while only the links above it
+// moved — the thing this layout deliberately no longer does.
 //
 const initialsOf = (name = '') =>
   name
@@ -91,44 +96,49 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
             </div>
           </div>
         ))}
-      </nav>
 
-      <div className="shrink-0 border-t border-border-muted p-2">
-        {!collapsed && (
-          <div className="mb-1.5 flex items-center gap-2.5 px-1.5 py-1.5">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-accent-fg">
-              {initialsOf(user?.name) || <UserCircle size={16} />}
-            </span>
-            <div className="min-w-0">
-              <p className="truncate text-[12px] font-semibold text-navy">{user?.name}</p>
-              <p className="truncate text-[11px] text-text-faint">{user?.roleName}</p>
+        {/* The account block. `mt-auto` sits it at the foot of the rail when the
+            nav is short, and lets it scroll up with the links when the nav is
+            long — it is part of the scroll flow, not pinned beneath it. The
+            negative margins bleed the top border to the rail's edges, since the
+            surrounding `<nav>` carries its own padding. */}
+        <div className="mt-auto -mx-2 border-t border-border-muted px-2 pt-2">
+          {!collapsed && (
+            <div className="mb-1.5 flex items-center gap-2.5 px-1.5 py-1.5">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-accent-fg">
+                {initialsOf(user?.name) || <UserCircle size={16} />}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-[12px] font-semibold text-navy">{user?.name}</p>
+                <p className="truncate text-[11px] text-text-faint">{user?.roleName}</p>
+              </div>
             </div>
+          )}
+
+          <div className="flex flex-col gap-0.5">
+            <NavLink
+              to="/profile"
+              title={collapsed ? 'My Profile' : undefined}
+              className={({ isActive }) => itemClass(collapsed, isActive)}
+            >
+              <User size={15} strokeWidth={2} className="shrink-0" />
+              {!collapsed && <span className="truncate">My Profile</span>}
+            </NavLink>
+
+            <button
+              type="button"
+              onClick={onLogout}
+              title={collapsed ? 'Log out' : undefined}
+              className={`flex items-center gap-2.5 rounded-md text-[12px] font-medium text-danger transition-colors hover:bg-danger/10 ${
+                collapsed ? 'justify-center px-0 py-2' : 'px-2.5 py-2'
+              }`}
+            >
+              <LogOut size={15} strokeWidth={2} className="shrink-0" />
+              {!collapsed && <span className="truncate">Log out</span>}
+            </button>
           </div>
-        )}
-
-        <div className="flex flex-col gap-0.5">
-          <NavLink
-            to="/profile"
-            title={collapsed ? 'My Profile' : undefined}
-            className={({ isActive }) => itemClass(collapsed, isActive)}
-          >
-            <User size={15} strokeWidth={2} className="shrink-0" />
-            {!collapsed && <span className="truncate">My Profile</span>}
-          </NavLink>
-
-          <button
-            type="button"
-            onClick={onLogout}
-            title={collapsed ? 'Log out' : undefined}
-            className={`flex items-center gap-2.5 rounded-md text-[12px] font-medium text-danger transition-colors hover:bg-danger/10 ${
-              collapsed ? 'justify-center px-0 py-2' : 'px-2.5 py-2'
-            }`}
-          >
-            <LogOut size={15} strokeWidth={2} className="shrink-0" />
-            {!collapsed && <span className="truncate">Log out</span>}
-          </button>
         </div>
-      </div>
+      </nav>
     </aside>
   )
 }

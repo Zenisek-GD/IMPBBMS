@@ -5,6 +5,7 @@ import { CONFERENCE_STATUS_TONES } from '../../api/contracts'
 import { fetchRfqs } from '../../api/bidding'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
+import WorkHoursDateTimeInput from '../../components/ui/WorkHoursDateTimeInput'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
@@ -77,8 +78,7 @@ function ScheduleModal({ onClose, onScheduled }) {
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Date &amp; time
             </label>
-            <input
-              type="datetime-local"
+            <WorkHoursDateTimeInput
               value={form.scheduledAt}
               onChange={(event) => setForm({ ...form, scheduledAt: event.target.value })}
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"

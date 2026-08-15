@@ -19,9 +19,9 @@ import { fetchPublicBranding } from '../api/settings'
 //
 // ── DYNAMIC SYSTEM NAME ─────────────────────────────────────────────────────
 // The wordmark fetches the admin-configured system name from the public
-// branding endpoint (no auth required). Falls back to "Procurenance".
+// branding endpoint (no auth required). Falls back to "ProcureNance".
 export default function AuthLayout({ title, subtitle, children, footer }) {
-  const [systemName, setSystemName] = useState('Procurenance')
+  const [systemName, setSystemName] = useState('ProcureNance')
 
   useEffect(() => {
     let cancelled = false

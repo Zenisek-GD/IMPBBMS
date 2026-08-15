@@ -113,7 +113,7 @@ test("the returned step is what lets a caller block replay", () => {
 
 console.log("\nenrolment URI");
 test("is a valid otpauth URI with the parameters apps assume", () => {
-  const uri = buildOtpAuthUri({ secret, account: "mayor@example.gov.ph", issuer: "Procurenance" });
+  const uri = buildOtpAuthUri({ secret, account: "mayor@example.gov.ph", issuer: "ProcureNance" });
   const parsed = new URL(uri);
   assert.equal(parsed.protocol, "otpauth:");
   assert.equal(parsed.searchParams.get("secret"), secret);

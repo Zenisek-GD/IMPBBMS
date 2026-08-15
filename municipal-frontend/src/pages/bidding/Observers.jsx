@@ -13,6 +13,7 @@ import {
 import * as biddingApi from '../../api/bidding'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
+import WorkHoursDateTimeInput from '../../components/ui/WorkHoursDateTimeInput'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
@@ -64,8 +65,7 @@ function InviteModal({ rfq, organizations, onClose, onDone }) {
       <label className="mb-1 block text-xs font-medium text-text-secondary">
         When the activity is scheduled
       </label>
-      <input
-        type="datetime-local"
+      <WorkHoursDateTimeInput
         value={scheduledAt}
         onChange={(e) => setScheduledAt(e.target.value)}
         className="mb-1 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"

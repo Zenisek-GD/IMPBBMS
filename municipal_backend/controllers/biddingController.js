@@ -12,6 +12,7 @@ import { BacResolution, nextResolutionNo } from "../models/bacResolutionModel.js
 import { getLguProfile } from "../models/systemSettingModel.js";
 import { notifyByPermission, notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 import {
   suggestProcurementMode,
   requiresPrebidConference,
@@ -89,11 +90,9 @@ const serializeBid = (bid, { blind, includeFinancial }) => ({
 
 // ── RFQ / ITB ───────────────────────────────────────────────────────────────
 
-const nextReference = async (modeKey) => {
+const nextReference = (modeKey) => {
   const prefix = modeKey === "competitiveBidding" ? "ITB" : "RFQ";
-  const year = new Date().getFullYear();
-  const count = await Rfq.count({ where: { referenceNo: { [Op.like]: `${prefix}-${year}-%` } } });
-  return `${prefix}-${year}-${String(count + 1).padStart(4, "0")}`;
+  return nextSequenceNo(Rfq, "referenceNo", prefix, new Date().getFullYear());
 };
 
 export const listRfqs = async (req, res) => {
@@ -171,20 +170,22 @@ export const createRfq = async (req, res) => {
 
   const modeKey = mode.key;
 
-  const rfq = await Rfq.create({
-    referenceNo: await nextReference(modeKey),
-    title: title?.trim() || pr.purpose || `Procurement for ${pr.prNumber}`,
-    abc,
-    category: category ?? "goods",
-    closingDate,
-    prebidAt: prebidAt ?? null,
-    // IRR Sec. 51.1 and 34.3(b) — both derived, not asked of the user.
-    prebidRequired: requiresPrebidConference(abc),
-    postingRequired: modeKey !== "smallValueProcurement" || abc > SVP_POSTING_EXEMPTION_CEILING,
-    prHeaderId,
-    procurementModeId: mode.id,
-    status: "draft",
-  });
+  const rfq = await withSequenceRetry(async () =>
+    Rfq.create({
+      referenceNo: await nextReference(modeKey),
+      title: title?.trim() || pr.purpose || `Procurement for ${pr.prNumber}`,
+      abc,
+      category: category ?? "goods",
+      closingDate,
+      prebidAt: prebidAt ?? null,
+      // IRR Sec. 51.1 and 34.3(b) — both derived, not asked of the user.
+      prebidRequired: requiresPrebidConference(abc),
+      postingRequired: modeKey !== "smallValueProcurement" || abc > SVP_POSTING_EXEMPTION_CEILING,
+      prHeaderId,
+      procurementModeId: mode.id,
+      status: "draft",
+    })
+  );
 
   res.status(201).json({
     ...serializeRfq(await Rfq.findByPk(rfq.id, rfqIncludes)),
@@ -243,20 +244,22 @@ const createEpaSolicitation = async (req, res) => {
     });
   }
 
-  const rfq = await Rfq.create({
-    referenceNo: await nextReference(mode.key),
-    title: title?.trim() || appEntry.projectTitle,
-    abc,
-    category: category ?? "goods",
-    closingDate,
-    prebidAt: prebidAt ?? null,
-    prebidRequired: requiresPrebidConference(abc),
-    postingRequired: mode.key !== "smallValueProcurement" || abc > SVP_POSTING_EXEMPTION_CEILING,
-    appEntryId: appEntry.id,
-    isEarlyProcurement: true,
-    procurementModeId: mode.id,
-    status: "draft",
-  });
+  const rfq = await withSequenceRetry(async () =>
+    Rfq.create({
+      referenceNo: await nextReference(mode.key),
+      title: title?.trim() || appEntry.projectTitle,
+      abc,
+      category: category ?? "goods",
+      closingDate,
+      prebidAt: prebidAt ?? null,
+      prebidRequired: requiresPrebidConference(abc),
+      postingRequired: mode.key !== "smallValueProcurement" || abc > SVP_POSTING_EXEMPTION_CEILING,
+      appEntryId: appEntry.id,
+      isEarlyProcurement: true,
+      procurementModeId: mode.id,
+      status: "draft",
+    })
+  );
 
   res.status(201).json({
     ...serializeRfq(await Rfq.findByPk(rfq.id, rfqIncludes)),
@@ -1218,25 +1221,27 @@ export const recommendAward = async (req, res) => {
   }
 
   const year = new Date().getFullYear();
-  const count = await Award.count({ where: { noaNumber: { [Op.like]: `NOA-${year}-%` } } });
 
-  const award = await Award.create({
-    noaNumber: `NOA-${year}-${String(count + 1).padStart(4, "0")}`,
-    noaDate: new Date().toISOString().slice(0, 10),
-    amount: bid.totalBidPrice,
-    rfqId: bid.rfqId,
-    bidId: bid.id,
-    vendorId: bid.vendorId,
-    recommendedById: req.currentUser.id,
-    status: "pendingHopeApproval",
-    awardBasis: basis,
-  });
+  const award = await withSequenceRetry(async () =>
+    Award.create({
+      noaNumber: await nextSequenceNo(Award, "noaNumber", "NOA", year),
+      noaDate: new Date().toISOString().slice(0, 10),
+      amount: bid.totalBidPrice,
+      rfqId: bid.rfqId,
+      bidId: bid.id,
+      vendorId: bid.vendorId,
+      recommendedById: req.currentUser.id,
+      status: "pendingHopeApproval",
+      awardBasis: basis,
+    })
+  );
 
   // ── The committee's actual instrument ──────────────────────────────────────
   // The BAC acts by resolution, not by one member's click. Members present are
   // snapshotted rather than referenced, so a later change of committee cannot
   // rewrite what was resolved on the day.
-  const resolution = await BacResolution.create({
+  const resolution = await withSequenceRetry(async () =>
+    BacResolution.create({
     resolutionNo: await nextResolutionNo(year),
     type: "recommendAward",
     title: `Resolution recommending award of ${bid.rfq?.referenceNo} to ${bid.vendor?.businessName}`,
@@ -1261,7 +1266,8 @@ export const recommendAward = async (req, res) => {
     chairpersonId: req.currentUser.id,
     entityRef: "award",
     entityId: award.id,
-  });
+    })
+  );
 
   await auditFromRequest(req, {
     actionType: AUDIT_ACTIONS.AWARD_RECOMMENDED,

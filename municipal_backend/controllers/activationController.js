@@ -78,7 +78,7 @@ export const verifyActivationLink = async (req, res) => {
     // No actorId: the visitor is not signed in, and will not be until activation
     // completes. They are identified by the account the token points at.
     actorName: user.name,
-    actorRole: "vendor",
+    actorRole: user.Role?.key ?? null,
     ipAddress: req.ip,
     afterState: { firstAccess, invitationExpiresAt: record.expiresAt },
   });
@@ -137,7 +137,7 @@ export const setupActivation = async (req, res) => {
     entityId: user.id,
     summary: `Activation details submitted for ${user.email}; verification code issued`,
     actorName: user.name,
-    actorRole: "vendor",
+    actorRole: user.Role?.key ?? null,
     ipAddress: req.ip,
     // A password was chosen. What it is does not appear here, in any form —
     // not the value, not its length, not a hash. See redactSecrets in
@@ -155,7 +155,7 @@ export const setupActivation = async (req, res) => {
     entityId: user.id,
     summary: `Verification code issued for account activation (${maskEmail(user.email)})`,
     actorName: user.name,
-    actorRole: "vendor",
+    actorRole: user.Role?.key ?? null,
     ipAddress: req.ip,
     afterState: { purpose: "accountActivation", expiresAt: issued.expiresAt },
   });
@@ -201,7 +201,7 @@ export const confirmActivation = async (req, res) => {
       entityId: user.id,
       summary: `Incorrect or expired activation code submitted for ${user.email}`,
       actorName: user.name,
-      actorRole: "vendor",
+      actorRole: user.Role?.key ?? null,
       ipAddress: req.ip,
       afterState: { purpose: "accountActivation" },
     });
@@ -236,7 +236,7 @@ export const confirmActivation = async (req, res) => {
     summary: `Email ownership verified by one-time code for ${user.email}`,
     actorId: user.id,
     actorName: user.name,
-    actorRole: "vendor",
+    actorRole: user.Role?.key ?? null,
     ipAddress: req.ip,
     afterState: { purpose: "accountActivation", verifiedAddress: user.email },
   });
@@ -248,7 +248,7 @@ export const confirmActivation = async (req, res) => {
     summary: `Bidder account activated for ${user.email}${vendor ? ` (${vendor.businessName})` : ""}`,
     actorId: user.id,
     actorName: user.name,
-    actorRole: "vendor",
+    actorRole: user.Role?.key ?? null,
     ipAddress: req.ip,
     beforeState: { status: "pendingActivation", displayName: previousName },
     afterState: {
@@ -314,7 +314,7 @@ export const resendActivationCode = async (req, res) => {
     entityId: user.id,
     summary: `Activation code re-issued for ${maskEmail(user.email)}`,
     actorName: user.name,
-    actorRole: "vendor",
+    actorRole: user.Role?.key ?? null,
     ipAddress: req.ip,
     afterState: { purpose: "accountActivation", resend: true, expiresAt: issued.expiresAt },
   });

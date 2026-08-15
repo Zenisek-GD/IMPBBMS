@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import * as api from '../../api/announcements'
 import { ANNOUNCEMENT_STATUS_TONES } from '../../api/announcements'
+import WorkHoursDateTimeInput from '../../components/ui/WorkHoursDateTimeInput'
 import { fetchRfqs } from '../../api/bidding'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
@@ -335,17 +336,17 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
           <div className="grid gap-3 sm:grid-cols-3">
             <label className={labelClass}>
               Pre-bid conference
-              <input type="datetime-local" value={form.prebidAt} onChange={(e) => set('prebidAt', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <WorkHoursDateTimeInput value={form.prebidAt} onChange={(e) => set('prebidAt', e.target.value)} className={`mt-1 ${inputClass}`} />
               {err('prebidAt')}
             </label>
             <label className={labelClass}>
               Deadline for bids
-              <input type="datetime-local" value={form.submissionDeadline} onChange={(e) => set('submissionDeadline', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <WorkHoursDateTimeInput value={form.submissionDeadline} onChange={(e) => set('submissionDeadline', e.target.value)} className={`mt-1 ${inputClass}`} />
               {err('submissionDeadline')}
             </label>
             <label className={labelClass}>
               Bid opening
-              <input type="datetime-local" value={form.bidOpeningAt} onChange={(e) => set('bidOpeningAt', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <WorkHoursDateTimeInput value={form.bidOpeningAt} onChange={(e) => set('bidOpeningAt', e.target.value)} className={`mt-1 ${inputClass}`} />
               {err('bidOpeningAt')}
             </label>
           </div>
@@ -394,7 +395,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
             </label>
             <label className={labelClass}>
               Bidder registration closes
-              <input type="datetime-local" value={form.registrationDeadline} onChange={(e) => set('registrationDeadline', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <WorkHoursDateTimeInput value={form.registrationDeadline} onChange={(e) => set('registrationDeadline', e.target.value)} className={`mt-1 ${inputClass}`} />
               {err('registrationDeadline')}
             </label>
           </div>

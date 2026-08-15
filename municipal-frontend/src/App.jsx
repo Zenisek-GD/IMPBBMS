@@ -324,9 +324,36 @@ function App() {
             <Route path="/documents" element={<GeneratedDocuments />} />
           </Route>
 
-          {/* Audit log: Internal Auditor sees everything; the System
-              Administrator sees system logs (Section 2.3). */}
-          <Route element={<RoleRoute allow={['internalAuditor', 'systemAdministrator']} />}>
+          {/* Audit log. Every role listed here already holds `audit.viewAll`
+              (or `audit.viewLogs` for the administrator) in the permission
+              matrix, and the API at /api/audit already accepts them — the route
+              was simply gated by a two-role allow-list that locked the rest out
+              of a page they were entitled to. Widened so the Mayor can see the
+              administrator's actions (a security requirement — the admin is the
+              one office that can alter the database), and so every oversight and
+              finance officer has the audit trail their accountability needs.
+              The vendor and the purely operational roles are deliberately NOT
+              here: a bidder or requester reading the full internal log would see
+              evaluator identities and other bidders' actions, which blind
+              evaluation exists to prevent. */}
+          <Route
+            element={
+              <RoleRoute
+                allow={[
+                  'internalAuditor',
+                  'systemAdministrator',
+                  'hope',
+                  'budgetOfficer',
+                  'municipalAccountant',
+                  'municipalTreasurer',
+                  'planningOfficer',
+                  'sanggunianSecretary',
+                  'bacChairperson',
+                  'bacViceChairperson',
+                ]}
+              />
+            }
+          >
             <Route path="/audit-log" element={<AuditLog />} />
           </Route>
 

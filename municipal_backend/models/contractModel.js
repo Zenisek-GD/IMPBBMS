@@ -121,6 +121,12 @@ export const Delivery = sequelize.define("Delivery", {
   },
   // Section 7.5: what was not delivered feeds the Pending/Unbought queue.
   acceptedQuantityNote: { type: DataTypes.TEXT, allowNull: true },
+  // The peso value the inspecting officer certifies was actually delivered and
+  // accepted. It caps what may be invoiced against THIS delivery, so a supplier
+  // cannot bill the whole contract against one small acceptance. Nullable: older
+  // deliveries predate the field, and invoicing falls back to the contract
+  // ceiling when it is absent.
+  acceptedValue: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
   remarks: { type: DataTypes.TEXT, allowNull: true },
 });
 

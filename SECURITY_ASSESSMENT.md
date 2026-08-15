@@ -1,6 +1,6 @@
 # Data Privacy and Security — Assessment and Corrected Documentation
 
-**System:** Procurenance — Municipal Procurement and Budgeting System
+**System:** ProcureNance — Municipal Procurement and Budgeting System
 **Assessed:** 13 August 2026
 **Purpose:** to state accurately what the system does, what it does not, and what should be said in the written documentation instead.
 

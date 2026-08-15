@@ -1,6 +1,7 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "./db.js";
 import { User } from "./userModel.js";
+import { nextSequenceNo } from "../services/sequenceNo.js";
 
 // ── BAC RESOLUTION ───────────────────────────────────────────────────────────
 // The Bids and Awards Committee is a collegial body. It does not act through
@@ -57,12 +58,7 @@ export const BacResolution = sequelize.define(
 
 BacResolution.belongsTo(User, { as: "chairperson", foreignKey: "chairpersonId" });
 
-export const nextResolutionNo = async (year) => {
-  const { Op } = await import("sequelize");
-  const count = await BacResolution.count({
-    where: { resolutionNo: { [Op.like]: `BAC-RES-${year}-%` } },
-  });
-  return `BAC-RES-${year}-${String(count + 1).padStart(4, "0")}`;
-};
+export const nextResolutionNo = (year, transaction) =>
+  nextSequenceNo(BacResolution, "resolutionNo", "BAC-RES", year, { transaction });
 
 export { sequelize };

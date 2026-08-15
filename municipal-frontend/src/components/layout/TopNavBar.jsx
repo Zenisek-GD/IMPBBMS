@@ -21,13 +21,13 @@ import ThemeToggle from '../ui/ThemeToggle'
 //
 // ── DYNAMIC SYSTEM NAME ─────────────────────────────────────────────────────
 // The wordmark is configurable by the system administrator through System
-// Settings → Branding. It falls back to "Procurenance" when no override is set.
+// Settings → Branding. It falls back to "ProcureNance" when no override is set.
 export default function TopNavBar({ searchPlaceholder, lguName, systemName }) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-black/20 bg-brand px-5">
       <div className="flex min-w-0 items-center gap-5">
         <div className="flex flex-col leading-tight">
-          <span className="text-[17px] font-semibold tracking-[-0.01em] text-brand-fg">{systemName || 'Procurenance'}</span>
+          <span className="text-[17px] font-semibold tracking-[-0.01em] text-brand-fg">{systemName || 'ProcureNance'}</span>
           {lguName && (
             <span className="truncate text-[11px] tracking-[0.02em] text-topnav-link">{lguName}</span>
           )}

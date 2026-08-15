@@ -16,6 +16,7 @@ import { useTableControls } from '../../components/ui/useTableControls'
 function InspectModal({ delivery, onClose, onDecided }) {
   const [remarks, setRemarks] = useState('')
   const [note, setNote] = useState('')
+  const [acceptedValue, setAcceptedValue] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -27,6 +28,9 @@ function InspectModal({ delivery, onClose, onDecided }) {
         result,
         remarks,
         acceptedQuantityNote: note,
+        // Only meaningful on acceptance; caps what the supplier may invoice
+        // against this delivery. Sent as null when left blank.
+        acceptedValue: result === 'accepted' && acceptedValue !== '' ? Number(acceptedValue) : null,
       })
       onDecided()
       onClose()
@@ -49,6 +53,19 @@ function InspectModal({ delivery, onClose, onDecided }) {
         value={note}
         onChange={(event) => setNote(event.target.value)}
         placeholder="e.g. 40 of 40 units accepted"
+        className="mb-3 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+      />
+
+      <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+        Accepted value (₱) — caps what may be invoiced for this delivery
+      </label>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        value={acceptedValue}
+        onChange={(event) => setAcceptedValue(event.target.value)}
+        placeholder="Leave blank to fall back to the contract ceiling"
         className="mb-3 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
       />
 

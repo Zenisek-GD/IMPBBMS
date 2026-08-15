@@ -136,7 +136,13 @@ function RecordTable({ columns, rows, empty }) {
           {visible.map((row, index) => (
             <tr key={index} className="border-t border-border-muted">
               {columns.map(([label, accessor]) => (
-                <td key={label} className="px-4 py-2.5 text-[13px] whitespace-nowrap text-text-secondary">
+                // `text-navy`, matching the Field values in Budget and
+                // Financial Information. These cells were the muted secondary
+                // grey, so the same fact — an amount, a date, a status — was
+                // drawn in two different colours depending on which block of
+                // the page it appeared in, and the reference-number columns
+                // (which set text-navy inline) read as black beside them.
+                <td key={label} className="px-4 py-2.5 text-[13px] whitespace-nowrap text-navy">
                   {accessor(row)}
                 </td>
               ))}
@@ -492,7 +498,11 @@ export default function PublicProjectDetail() {
           <div className="mt-4">
             <Section title="Complete Project Timeline" icon={History}>
               {timeline ? (
-                <ProjectTimeline events={timeline.events} disclosure={timeline.disclosure} />
+                <ProjectTimeline
+                  events={timeline.events}
+                  disclosure={timeline.disclosure}
+                  phases={timeline.phases}
+                />
               ) : (
                 <p className="px-4 py-10 text-center text-[13px] text-text-faint">Loading timeline…</p>
               )}

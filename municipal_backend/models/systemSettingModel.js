@@ -44,7 +44,7 @@ export const SETTING_KEYS = {
 export const DEFAULT_CAPITALIZATION_THRESHOLD = 50000;
 
 // ── Default branding values ────────────────────────────────────────────────
-export const DEFAULT_SYSTEM_NAME = "Procurenance";
+export const DEFAULT_SYSTEM_NAME = "ProcureNance";
 export const DEFAULT_TRANSPARENCY_TITLE = "Transparency Portal";
 export const DEFAULT_TRANSPARENCY_FOOTER =
   "Published under the Implementing Rules and Regulations of RA No. 12009 " +

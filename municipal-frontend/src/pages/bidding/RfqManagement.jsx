@@ -4,6 +4,7 @@ import * as biddingApi from '../../api/bidding'
 import { RFQ_STATUS_LABELS, RFQ_STATUS_TONES } from '../../api/bidding'
 import { fetchPrs } from '../../api/purchaseRequisitions'
 import DashboardPage from '../../components/ui/DashboardPage'
+import WorkHoursDateTimeInput from '../../components/ui/WorkHoursDateTimeInput'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
@@ -87,8 +88,7 @@ function CreateRfqModal({ onClose, onCreated }) {
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Closing date
             </label>
-            <input
-              type="datetime-local"
+            <WorkHoursDateTimeInput
               value={form.closingDate}
               onChange={(event) => setForm({ ...form, closingDate: event.target.value })}
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"

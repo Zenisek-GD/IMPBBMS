@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Op } from "sequelize";
 import { ActivationToken } from "../models/activationTokenModel.js";
 import { User } from "../models/userModel.js";
+import { Role } from "../models/roleModel.js";
 import { activationTtlHours, frontendOrigin } from "../config/mail.js";
 
 // 256 bits from the CSPRNG. Long enough that guessing is not a strategy, so the
@@ -71,7 +72,10 @@ export const resolveActivationToken = async (token) => {
   });
   if (!record) return invalid;
 
-  const user = await User.findByPk(record.userId);
+  // Role is included so callers can attribute audit entries to the account's
+  // real role. This flow serves both bidder onboarding and administrator-
+  // initiated resets of internal officials, so it must not assume "vendor".
+  const user = await User.findByPk(record.userId, { include: [Role] });
   if (!user) return invalid;
 
   // An account already activated has no business being activated again, even

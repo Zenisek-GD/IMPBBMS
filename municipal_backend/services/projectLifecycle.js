@@ -108,6 +108,21 @@ const loadChain = async (appEntryIds) => {
   return { prs, rfqs, bids, awards, contracts, deliveries, invoices, payments };
 };
 
+// `AppEntry.procurementMode` stores a ProcurementMode *key* ("competitiveBidding"),
+// and the public view falls back to it whenever a project has not been
+// advertised yet — so every upcoming project published the raw key as its
+// procurement method, right under the title.
+//
+// These names cannot be derived by spacing the camel case: "stiProcurement" is
+// "Direct Procurement for Science, Technology, and Innovation" and
+// "unsolicitedOffer" is "Unsolicited Offer with Bid Matching". Two of the eleven
+// modes would be renamed into something the law does not call them, so the real
+// name has to be looked up.
+const loadModeNames = async () => {
+  const modes = await ProcurementMode.findAll({ attributes: ["key", "name"] });
+  return new Map(modes.map((mode) => [mode.key, mode.name]));
+};
+
 const groupBy = (rows, key) => {
   const map = new Map();
   for (const row of rows) {
@@ -145,6 +160,11 @@ const deriveCategory = (phase, { contracts, deliveries, payments }) => {
   return PHASE_ORDER.indexOf(phase) >= PHASE_ORDER.indexOf("solicitation") ? "ongoing" : "upcoming";
 };
 
+// The order categories are listed in publicly. An unrecognised category sorts
+// last rather than first, so adding a category without updating this map cannot
+// silently push it above the completed projects.
+const CATEGORY_RANK = { completed: 0, ongoing: 1, upcoming: 2 };
+
 // Money, in the three figures that matter publicly: what was budgeted, what it
 // was actually awarded for, and what has actually left the treasury.
 const deriveFinancials = (entry, { awards, contracts, invoices, payments }) => {
@@ -175,7 +195,7 @@ const deriveFinancials = (entry, { awards, contracts, invoices, payments }) => {
 
 // Assembles one public project view. `detailed` adds the per-record breakdown
 // the detail page needs; the list view omits it to keep responses small.
-const buildProject = (entry, chain, { detailed = false } = {}) => {
+const buildProject = (entry, chain, { detailed = false, modeNames = null } = {}) => {
   const phase = derivePhase(chain);
   const category = deriveCategory(phase, chain);
   const phaseIndex = PHASE_ORDER.indexOf(phase);
@@ -195,7 +215,8 @@ const buildProject = (entry, chain, { detailed = false } = {}) => {
     phaseLabel: LIFECYCLE_PHASES[phaseIndex]?.label ?? "Planning",
     // Completion is the last phase, so a project at index 7 of 8 reads 100%.
     progressPercent: Math.round(((phaseIndex + 1) / PHASE_ORDER.length) * 100),
-    procurementMode: rfq?.mode?.name ?? entry.procurementMode,
+    procurementMode:
+      rfq?.mode?.name ?? modeNames?.get(entry.procurementMode) ?? entry.procurementMode,
     fiscalYear: entry.fiscalYear,
     targetStartQuarter: entry.targetStartQuarter,
     targetCompletionQuarter: entry.targetCompletionQuarter,
@@ -339,10 +360,28 @@ export const listPublicProjects = async ({ search, category, fiscalYear, departm
     order: [["updatedAt", "DESC"]],
   });
 
-  const chain = await loadChain(entries.map((entry) => entry.id));
+  const [chain, modeNames] = await Promise.all([
+    loadChain(entries.map((entry) => entry.id)),
+    loadModeNames(),
+  ]);
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
-  const projects = entries.map((entry) => buildProject(entry, chainFor(entry.id, grouped), { detailed }));
+  const projects = entries.map((entry) =>
+    buildProject(entry, chainFor(entry.id, grouped), { detailed, modeNames })
+  );
+
+  // Completed projects lead the list: a finished procurement is the one with a
+  // full record behind it — award, contract, deliveries and payments all
+  // published — so it is what a visitor arriving to check on the municipality
+  // can actually read end to end. Ongoing follows, and upcoming last, since an
+  // upcoming project is so far only a line in the plan.
+  //
+  // Sorted after assembly because `category` is derived from the record chain
+  // rather than stored on the row, so it cannot be an ORDER BY. Array#sort is
+  // stable, so within a category the `updatedAt DESC` order set by the query
+  // above is preserved — most recently touched first.
+  const rank = (project) => CATEGORY_RANK[project.category] ?? Number.MAX_SAFE_INTEGER;
+  projects.sort((a, b) => rank(a) - rank(b));
 
   // Category is derived, not stored, so it is filtered after assembly.
   return category && category !== "all"
@@ -360,10 +399,10 @@ export const getPublicProject = async (id) => {
   });
   if (!entry) return null;
 
-  const chain = await loadChain([entry.id]);
+  const [chain, modeNames] = await Promise.all([loadChain([entry.id]), loadModeNames()]);
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
-  return buildProject(entry, chainFor(entry.id, grouped), { detailed: true });
+  return buildProject(entry, chainFor(entry.id, grouped), { detailed: true, modeNames });
 };
 
 // Aggregate figures for the portal header, computed over the same published set

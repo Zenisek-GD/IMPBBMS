@@ -103,7 +103,7 @@ const layout = ({ heading, bodyHtml, footerNote }) => `
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
     <tr>
       <td style="padding:18px 28px;background:#0f2740;">
-        <span style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:-0.01em;">Procurenance</span>
+        <span style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:-0.01em;">ProcureNance</span>
         <span style="color:#93a7bd;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;padding-left:10px;">Municipal Procurement</span>
       </td>
     </tr>
@@ -132,7 +132,7 @@ const paragraph = (text) =>
 const salutation = (name) => (name ? `Dear ${name},` : "Dear Sir/Madam,");
 
 const AUTOMATED_FOOTER =
-  "This is a system-generated message from the Procurenance Municipal Procurement System. " +
+  "This is a system-generated message from the ProcureNance Municipal Procurement System. " +
   "Please do not reply to this address. Should you have received this message in error, " +
   "kindly notify the Bids and Awards Committee Secretariat.";
 
@@ -148,14 +148,14 @@ export const sendActivationInvitation = async ({
   expiresInHours,
   invitedBy,
 }) => {
-  const subject = "Activation of your Procurenance bidder account";
+  const subject = "Activation of your ProcureNance bidder account";
 
   const text = [
     salutation(contactName),
     "",
     `This is to inform you that the bidder registration submitted on behalf of ${businessName}`,
     "has been reviewed and approved. Accordingly, an account has been created for you in the",
-    "Procurenance Municipal Procurement System.",
+    "ProcureNance Municipal Procurement System.",
     "",
     "To activate the account, please access the link below and set your own password:",
     "",
@@ -182,7 +182,7 @@ export const sendActivationInvitation = async ({
       paragraph(
         "This is to inform you that the bidder registration submitted on behalf of " +
           `<strong>${escapeHtml(businessName)}</strong> has been reviewed and approved. ` +
-          "Accordingly, an account has been created for you in the Procurenance Municipal " +
+          "Accordingly, an account has been created for you in the ProcureNance Municipal " +
           "Procurement System."
       ),
       paragraph(
@@ -234,7 +234,7 @@ const OTP_INTROS = {
 
 export const sendOtpEmail = async ({ to, name, code, purpose, purposeLabel, expiresInMinutes }) => {
   const reason = OTP_INTROS[purpose] ?? `to confirm your ${purposeLabel}`;
-  const subject = `Procurenance verification code: ${code}`;
+  const subject = `ProcureNance verification code: ${code}`;
 
   const text = [
     salutation(name),
@@ -288,7 +288,7 @@ export const sendOtpEmail = async ({ to, name, code, purpose, purposeLabel, expi
 // made by someone other than the account holder does not go unnoticed.
 // ─────────────────────────────────────────────────────────────────────────────
 export const sendActivationCompleteEmail = async ({ to, name, businessName }) => {
-  const subject = "Confirmation of activation of your Procurenance bidder account";
+  const subject = "Confirmation of activation of your ProcureNance bidder account";
 
   const text = [
     salutation(name),
@@ -329,7 +329,7 @@ export const sendActivationCompleteEmail = async ({ to, name, businessName }) =>
 
 export const sendPasswordChangedEmail = async ({ to, name, at, ipAddress, wasReset }) => {
   const what = wasReset ? "reset" : "changed";
-  const subject = `Your Procurenance password was ${what}`;
+  const subject = `Your ProcureNance password was ${what}`;
 
   const when = new Date(at).toLocaleString("en-PH", {
     dateStyle: "medium",
@@ -340,7 +340,7 @@ export const sendPasswordChangedEmail = async ({ to, name, at, ipAddress, wasRes
   const text = [
     salutation(name),
     "",
-    `This is to notify you that the password on your Procurenance account was ${what} on`,
+    `This is to notify you that the password on your ProcureNance account was ${what} on`,
     `${when}${ipAddress ? `, from IP address ${ipAddress}` : ""}.`,
     "",
     "If you authorized this change, no further action is required on your part.",
@@ -357,7 +357,7 @@ export const sendPasswordChangedEmail = async ({ to, name, at, ipAddress, wasRes
     bodyHtml: [
       paragraph(salutation(name ? escapeHtml(name) : null)),
       paragraph(
-        `This is to notify you that the password on your Procurenance account was ${what} on ` +
+        `This is to notify you that the password on your ProcureNance account was ${what} on ` +
           `<strong>${escapeHtml(when)}</strong>` +
           (ipAddress ? `, from IP address <strong>${escapeHtml(ipAddress)}</strong>.` : ".")
       ),
@@ -448,7 +448,7 @@ export const sendIntakeAcknowledgementEmail = async ({
 export const sendPasswordResetEmail = async ({ to, resetUrl, expiresInMinutes }) =>
   deliver({
     to,
-    subject: "Reset of your Procurenance password",
+    subject: "Reset of your ProcureNance password",
     text:
       `Please access the link below to reset your password. It shall remain valid for ` +
       `${expiresInMinutes} minutes.\n\n${resetUrl}\n`,

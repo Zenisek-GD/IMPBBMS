@@ -98,7 +98,7 @@ export default function PublicHeader({ lguName, systemName }) {
         <Link to="/" className="col-start-1 flex min-w-0 items-center">
           <div className="min-w-0">
             <p className="truncate text-[16px] font-semibold tracking-[-0.015em] text-navy">
-              {systemName || 'Procurenance'}
+              {systemName || 'ProcureNance'}
             </p>
             <p className="truncate text-[11.5px] text-text-faint">
               {lguName ?? 'Municipal Transparency Portal'}

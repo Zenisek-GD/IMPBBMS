@@ -109,17 +109,44 @@ export const getProject = async (req, res) => {
 const ACTION_LABELS = {
   "app.transition": "Annual Procurement Plan",
   "pr.transition": "Purchase Requisition",
+  "pr.mode.determined": "Procurement method decided",
   "rfq.published": "Invitation to Bid published",
+  "observers.invited": "Observers invited",
   "bids.opened": "Bids opened",
   "evaluation.submitted": "Bid evaluation submitted",
   "evaluation.closed": "Evaluation concluded",
   "award.recommended": "Award recommended",
   "award.approved": "Notice of Award approved",
   "contract.signed": "Contract signed",
+  "contract.ntp.issued": "Notice to Proceed issued",
   "delivery.inspected": "Delivery inspected",
   "invoice.certified": "Invoice certified",
   "payment.released": "Payment released",
   "document.uploaded": "Document attached",
+};
+
+// Which of the eight published lifecycle stages each action belongs to, so the
+// timeline can be grouped under the same headings as the progress rail rather
+// than presenting one flat run of entries. Keys match LIFECYCLE_PHASES in
+// services/projectLifecycle.js; an action absent here is grouped by the stage
+// of the entry before it, so a new action type degrades to "same stage as the
+// last one" instead of vanishing into an unlabelled group.
+const ACTION_STAGES = {
+  "app.transition": "planning",
+  "pr.transition": "requisition",
+  "pr.mode.determined": "requisition",
+  "rfq.published": "solicitation",
+  "observers.invited": "solicitation",
+  "bids.opened": "bidding",
+  "evaluation.submitted": "evaluation",
+  "evaluation.closed": "evaluation",
+  "award.recommended": "award",
+  "award.approved": "award",
+  "contract.signed": "contract",
+  "contract.ntp.issued": "contract",
+  "delivery.inspected": "completion",
+  "invoice.certified": "completion",
+  "payment.released": "completion",
 };
 
 // Actions where the individual's name is withheld but the role is kept, so the
@@ -136,6 +163,18 @@ const EXCLUDED_ACTIONS = new Set([
   "auth.password.reset",
   "access.denied",
 ]);
+
+// Whole families that are never public, whatever entity they were recorded
+// against. The explicit set above predates MFA and the security console, and
+// listing each new action type individually means a family only stays private
+// for as long as someone remembers to extend the list — so account-security and
+// system-security trails are excluded by prefix instead.
+const EXCLUDED_ACTION_PREFIXES = ["auth.", "security."];
+
+const isPublicAction = (actionType) =>
+  typeof actionType === "string" &&
+  !EXCLUDED_ACTIONS.has(actionType) &&
+  !EXCLUDED_ACTION_PREFIXES.some((prefix) => actionType.startsWith(prefix));
 
 // Status keys are camelCase ("pendingHopeApproval"); the public reads prose.
 // Acronyms are restored afterwards — splitting on case alone turns HOPE (Head
@@ -180,7 +219,7 @@ export const getProjectTimeline = async (req, res) => {
   const roleNames = new Map(roles.map((role) => [role.key, role.name]));
 
   const events = entries
-    .filter((entry) => !EXCLUDED_ACTIONS.has(entry.actionType))
+    .filter((entry) => isPublicAction(entry.actionType))
     .map((entry) => {
       const anonymise = ANONYMISED_ACTIONS.has(entry.actionType);
       const after = entry.afterState ?? {};
@@ -192,6 +231,7 @@ export const getProjectTimeline = async (req, res) => {
         occurredAt: entry.recordedAt,
         action: ACTION_LABELS[entry.actionType] ?? readableStatus(entry.actionType),
         actionType: entry.actionType,
+        stage: ACTION_STAGES[entry.actionType] ?? null,
         summary: entry.summary,
         // Named for accountability, except where blind evaluation forbids it.
         actorName: anonymise ? null : entry.actorName,
@@ -211,7 +251,7 @@ export const getProjectTimeline = async (req, res) => {
   // audited *decision*, but a citizen reading a timeline still expects to see
   // when the contract was drafted or the delivery arrived.
   const milestones = [];
-  const addMilestone = (occurredAt, action, detail) => {
+  const addMilestone = (occurredAt, action, detail, stage) => {
     if (!occurredAt) return;
     milestones.push({
       id: `record-${milestones.length}`,
@@ -219,6 +259,7 @@ export const getProjectTimeline = async (req, res) => {
       occurredAt,
       action,
       actionType: "record.milestone",
+      stage,
       summary: detail,
       actorName: null,
       actorRole: null,
@@ -232,18 +273,34 @@ export const getProjectTimeline = async (req, res) => {
   };
 
   for (const contract of project.records.contracts) {
-    addMilestone(contract.startDate, "Contract commenced", `${contract.contractNo} took effect`);
+    addMilestone(contract.startDate, "Contract commenced", `${contract.contractNo} took effect`, "contract");
   }
   for (const delivery of project.records.deliveries) {
-    addMilestone(delivery.deliveredAt, "Delivery reported", delivery.description ?? "Goods or works delivered");
+    addMilestone(
+      delivery.deliveredAt,
+      "Delivery reported",
+      delivery.description ?? "Goods or works delivered",
+      "completion"
+    );
   }
   for (const payment of project.records.payments) {
-    addMilestone(payment.releasedAt, "Disbursement released", `${payment.disbursementNo}`);
+    addMilestone(payment.releasedAt, "Disbursement released", `${payment.disbursementNo}`, "completion");
   }
 
   const timeline = [...events, ...milestones].sort(
     (a, b) => new Date(a.occurredAt) - new Date(b.occurredAt)
   );
+
+  // Carry the last known stage forward over any entry ACTION_STAGES does not
+  // name, so an action type added later joins the group it chronologically
+  // belongs to instead of forming an "Other" bucket at the end of the page.
+  // Done after the sort, because "the stage before it" only means anything once
+  // the entries are in time order.
+  let carried = project.phases?.[0]?.key ?? null;
+  for (const event of timeline) {
+    if (event.stage) carried = event.stage;
+    else event.stage = carried;
+  }
 
   res.json({
     projectId: project.id,

@@ -15,7 +15,7 @@ import { Role } from "../models/roleModel.js";
 import { generateSecret, verifyToken, buildOtpAuthUri, TOTP_PARAMETERS } from "../services/totp.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import { recordAudit, auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
-import { sessionTtlForRole, serializeUser, userIncludes } from "./authController.js";
+import { sessionTtlForRole, serializeUser, userIncludes, regenerateSession } from "./authController.js";
 
 // Enrolment and verification of the second factor. The rule this file exists to
 // enforce: knowing the password is not enough, and no code path here may be
@@ -116,7 +116,7 @@ export const beginEnrollment = async (req, res) => {
 
   const secret = generateSecret();
   const lgu = await getLguProfile();
-  const issuer = lgu.name || "Procurenance";
+  const issuer = lgu.name || "ProcureNance";
   const uri = buildOtpAuthUri({ secret, account: req.currentUser.email, issuer });
 
   // Replaces any half-finished enrolment. A user who scanned a code, lost the
@@ -369,11 +369,14 @@ export const verifyLoginChallenge = async (req, res) => {
     return res.status(401).json(result);
   }
 
-  // Only now does a real session exist.
-  delete req.session.pendingMfaUserId;
-  delete req.session.pendingMfaExpiresAt;
+  // Only now does a real session exist. Rotate the identifier as the session
+  // crosses from pending to authenticated (regenerate discards the pending
+  // fields with the old session), and record when it authenticated so a later
+  // password change can invalidate it.
+  await regenerateSession(req);
   req.session.userId = user.id;
   req.session.mfaVerified = true;
+  req.session.authAt = Date.now();
   req.session.cookie.maxAge = sessionTtlForRole(user.Role.key);
 
   await recordAudit({

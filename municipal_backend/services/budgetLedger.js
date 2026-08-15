@@ -1,5 +1,6 @@
 import { Op, fn, col } from "sequelize";
 import { Appropriation, Obligation } from "../models/appropriationModel.js";
+import { nextSequenceNo } from "./sequenceNo.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { PrHeader } from "../models/prModel.js";
 import { Department } from "../models/departmentModel.js";
@@ -306,13 +307,11 @@ function emptyTotals() {
 
 // ── Obligation register ──────────────────────────────────────────────────────
 // Issues the ORS number. Sequential per fiscal year, which is how the register
-// is kept on paper.
-export const nextObligationNo = async (fiscalYear) => {
-  const count = await Obligation.count({
-    where: { obligationNo: { [Op.like]: `ORS-${fiscalYear}-%` } },
-  });
-  return `ORS-${fiscalYear}-${String(count + 1).padStart(4, "0")}`;
-};
+// is kept on paper. Derived from the highest number present rather than a row
+// COUNT, so cancelling an obligation cannot make the next one reuse a retired
+// ORS number.
+export const nextObligationNo = (fiscalYear, transaction) =>
+  nextSequenceNo(Obligation, "obligationNo", "ORS", fiscalYear, { transaction });
 
 // Resolves the appropriation a requisition draws on, via its APP entry. A
 // requisition inherits the budget line its plan was charged against — it cannot

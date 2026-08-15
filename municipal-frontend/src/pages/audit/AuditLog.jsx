@@ -172,7 +172,19 @@ export default function AuditLog() {
                   >
                     <td className="px-4 py-3 font-mono text-xs text-text-faint">{entry.sequence}</td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">
-                      {new Date(entry.recordedAt).toLocaleString()}
+                      {/* Explicit 12-hour clock. Bare toLocaleString() inherits
+                          the host locale, which renders a 24-hour ("military")
+                          time on many machines; the options pin it to AM/PM with
+                          the date, so "when" reads the same on every officer's
+                          screen. */}
+                      {new Date(entry.recordedAt).toLocaleString('en-PH', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        hour12: true,
+                      })}
                     </td>
                     {/* The record acted on used to have a column of its own,
                         printed as "Contract#41". It reads better as a subtitle

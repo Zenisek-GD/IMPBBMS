@@ -1,6 +1,7 @@
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
 import { Vendor } from "../models/vendorModel.js";
-import { Contract } from "../models/contractModel.js";
+import { Contract, Delivery } from "../models/contractModel.js";
+import { Bid } from "../models/biddingModel.js";
 import { Invoice } from "../models/paymentModel.js";
 import { User } from "../models/userModel.js";
 import { checksumOf, safeFilename } from "../services/documentStore.js";
@@ -58,10 +59,15 @@ const accessFor = async (req, entityRef, entityId) => {
 
     case "bid": {
       // Bid attachments follow the same disclosure rule as the bid itself, so
-      // they are readable by evaluators and by the bid's owner.
+      // they are readable by evaluators and by the bid's owner — but "the bid's
+      // owner" means THIS bid's vendor, not any vendor. Checking only that the
+      // caller has a vendor profile would let one bidder read, replace or delete
+      // a competitor's bid documents, which are confidential until opening.
+      const bid = await Bid.findByPk(entityId);
+      const isOwner = Boolean(ownVendor) && bid?.vendorId === ownVendor.id;
       return {
-        read: has("bidding.view") || has("bidding.evaluate") || has("bidding.technicalInput") || Boolean(ownVendor),
-        write: Boolean(ownVendor),
+        read: isOwner || has("bidding.view") || has("bidding.evaluate") || has("bidding.technicalInput"),
+        write: isOwner,
       };
     }
 
@@ -75,9 +81,18 @@ const accessFor = async (req, entityRef, entityId) => {
     }
 
     case "delivery": {
+      // A delivery belongs to one contract, which belongs to one vendor. A
+      // supplier may only reach delivery papers on their OWN contract; checking
+      // just that the caller is a vendor would expose another supplier's
+      // delivery and inspection records. Officers keep their permission-based
+      // access.
+      const delivery = await Delivery.findByPk(entityId, {
+        include: [{ model: Contract, as: "contract" }],
+      });
+      const isOwner = Boolean(ownVendor) && delivery?.contract?.vendorId === ownVendor.id;
       return {
-        read: has("delivery.report") || has("contract.view") || Boolean(ownVendor),
-        write: has("delivery.report") || Boolean(ownVendor),
+        read: isOwner || has("delivery.report") || has("contract.view"),
+        write: isOwner || has("delivery.report"),
       };
     }
 
