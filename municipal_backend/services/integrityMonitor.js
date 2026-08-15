@@ -93,10 +93,32 @@ const MATERIAL = (entityRef) => WATCHED[entityRef]?.columns ?? [];
 // database cannot look like tampering. MySQL returns DECIMAL as a string and
 // DATETIME as a Date; hashing the raw value would make the fingerprint depend
 // on which driver path loaded the row.
+//
+// That was always the intent, but the number branch below used to be identical
+// to the fallback, which made the DECIMAL half of it a no-op. The consequence
+// was specific and bad: `Bid.create({ totalBidPrice: 1950000 })` leaves a JS
+// number on the instance the `afterCreate` hook fingerprints, while the sweep
+// re-reads the row and gets the string "1950000.00". `String(1950000)` is
+// "1950000" and `String("1950000.00")` is "1950000.00", so one unchanged row
+// produced two different fingerprints — and every newly created bid, award,
+// contract, payment, appropriation, obligation and requisition raised one bogus
+// "altered outside the system" alert on its first sweep, on precisely the money
+// records this monitor exists to protect. The sweep then re-baselined the row,
+// so each alert fired once and never recurred, which is what made the behaviour
+// look inexplicable rather than systematic.
+//
+// The pattern requires an actual decimal point, so an identifier that merely
+// looks numeric — an ordinance number like "001" — is left exactly as it is.
+// Regression-tested by `integrityMonitor.decimal.test.mjs`.
+const DECIMAL_STRING = /^-?\d+\.\d+$/;
+
 const normalise = (value) => {
   if (value === null || value === undefined) return "\u0000";
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "number") return String(value);
+  // A DECIMAL column arrives as a string from MySQL and as a number on the
+  // instance that just wrote it. Reduce both to one canonical form.
+  if (typeof value === "string" && DECIMAL_STRING.test(value)) return String(Number(value));
   return String(value);
 };
 
