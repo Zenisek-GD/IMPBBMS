@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { Plus, ClipboardList, Info, Lock } from 'lucide-react'
 import * as appApi from '../../api/appEntries'
 import * as financeApi from '../../api/finance'
+import * as planningApi from '../../api/planning'
 import {
   APP_STATUS_LABELS,
   APP_STATUS_TONES,
@@ -33,6 +34,9 @@ const entrySchema = z
   .object({
     projectTitle: z.string().trim().min(1, 'Project title is required'),
     description: z.string().optional(),
+    aipEntryId: z.coerce.number({ message: 'An investment program project is required' }).positive(
+      'Select the investment program project this APP line will procure.'
+    ),
     // An APP entry is a plan to spend appropriated money, so it must name the
     // ordinance line it draws on. The server refuses entries without one.
     appropriationId: z.coerce.number({ message: 'An appropriation line is required' }).positive(
@@ -75,6 +79,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   const [serverError, setServerError] = useState('')
   const [suggestion, setSuggestion] = useState(null)
   const [appropriations, setAppropriations] = useState([])
+  const [aipEntries, setAipEntries] = useState([])
 
   const {
     register,
@@ -93,6 +98,17 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
     financeApi
       .fetchAppropriations({ chargeable: 'true' })
       .then((rows) => !cancelled && setAppropriations(rows))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    planningApi
+      .fetchAipEntries({ fiscalYear: new Date().getFullYear() })
+      .then((rows) => !cancelled && setAipEntries(rows))
       .catch(() => {})
     return () => {
       cancelled = true
@@ -138,6 +154,30 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
     <Modal title={title} onClose={onClose}>
       <form onSubmit={handleSubmit(submit)} noValidate className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
         <FormField label="Project title" error={errors.projectTitle?.message} registration={register('projectTitle')} />
+
+        <div>
+          <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+            Investment program project
+          </label>
+          <select
+            {...register('aipEntryId')}
+            className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+          >
+            <option value="">— select an adopted investment program project —</option>
+            {aipEntries.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.title} ({entry.fiscalYear}) · {peso(entry.estimatedCost)} programmed
+              </option>
+            ))}
+          </select>
+          {errors.aipEntryId && <p className="mt-1 text-xs text-danger">{errors.aipEntryId.message}</p>}
+          {aipEntries.length === 0 && (
+            <p className="mt-1.5 text-xs text-warning">
+              No adopted investment program projects are available for this fiscal year. Create and adopt an AIP
+              project before filing this APP line.
+            </p>
+          )}
+        </div>
 
         {/* The budget line first: everything below is constrained by it. */}
         <div>
@@ -549,6 +589,7 @@ export default function AppEntries() {
           defaultValues={{
             projectTitle: '',
             description: '',
+            aipEntryId: '',
             appropriationId: '',
             abc: '',
             unit: '',
@@ -576,6 +617,7 @@ export default function AppEntries() {
           title={`Edit ${editing.projectTitle}`}
           defaultValues={{
             ...editing,
+            aipEntryId: editing.aipEntryId ?? '',
             description: editing.description ?? '',
             unit: editing.unit ?? '',
             quantity: editing.quantity ?? '',

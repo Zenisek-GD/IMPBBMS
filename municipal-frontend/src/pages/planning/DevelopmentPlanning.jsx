@@ -706,6 +706,9 @@ export default function DevelopmentPlanning() {
   const canAdopt = permissions.has('planning.adoptAip')
 
   const adoptedPlan = plans.find((p) => p.status === 'adopted')
+  const currentYear = new Date().getFullYear()
+  const hasCurrentYearProgram = programs.some((program) => program.fiscalYear === currentYear)
+  const programYearToOpen = hasCurrentYearProgram ? currentYear + 1 : currentYear
 
   return (
     <DashboardPage>
@@ -860,14 +863,10 @@ export default function DevelopmentPlanning() {
               adoptedPlan && (
                 <button
                   type="button"
-                  onClick={() =>
-                    run(() =>
-                      planningApi.createProgram({ fiscalYear: new Date().getFullYear() + 1 })
-                    ).catch(() => {})
-                  }
+                  onClick={() => run(() => planningApi.createProgram({ fiscalYear: programYearToOpen })).catch(() => {})}
                   className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                 >
-                  OPEN NEXT YEAR
+                  {hasCurrentYearProgram ? 'OPEN NEXT YEAR' : `OPEN ${currentYear}`}
                 </button>
               )
             }

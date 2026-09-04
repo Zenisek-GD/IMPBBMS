@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Program Files/**)",
+      "Read(//c//**)",
+      "mcp__33aa132b-55e0-44f6-af12-f67123c0f41d__get_figma_skill",
+      "Bash(node \"/c/Users/Gerald/AppData/Local/Temp/claude/C--Users-Gerald-Desktop-3Year-Capstone-1-IMPBBMS-Capstone/59e89342-093f-4cd8-b52d-56d1318a35c4/scratchpad/probe.js\" \"/c/Users/Gerald/.claude/projects/C--Users-Gerald-Desktop-3Year-Capstone-1-IMPBBMS-Capstone/59e89342-093f-4cd8-b52d-56d1318a35c4/tool-results/mcp-33aa132b-55e0-44f6-af12-f67123c0f41d-get_metadata-1785511829104.txt\")",
+      "Bash(node \"/c/Users/Gerald/AppData/Local/Temp/claude/C--Users-Gerald-Desktop-3Year-Capstone-1-IMPBBMS-Capstone/59e89342-093f-4cd8-b52d-56d1318a35c4/scratchpad/top_frames.js\" \"/c/Users/Gerald/.claude/projects/C--Users-Gerald-Desktop-3Year-Capstone-1-IMPBBMS-Capstone/59e89342-093f-4cd8-b52d-56d1318a35c4/tool-results/mcp-33aa132b-55e0-44f6-af12-f67123c0f41d-get_metadata-1785511829104.txt\")",
+      "mcp__33aa132b-55e0-44f6-af12-f67123c0f41d__get_design_context",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(powershell -Command 'Get-Process | Where-Object { $_.ProcessName -like '\\\\''*mysql*'\\\\'' } | Select-Object ProcessName, Id, Path')",
+      "Bash(powershell -Command \"Get-CimInstance Win32_Process -Filter \\\\\"Name='mysqld.exe'\\\\\" | Select-Object ProcessId, ExecutablePath, CommandLine | Format-List\")",
+      "Bash(\"/c/laragon/bin/mysql/mysql-8.4.3-winx64/bin/mysql.exe\" -h 127.0.0.1 -P 3306 -u root --password= -e \"SELECT 1;\")",
+      "Bash(\"/c/laragon/bin/mysql/mysql-8.4.3-winx64/bin/mysql.exe\" -h 127.0.0.1 -P 3306 -u root --password= -e \"CREATE DATABASE IF NOT EXISTS municipal_backend;\")",
+      "Bash(node seed.js)",
+      "Bash(node index.js)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/api/auth/me)",
+      "mcp__33aa132b-55e0-44f6-af12-f67123c0f41d__get_screenshot",
+      "Bash(curl -sL -o admin.png \"https://www.figma.com/api/mcp/asset/8bc11663-8c85-41be-9384-8229614f9818.png\")",
+      "Bash(curl -sL -o exec.png \"https://www.figma.com/api/mcp/asset/ff8c3d1a-f10d-4e6e-9993-c7ee42033c34.png\")",
+      "WebSearch",
+      "Bash(powershell -Command 'Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }')",
+      "Bash(curl -s -c /tmp/x.txt -X POST http://localhost:3000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"departmentrequester@civicbid.test\",\"password\":\"Passw0rd!\"}')",
+      "Bash(python -c ' *)",
+      "Bash(npm -v)",
+      "Bash(where mysql *)",
+      "Bash(where mysqld *)",
+      "PowerShell(Get-Service | Where-Object { $_.Name -match 'mysql|maria' } | Select-Object Name, Status, DisplayName | Format-Table -AutoSize; \"---\"; @\\('C:\\\\xampp\\\\mysql\\\\bin\\\\mysql.exe','C:\\\\Program Files\\\\MySQL','C:\\\\laragon\\\\bin\\\\mysql','C:\\\\wamp64\\\\bin\\\\mysql','C:\\\\Program Files\\\\MariaDB'\\) | ForEach-Object { if \\(Test-Path $_\\) { \"FOUND: $_\" } else { \"missing: $_\" } })",
+      "PowerShell(Get-ChildItem 'C:\\\\laragon\\\\bin\\\\mysql' -Directory | Select-Object -ExpandProperty Name; \"---services---\"; Get-Service | Where-Object { $_.DisplayName -match 'mysql|maria|laragon' } | Format-Table Name,Status -AutoSize; \"---listening 3306---\"; \\(Get-NetTCPConnection -State Listen -LocalPort 3306 -ErrorAction SilentlyContinue | Measure-Object\\).Count)",
+      "PowerShell(Start-Process -FilePath 'C:\\\\laragon\\\\bin\\\\mysql\\\\mysql-8.4.3-winx64\\\\bin\\\\mysqld.exe' -ArgumentList '--defaults-file=C:\\\\laragon\\\\bin\\\\mysql\\\\mysql-8.4.3-winx64\\\\my.ini' -WindowStyle Hidden; Start-Sleep -Seconds 6; \\(Get-NetTCPConnection -State Listen -LocalPort 3306 -ErrorAction SilentlyContinue | Measure-Object\\).Count)",
+      "PowerShell(& 'C:\\\\laragon\\\\bin\\\\mysql\\\\mysql-8.4.3-winx64\\\\bin\\\\mysql.exe' -u root -e \"SELECT VERSION\\(\\); SHOW DATABASES LIKE 'municipal_backend';\")",
+      "PowerShell(& 'C:\\\\laragon\\\\bin\\\\mysql\\\\mysql-8.4.3-winx64\\\\bin\\\\mysql.exe' -u root -e \"CREATE DATABASE IF NOT EXISTS municipal_backend CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; SHOW DATABASES LIKE 'municipal_backend';\")"
+    ]
+  }
+}
