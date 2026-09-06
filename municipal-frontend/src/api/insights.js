@@ -39,6 +39,8 @@ export const ACTION_LABELS = {
   'auth.mfa.trust.created': 'Trusted 2FA created',
   'auth.mfa.trust.used': 'Trusted 2FA used',
   'auth.mfa.trust.expired': 'Trusted 2FA expired',
+  'auth.mfa.role.enabled': 'Role 2FA Enabled',
+  'auth.mfa.role.disabled': 'Role 2FA Disabled',
   'auth.mfa.policy.enabled': 'Administrator enabled 2FA',
   'auth.mfa.policy.disabled': 'Administrator disabled 2FA',
   'auth.logout': 'Signed out',

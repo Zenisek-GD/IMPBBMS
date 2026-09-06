@@ -165,7 +165,7 @@ export default function MfaEnrollment() {
     <DashboardPage>
       <PageHeader
         title="Set up two-factor authentication"
-        subtitle="Every account here can approve spending, issue documents under the municipality's name, or read the whole procurement record. A password alone is not enough."
+        subtitle="Your assigned role requires authenticator verification. Register your authenticator to continue."
       />
 
       {error && (
@@ -228,7 +228,7 @@ export default function MfaEnrollment() {
               disabled={token.length !== 6 || busy || !enrollment}
               onClick={confirm}
             >
-              {busy ? 'CHECKING…' : 'TURN ON TWO-FACTOR'}
+              {busy ? 'CHECKING…' : 'VERIFY AUTHENTICATOR'}
             </Button>
             <p className="mt-3 text-[11px] text-text-faint">
               The code changes every 30 seconds. If it is rejected, wait for the next one — a code can only

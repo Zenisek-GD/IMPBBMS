@@ -1,4 +1,4 @@
-import { SESSION_DURATION_MS, cookieOptions } from "./authPolicy.js";
+import { SESSION_DURATION_MS, cookieOptions, roleRequiresTwoFactor } from "./authPolicy.js";
 
 export const regenerateSession = (req) =>
   new Promise((resolve, reject) => req.session.regenerate((err) => err ? reject(err) : resolve()));
@@ -9,6 +9,8 @@ export const startLoginSession = async (req, user, { enrollment, trustedUntil = 
   await regenerateSession(req);
   const now = Date.now();
   Object.assign(req.session, {
+    roleId: user.Role.id, roleSessionVersion: user.Role.sessionVersion,
+    mfaRequiredAtLogin: roleRequiresTwoFactor(user.Role),
     userId: user.id, authAt: now, loginSessionExpiresAt: now + SESSION_DURATION_MS,
     twoFactorTrustedUntil: trustedUntil, mfaVerified: verified,
     mfaEnrollmentRequired: enrollmentRequired, mfaEnrollmentId: verified ? enrollment?.id : null,

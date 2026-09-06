@@ -138,46 +138,60 @@ export const redactSecrets = (value, depth = 0) => {
 // chain and make verification ambiguous.
 let writeQueue = Promise.resolve();
 
+const appendAudit = async (payload, transaction) => {
+  const last = await AuditLog.findOne({
+    order: [["sequence", "DESC"]],
+    transaction,
+    lock: transaction.LOCK?.UPDATE,
+  });
+
+  const entry = {
+    sequence: (last?.sequence ?? 0) + 1,
+    actionType: payload.actionType,
+    entityRef: payload.entityRef ?? null,
+    entityId: payload.entityId ?? null,
+    actorId: payload.actorId ?? null,
+    actorName: payload.actorName ?? null,
+    actorRole: payload.actorRole ?? null,
+    outcome: payload.outcome ?? "success",
+    summary: payload.summary ?? null,
+    ipAddress: payload.ipAddress ?? null,
+    // Scrubbed on the way in — see redactSecrets above. The hash is
+    // computed over the redacted form, which is also what is stored, so
+    // verification still holds.
+    beforeState: payload.beforeState ? redactSecrets(payload.beforeState) : null,
+    afterState: payload.afterState ? redactSecrets(payload.afterState) : null,
+    // Defaults to now. The override exists for backfilling historical
+    // activity — importing records from a predecessor system, or seeding
+    // demonstration data — where the entry's real time is not the time it
+    // was written. No controller passes it; every live action is stamped
+    // by the server. The hash covers whatever is stored either way, so a
+    // backfilled entry stays as verifiable as a live one.
+    recordedAt: toStoredPrecision(payload.recordedAt ?? new Date()),
+};
+
+const prevHash = last?.hash ?? GENESIS_HASH;
+return AuditLog.create(
+  { ...entry, prevHash, hash: computeHash(entry, prevHash) },
+  { transaction }
+);
+};
+
+// Reserve the audit queue until policy and audit records commit together.
+// A failed audit write rolls back the security change.
+export const withAuditTransaction = (work) => {
+  const run = () => sequelize.transaction((transaction) =>
+    work(transaction, (payload) => appendAudit(payload, transaction)));
+  const result = writeQueue.then(run, run);
+  writeQueue = result.catch(() => {});
+  return result;
+};
+
 export const recordAudit = (payload) => {
   const run = async () => {
     try {
       return await sequelize.transaction(async (transaction) => {
-        const last = await AuditLog.findOne({
-          order: [["sequence", "DESC"]],
-          transaction,
-          lock: transaction.LOCK?.UPDATE,
-        });
-
-        const entry = {
-          sequence: (last?.sequence ?? 0) + 1,
-          actionType: payload.actionType,
-          entityRef: payload.entityRef ?? null,
-          entityId: payload.entityId ?? null,
-          actorId: payload.actorId ?? null,
-          actorName: payload.actorName ?? null,
-          actorRole: payload.actorRole ?? null,
-          outcome: payload.outcome ?? "success",
-          summary: payload.summary ?? null,
-          ipAddress: payload.ipAddress ?? null,
-          // Scrubbed on the way in — see redactSecrets above. The hash is
-          // computed over the redacted form, which is also what is stored, so
-          // verification still holds.
-          beforeState: payload.beforeState ? redactSecrets(payload.beforeState) : null,
-          afterState: payload.afterState ? redactSecrets(payload.afterState) : null,
-          // Defaults to now. The override exists for backfilling historical
-          // activity — importing records from a predecessor system, or seeding
-          // demonstration data — where the entry's real time is not the time it
-          // was written. No controller passes it; every live action is stamped
-          // by the server. The hash covers whatever is stored either way, so a
-          // backfilled entry stays as verifiable as a live one.
-          recordedAt: toStoredPrecision(payload.recordedAt ?? new Date()),
-        };
-
-        const prevHash = last?.hash ?? GENESIS_HASH;
-        return AuditLog.create(
-          { ...entry, prevHash, hash: computeHash(entry, prevHash) },
-          { transaction }
-        );
+        return appendAudit(payload, transaction);
       });
     } catch (err) {
       // Auditing must never break the action it is recording. A failure here
@@ -266,6 +280,8 @@ export const AUDIT_ACTIONS = {
   MFA_TRUST_CREATED: "auth.mfa.trust.created",
   MFA_TRUST_USED: "auth.mfa.trust.used",
   MFA_TRUST_EXPIRED: "auth.mfa.trust.expired",
+  ROLE_MFA_ENABLED: "auth.mfa.role.enabled",
+  ROLE_MFA_DISABLED: "auth.mfa.role.disabled",
   MFA_POLICY_ENABLED: "auth.mfa.policy.enabled",
   MFA_POLICY_DISABLED: "auth.mfa.policy.disabled",
 

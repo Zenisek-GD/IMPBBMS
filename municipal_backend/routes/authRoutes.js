@@ -50,8 +50,7 @@ router.post("/mfa/enroll", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20
 router.post("/mfa/enroll/confirm", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20 }), confirmEnrollment);
 router.post("/mfa/recovery-codes", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20 }), regenerateRecoveryCodes);
 
-// Switching it off needs the password *and* a current code — either alone would
-// let whoever is standing at an unlocked screen remove the protection.
+// Kept as an explicit denial for older clients; only role policy controls 2FA.
 router.post("/mfa/disable", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 20 }), disableMfa);
 
 // Personal display settings — theme and sidebar state. Rate limited only

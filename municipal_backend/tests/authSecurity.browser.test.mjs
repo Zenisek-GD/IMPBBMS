@@ -29,16 +29,23 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  let enabled = true;
+  const roles = [
+    { id: 1, key: "systemAdministrator", name: "System Administrator", twoFactorRequired: true, twoFactorVersion: 0 },
+    { id: 2, key: "observer", name: "Observer", twoFactorRequired: false, twoFactorVersion: 0 },
+    { id: 3, key: "customRole", name: "Custom Database Role", twoFactorRequired: true, twoFactorVersion: 0 },
+  ];
+  let currentRole = "systemAdministrator";
+  let currentPermissions = [];
+  let lastUpdate;
   let authenticated = true;
   let forceExpired = false;
   let deadline = Date.now() + 120_000;
   let policyWrites = 0;
-  const policy = () => ({ twoFactorEnabled: enabled, require2faOnNewDevice: enabled,
+  const policy = () => ({ roles, requiredRoleCount: roles.filter((role) => role.twoFactorRequired).length,
     trusted2faDurationMinutes: 30, sessionDurationMinutes: 30, automaticSessionLogout: true });
   const user = () => ({
-    id: 1, name: "Browser Test Admin", email: "admin@example.test", role: "systemAdministrator",
-    roleName: "System Administrator", permissions: [], themePreference: "light",
+    id: 1, name: "Browser Test Admin", email: "admin@example.test", role: currentRole,
+    roleName: currentRole, permissions: currentPermissions, themePreference: "light",
     sessionTimeoutMs: 1_800_000, loginSessionExpiresAt: deadline,
     twoFactorTrustedUntil: deadline, serverTime: Date.now(), mfaVerified: true, mfaEnrollmentRequired: false,
   });
@@ -63,8 +70,15 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
     } else if (url.pathname === "/api/security/authentication") {
       if (request.method() === "PATCH") {
         const body = JSON.parse(request.postData());
-        assert.equal(body.confirmDisable, !body.twoFactorEnabled);
-        enabled = body.twoFactorEnabled;
+        assert.ok(Array.isArray(body.roles));
+        assert.equal(body.confirmDisable, body.roles.some((update) => !update.twoFactorRequired));
+        lastUpdate = body;
+        for (const update of body.roles) {
+          const role = roles.find((role) => role.id === update.id);
+          assert.equal(update.expectedVersion, role.twoFactorVersion);
+          role.twoFactorRequired = update.twoFactorRequired;
+          role.twoFactorVersion++;
+        }
         policyWrites++;
       }
       data = policy();
@@ -76,21 +90,84 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
     await request.respond({ status, contentType: "application/json", headers, body: JSON.stringify(data) });
   });
 
+
+  const click = (label) => page.evaluate((label) => {
+    const button = [...document.querySelectorAll('button')].find((button) => button.textContent === label);
+    if (!button) throw new Error("Missing button: " + label);
+    button.click();
+  }, label);
+  const waitSaved = (count) => page.waitForFunction((count) =>
+    document.body.innerText.includes(count + ' of 3 roles currently require'), {}, count);
+  const adminSwitch = '[role="switch"][aria-label="Require 2FA for System Administrator"]';
+  const observerSwitch = '[role="switch"][aria-label="Require 2FA for Observer"]';
+  const customSwitch = '[role="switch"][aria-label="Require 2FA for Custom Database Role"]';
   await page.goto(origin + "/admin/security-settings", { waitUntil: "networkidle0" });
-  await page.waitForSelector('[role="switch"]');
-  assert.equal(await page.$eval('[role="switch"]', (element) => element.getAttribute("aria-checked")), "true");
+  await page.waitForSelector(adminSwitch);
+  assert.equal((await page.$$('[role="switch"]')).length, 3);
+  assert.match(await page.evaluate(() => document.body.innerText), /2 of 3 roles currently require/);
   assert.match(await page.evaluate(() => document.body.innerText), /Automatic Session Logout/);
-  await page.click('[role="switch"]');
+  await click("Select All");
+  assert.equal(await page.$$eval('input[type="checkbox"]', (items) => items.filter((item) => item.checked).length), 3);
+  await click("Clear Selection");
+  assert.equal(await page.$$eval('input[type="checkbox"]', (items) => items.filter((item) => item.checked).length), 0);
+  assert.equal(policyWrites, 0);
+  await page.click('input[aria-label="Select Observer"]');
+  await click("Enable 2FA for Selected Roles");
+  assert.equal(policyWrites, 0);
+  assert.equal(roles[1].twoFactorRequired, false);
+  await click("Save Security Settings");
   await page.waitForSelector('[role="dialog"]');
+  await click("Cancel");
   assert.equal(policyWrites, 0);
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((button) => button.textContent === "Cancel").click());
-  assert.equal(policyWrites, 0);
-  await page.click('[role="switch"]');
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((button) => button.textContent === "Disable 2FA").click());
-  await page.waitForFunction(() => document.querySelector('[role="switch"]')?.getAttribute("aria-checked") === "false");
+  await click("Save Security Settings");
+  await click("Apply on Next Login");
+  await waitSaved(3);
   assert.equal(policyWrites, 1);
-  await page.click('[role="switch"]');
-  await page.waitForFunction(() => document.querySelector('[role="switch"]')?.getAttribute("aria-checked") === "true");
+  assert.equal(lastUpdate.roles.length, 1);
+  assert.equal(lastUpdate.roles[0].id, 2);
+
+  await page.click(adminSwitch);
+  assert.equal(policyWrites, 1);
+  assert.equal(roles[0].twoFactorRequired, true);
+  await click("Save Security Settings");
+  await page.waitForSelector('[role="dialog"]');
+  assert.match(await page.$eval('[role="dialog"]', (element) => element.innerText), /System Administrator/);
+  await click("Cancel");
+  assert.equal(policyWrites, 1);
+  await click("Save Security Settings");
+  await click("Disable 2FA");
+  await waitSaved(2);
+  assert.equal(policyWrites, 2);
+
+  // A mixed save confirms disabling first, then chooses how enabling applies.
+  await page.click(adminSwitch);
+  await page.click(observerSwitch);
+  await page.click(customSwitch);
+  await click("Save Security Settings");
+  await page.waitForSelector('[role="dialog"]');
+  const dialogText = await page.$eval('[role="dialog"]', (element) => element.innerText);
+  assert.match(dialogText, /Observer/);
+  assert.match(dialogText, /Custom Database Role/);
+  await click("Confirm");
+  await page.waitForFunction(() => document.querySelector('[role="dialog"]')?.innerText.includes('Apply Security Change'));
+  assert.equal(policyWrites, 2);
+  await click("Force Re-Authentication Now");
+  await waitSaved(1);
+  assert.equal(policyWrites, 3);
+  assert.equal(lastUpdate.applyMode, "forceReauthentication");
+  assert.equal(lastUpdate.roles.length, 3);
+  await page.setViewport({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await page.setViewport({ width: 1280, height: 900 });
+
+  // A delegated database permission also exposes the route and sidebar link.
+  currentRole = "observer";
+  currentPermissions = ["manage_two_factor_authentication"];
+  await page.goto(origin + "/admin/security-settings", { waitUntil: "networkidle0" });
+  await page.waitForSelector(adminSwitch);
+  assert.ok(await page.$('a[href="/admin/security-settings"]'));
+  currentRole = "systemAdministrator";
+  currentPermissions = [];
 
   forceExpired = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));

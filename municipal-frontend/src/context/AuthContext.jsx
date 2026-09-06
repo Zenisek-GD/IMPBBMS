@@ -110,7 +110,7 @@ export function AuthProvider({ children }) {
     const wake = () => { if (document.visibilityState !== 'hidden') revalidate() }
     // Fast local redirect plus independent server checks, also on resume.
     const timer = setInterval(checkDeadline, 250)
-    const heartbeat = setInterval(revalidate, 30_000)
+    const heartbeat = setInterval(revalidate, 5_000)
     window.addEventListener('focus', wake)
     window.addEventListener('pageshow', wake)
     document.addEventListener('visibilitychange', wake)

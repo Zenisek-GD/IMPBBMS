@@ -236,12 +236,15 @@ function App() {
             <Route path="/dashboard" element={<RoleWorkspace />} />
           </Route>
 
+          <Route element={<RoleRoute allow={['systemAdministrator']} permission="manage_two_factor_authentication" />}>
+            <Route path="/admin/security-settings" element={<AdminSecuritySettings />} />
+          </Route>
+
           <Route element={<RoleRoute allow={['systemAdministrator']} />}>
             <Route path="/admin" element={<RoleWorkspace />} />
             <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/admin/departments" element={<AdminDepartments />} />
             <Route path="/admin/settings" element={<AdminSettings />} />
-            <Route path="/admin/security-settings" element={<AdminSecuritySettings />} />
             {/* Was <AdminSettings /> as well, which made the "Thresholds"
                 sidebar entry a second link to the settings page. */}
             <Route path="/admin/thresholds" element={<AdminThresholds />} />

@@ -8,6 +8,10 @@ import { Department } from "./departmentModel.js";
 export const Role = sequelize.define("Role", {
   key: { type: DataTypes.STRING, allowNull: false, unique: true },
   name: { type: DataTypes.STRING, allowNull: false },
+  twoFactorRequired: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: "two_factor_required" },
+  // Separate revisions invalidate browser trust and, only when requested, sessions.
+  twoFactorVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  sessionVersion: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
 });
 
 // The office a role normally sits in. This only pre-fills the department when

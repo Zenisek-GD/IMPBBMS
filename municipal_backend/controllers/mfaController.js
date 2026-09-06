@@ -17,8 +17,8 @@ import { getLguProfile } from "../models/systemSettingModel.js";
 import { recordAudit, auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { serializeUser, userIncludes } from "./authController.js";
 import { startLoginSession } from "../services/loginSession.js";
-import { credentialVersion, sessionDetails } from "../services/authPolicy.js";
-import { createTrustedDevice, revokeUserTrust, securityAudit, twoFactorEnabled } from "../services/trustedDevices.js";
+import { credentialVersion, sessionDetails, roleRequiresTwoFactor } from "../services/authPolicy.js";
+import { createTrustedDevice, revokeUserTrust, securityAudit } from "../services/trustedDevices.js";
 
 // Enrolment and verification of the second factor. The rule this file exists to
 // enforce: knowing the password is not enough, and no code path here may be
@@ -107,6 +107,7 @@ export const getMfaStatus = async (req, res) => {
     : 0;
 
   res.json({
+    requiredByRole: roleRequiresTwoFactor(req.currentUser.Role),
     enrolled: enrollment?.status === "active",
     pending: enrollment?.status === "pending",
     confirmedAt: enrollment?.confirmedAt ?? null,
@@ -121,11 +122,14 @@ export const getMfaStatus = async (req, res) => {
 
 // ── Enrolment, step 1: issue a secret ────────────────────────────────────────
 export const beginEnrollment = async (req, res) => {
+  if (!roleRequiresTwoFactor(req.currentUser.Role)) {
+    return res.status(403).json({ message: "Your role does not require 2FA. Only a security administrator can change this requirement." });
+  }
   const existing = await MfaEnrollment.findOne({ where: { userId: req.currentUser.id } });
   if (existing?.status === "active") {
     return res.status(409).json({
       message:
-        "Two-factor authentication is already switched on for this account. Turn it off first if you are moving to a new phone.",
+        "An authenticator is already registered. Contact a System Administrator to reset it if you are moving to a new phone.",
     });
   }
 
@@ -192,6 +196,9 @@ export const beginEnrollment = async (req, res) => {
 // Nothing is enforced until this succeeds. Activating on issue alone would lock
 // out anyone whose camera failed or who scanned into the wrong app.
 export const confirmEnrollment = async (req, res) => {
+  if (!roleRequiresTwoFactor(req.currentUser.Role)) {
+    return res.status(403).json({ message: "Your role does not require 2FA. Only a security administrator can change this requirement." });
+  }
   const enrollment = await MfaEnrollment.findOne({ where: { userId: req.currentUser.id } });
   if (!enrollment || enrollment.status !== "pending") {
     return res.status(409).json({ message: "Start enrolment first." });
@@ -272,44 +279,9 @@ export const regenerateRecoveryCodes = async (req, res) => {
   res.json({ recoveryCodes: codes });
 };
 
-// ── Turn it off ──────────────────────────────────────────────────────────────
-// Both the password and a current code. Either alone would mean that whoever
-// walks up to an unlocked screen, or whoever has phished the password, can
-// remove the protection the password was insufficient for in the first place.
-export const disableMfa = async (req, res) => {
-  const enrollment = await MfaEnrollment.findOne({ where: { userId: req.currentUser.id } });
-  if (!enrollment) return res.status(409).json({ message: "Two-factor authentication is not switched on." });
-
-  const user = await User.findByPk(req.currentUser.id);
-  if (!(await user.comparePassword(req.body.password ?? ""))) {
-    await auditFromRequest(req, {
-      actionType: AUDIT_ACTIONS.MFA_DISABLE_REFUSED,
-      entityRef: "user",
-      entityId: user.id,
-      outcome: "denied",
-      summary: `Refused attempt to switch off two-factor for ${user.email} — wrong password`,
-    });
-    return res.status(403).json({ message: "That password is not correct." });
-  }
-
-  const result = await consumeToken(enrollment, req.body.token, { ip: req.ip });
-  if (!result.ok) return res.status(400).json(result);
-
-  await sequelize.transaction(async (transaction) => {
-    await MfaRecoveryCode.destroy({ where: { userId: user.id }, transaction });
-    await revokeUserTrust(user.id, { transaction });
-    await enrollment.destroy({ transaction });
-  });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.MFA_DISABLED,
-    entityRef: "user",
-    entityId: user.id,
-    summary: `${user.name} switched off two-factor authentication`,
-  });
-
-  res.json({ enabled: false });
-};
+// Account holders cannot override their assigned role's security policy.
+export const disableMfa = async (_req, res) =>
+  res.status(403).json({ message: "Two-factor authentication is managed by role in Security Settings. Contact a security administrator." });
 
 // ── Administrator reset ──────────────────────────────────────────────────────
 // The way back in for a user who lost their phone and their recovery codes.
@@ -372,17 +344,23 @@ export const verifyLoginChallenge = async (req, res) => {
   const user = await User.findByPk(pendingId, { include: [{ model: Role }] });
   const enrollment = user ? await MfaEnrollment.findOne({ where: { userId: user.id } }) : null;
   if (!user || user.status !== "active" || enrollment?.status !== "active" ||
+      req.session.pendingRoleId !== user.Role.id ||
+      req.session.pendingRoleSessionVersion !== user.Role.sessionVersion ||
       req.session.pendingCredentialVersion !== credentialVersion(user) ||
       req.session.pendingEnrollmentId !== enrollment.id) {
     delete req.session.pendingMfaUserId;
     return res.status(400).json({ message: "Start again from the sign-in page." });
   }
 
-  if (!(await twoFactorEnabled())) {
+  if (!roleRequiresTwoFactor(user.Role)) {
     await startLoginSession(req, user);
     await securityAudit(req, user, AUDIT_ACTIONS.LOGIN_SUCCESS, "Login successful", { method: "password", twoFactorEnabled: false });
     const full = await User.findByPk(user.id, { include: userIncludes });
     return res.json({ ...serializeUser(full), ...sessionDetails(req) });
+  }
+  if (req.session.pendingRoleVersion !== user.Role.twoFactorVersion) {
+    delete req.session.pendingMfaUserId;
+    return res.status(401).json({ code: "ROLE_SECURITY_CHANGED", message: "Your role security settings changed. Please start sign-in again." });
   }
   const usingRecovery = Boolean(req.body.recoveryCode);
   if (usingRecovery && isLocked(enrollment)) {

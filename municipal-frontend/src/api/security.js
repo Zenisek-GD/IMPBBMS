@@ -69,5 +69,5 @@ export const ALERT_EXPLANATIONS = {
 
 export const fetchAuthenticationSecurity = () =>
   apiClient.get('/security/authentication').then((res) => res.data)
-export const updateAuthenticationSecurity = (twoFactorEnabled, confirmDisable = false) =>
-  apiClient.patch('/security/authentication', { twoFactorEnabled, confirmDisable }).then((res) => res.data)
+export const updateAuthenticationSecurity = (payload) =>
+  apiClient.patch('/security/authentication', payload).then((res) => res.data)

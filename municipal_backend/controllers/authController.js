@@ -9,9 +9,9 @@ import { clearRateLimit } from "../middleware/rateLimitMiddleware.js";
 import { passwordSessionValid } from "../middleware/permissionMiddleware.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
 import { sendPasswordChangedEmail } from "../services/mailer.js";
-import { SESSION_DURATION_MS, PENDING_MFA_TTL_MS, credentialVersion, sessionDetails } from "../services/authPolicy.js";
+import { SESSION_DURATION_MS, PENDING_MFA_TTL_MS, credentialVersion, sessionDetails, roleRequiresTwoFactor } from "../services/authPolicy.js";
 import { startLoginSession, destroyLoginSession, regenerateSession, saveSession } from "../services/loginSession.js";
-import { twoFactorEnabled, findTrustedDevice, securityAudit } from "../services/trustedDevices.js";
+import { findTrustedDevice, securityAudit } from "../services/trustedDevices.js";
 
 export const sessionTtlForRole = () => SESSION_DURATION_MS;
 
@@ -112,7 +112,7 @@ export const login = async (req, res) => {
   clearRateLimit("login", req.ip);
   clearRateLimit("loginAccount", normalised);
 
-  const enabled = await twoFactorEnabled();
+  const enabled = roleRequiresTwoFactor(user.Role);
   const enrollment = enabled ? await MfaEnrollment.findOne({ where: { userId: user.id } }) : null;
   const trusted = enabled && enrollment?.status === "active"
     ? await findTrustedDevice(req, user, enrollment) : null;
@@ -123,6 +123,9 @@ export const login = async (req, res) => {
     req.session.pendingMfaExpiresAt = Date.now() + PENDING_MFA_TTL_MS;
     req.session.pendingCredentialVersion = credentialVersion(user);
     req.session.pendingEnrollmentId = enrollment.id;
+    req.session.pendingRoleId = user.Role.id;
+    req.session.pendingRoleVersion = user.Role.twoFactorVersion;
+    req.session.pendingRoleSessionVersion = user.Role.sessionVersion;
     req.session.cookie.maxAge = PENDING_MFA_TTL_MS;
     await saveSession(req);
     await securityAudit(req, user, AUDIT_ACTIONS.MFA_CHALLENGE_ISSUED,
@@ -135,7 +138,7 @@ export const login = async (req, res) => {
   }
 
   // Unenrolled accounts receive only a restricted enrollment session.
-  // With the system policy OFF, even enrolled accounts skip the challenge.
+  // With the assigned role policy OFF, even enrolled accounts skip the challenge.
   await startLoginSession(req, user, {
     enrollment, verified: Boolean(trusted),
     trustedUntil: trusted ? new Date(trusted.twoFactorTrustedUntil).getTime() : null,

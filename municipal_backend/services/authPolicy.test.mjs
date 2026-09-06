@@ -6,9 +6,10 @@ import {
 } from "./authPolicy.js";
 
 const at = Date.parse("2030-01-01T10:00:00Z");
-const user = { id: 1, password: "stored-bcrypt-hash" };
+const user = { id: 1, password: "stored-bcrypt-hash", Role: { id: 3, twoFactorVersion: 2 } };
 const enrollment = { id: 7, status: "active" };
 const row = {
+  roleId: 3, roleVersion: 2,
   userId: 1, enrollmentId: 7, credentialVersion: credentialVersion(user),
   verifiedAt: new Date(at), twoFactorTrustedUntil: new Date(at + TRUST_DURATION_MS),
 };
@@ -22,6 +23,9 @@ test("trust survives relogin, is account/enrollment-specific, and expires at the
   assert.equal(trustedRecordValid(row, { ...user, password: "changed" }, enrollment, at), false);
   assert.equal(trustedRecordValid(row, user, { ...enrollment, id: 8 }, at), false);
   assert.equal(trustedRecordValid(row, user, { ...enrollment, status: "pending" }, at), false);
+  assert.equal(trustedRecordValid(row, { ...user, Role: { id: 4, twoFactorVersion: 2 } }, enrollment, at), false);
+  assert.equal(trustedRecordValid(row, { ...user, Role: { id: 3, twoFactorVersion: 3 } }, enrollment, at), false);
+  assert.equal(trustedRecordValid({ ...row, roleId: null, roleVersion: null }, user, enrollment, at), false);
   assert.equal(new Date(row.twoFactorTrustedUntil).getTime(), at + TRUST_DURATION_MS);
 });
 

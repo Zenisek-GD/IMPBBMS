@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet } from 'react-router-dom'
-import { LogOut } from 'lucide-react'
+import { LogOut, ShieldCheck } from 'lucide-react'
 import Sidebar from '../components/layout/Sidebar'
 import TopNavBar from '../components/layout/TopNavBar'
 import Modal from '../components/ui/Modal'
@@ -17,6 +17,7 @@ import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts'
 export default function AppShell() {
   const { user, logout } = useAuth()
   const nav = ROLE_NAV[user?.role] ?? ROLE_NAV.departmentRequester
+  const canManageTwoFactor = user?.role === 'systemAdministrator' || user?.permissions?.includes('manage_two_factor_authentication')
 
   const [lguName, setLguName] = useState('')
   const [systemName, setSystemName] = useState('')
@@ -29,8 +30,12 @@ export default function AppShell() {
   const effectiveSections = useMemo(() => {
     const roleKey = user?.role ?? 'departmentRequester'
     const overrides = shortcutOverrides?.[roleKey]
-    return applyShortcutOverrides(nav.sections, overrides)
-  }, [nav.sections, shortcutOverrides, user?.role])
+    const sections = applyShortcutOverrides(nav.sections, overrides)
+    if (!canManageTwoFactor || sections.some((section) => section.items.some((item) => item.href === '/admin/security-settings'))) return sections
+    return [...sections, { heading: 'Security', items: [
+      { label: 'Security Settings', href: '/admin/security-settings', icon: ShieldCheck },
+    ] }]
+  }, [nav.sections, shortcutOverrides, user?.role, canManageTwoFactor])
 
   // Bind Alt+<key> shortcuts for every sidebar destination in this role.
   useKeyboardShortcuts(effectiveSections)

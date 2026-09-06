@@ -12,7 +12,7 @@ process.env.DB_NAME = scratch;
 process.env.NODE_ENV = "test";
 process.env.MFA_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
 
-test("HTTP authentication security against isolated MySQL", { timeout: 120_000 }, async (t) => {
+test("HTTP authentication security against isolated MySQL", { timeout: 600_000 }, async (t) => {
   const adminDb = await mysql.createConnection({
     host: process.env.DB_HOST ?? "127.0.0.1", port: Number(process.env.DB_PORT ?? 3306),
     user: process.env.DB_USER ?? "root", password: process.env.DB_PASSWORD ?? "",
@@ -39,6 +39,27 @@ test("HTTP authentication security against isolated MySQL", { timeout: 120_000 }
   const { trustCookieName, hashToken } = await import("../services/authPolicy.js");
   const { clearRateLimit } = await import("../middleware/rateLimitMiddleware.js");
   await sequelize.sync();
+  await t.test("additive role migration preserves legacy OFF and repeated runs preserve role choices", async () => {
+    const { migrateRoleSecurity } = await import("../services/migrateRoleSecurity.js");
+    const legacyRole = await models.Role.create({ key: "legacy", name: "Legacy Role" });
+    await models.SystemSetting.create({ key: "security.twoFactorEnabled", value: "false" });
+    const qi = sequelize.getQueryInterface();
+    for (const column of ["two_factor_required", "twoFactorVersion", "sessionVersion"]) {
+      await qi.removeColumn(models.Role.getTableName(), column);
+    }
+    for (const column of ["roleId", "roleVersion"]) await qi.removeColumn(models.TrustedDevice.getTableName(), column);
+    await migrateRoleSecurity();
+    await legacyRole.reload();
+    assert.equal(legacyRole.twoFactorRequired, false);
+    assert.equal(legacyRole.twoFactorVersion, 0);
+    await legacyRole.update({ twoFactorRequired: true, twoFactorVersion: 3 });
+    await migrateRoleSecurity();
+    await legacyRole.reload();
+    assert.equal(legacyRole.twoFactorRequired, true);
+    assert.equal(legacyRole.twoFactorVersion, 3);
+    assert.equal(await models.Permission.count({ where: { key: "manage_two_factor_authentication" } }), 1);
+    await legacyRole.destroy();
+  });
   const role = await models.Role.create({ name: "System Administrator", key: "systemAdministrator" });
   const externalRole = await models.Role.create({ name: "Vendor", key: "vendor" });
   const password = "IntegrationPassw0rd!";
@@ -86,6 +107,9 @@ test("HTTP authentication security against isolated MySQL", { timeout: 120_000 }
     assert.equal(result.status, 200, JSON.stringify(result.body));
     return result;
   };
+  t.beforeEach(() => {
+    for (const bucket of ["mfaChallenge", "login", "mfaEnroll"]) clearRateLimit(bucket, "127.0.0.1");
+  });
   const MINUTE = 60_000;
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2030-01-01T10:00:00Z") });
 
@@ -169,26 +193,168 @@ test("HTTP authentication security against isolated MySQL", { timeout: 120_000 }
     assert.equal(await models.TrustedDevice.count({ where: { userId: person.user.id } }), 0);
   });
 
-  await t.test("policy defaults ON, only admin can change it, OFF requires confirmation and keeps session expiry", async () => {
+
+  const configure = async (jar, changes, options = {}) => {
+    const updates = [];
+    for (const [targetRole, required] of changes) {
+      await targetRole.reload();
+      updates.push({ id: targetRole.id, twoFactorRequired: required, expectedVersion: targetRole.twoFactorVersion });
+    }
+    return request(jar, "PATCH", "/security/authentication", {
+      roles: updates, confirmDisable: true, applyMode: "nextLogin", ...options,
+    });
+  };
+
+  await t.test("dynamic roles, independent policy, confirmation, permissions, and password-only expiry", async () => {
     const admin = await fixture("policy");
     const jar = browser();
     await signIn(jar, admin);
-    assert.equal((await request(jar, "GET", "/security/authentication")).body.twoFactorEnabled, true);
-    assert.equal((await request(jar, "PATCH", "/security/authentication", { twoFactorEnabled: false })).body.code, "CONFIRMATION_REQUIRED");
-    assert.equal((await request(jar, "PATCH", "/security/authentication", { twoFactorEnabled: false, confirmDisable: true }, { origin: "https://attacker.example" })).status, 403);
-    assert.equal((await request(jar, "PATCH", "/security/authentication", { twoFactorEnabled: false, confirmDisable: true })).status, 200);
-    assert.equal(await models.TrustedDevice.count(), 0);
+    const custom = await models.Role.create({ key: "customProcurement", name: "Custom Procurement Office" });
+    const policy = await request(jar, "GET", "/security/authentication");
+    assert.equal(policy.body.roles.length, await models.Role.count());
+    assert.ok(policy.body.roles.some((entry) => entry.id === custom.id && entry.name === custom.name));
+    const payload = { roles: [{ id: externalRole.id, twoFactorRequired: false, expectedVersion: 0 }] };
+    assert.equal((await request(jar, "PATCH", "/security/authentication", payload)).body.code, "CONFIRMATION_REQUIRED");
+    assert.equal((await request(jar, "PATCH", "/security/authentication", { ...payload, confirmDisable: true },
+      { origin: "https://attacker.example" })).status, 403);
+    const adminTrust = await models.TrustedDevice.findOne({ where: { userId: admin.user.id } });
+    assert.equal((await configure(jar, [[externalRole, false]])).status, 200);
+    assert.ok(await models.TrustedDevice.findByPk(adminTrust.id));
+    assert.equal((await role.reload()).twoFactorRequired, true);
+    assert.equal((await custom.reload()).twoFactorRequired, true);
 
     const vendor = await fixture("vendor", true, externalRole.id);
     const externalBrowser = browser();
     const result = await login(externalBrowser, vendor);
     assert.equal(result.body.mfaRequired, undefined);
     assert.equal(result.body.loginSessionExpiresAt, Date.now() + 30 * MINUTE);
+    assert.equal(result.body.twoFactorTrustedUntil, null);
     assert.equal(result.body.mfaEnrollmentRequired, false);
-    assert.equal((await request(externalBrowser, "PATCH", "/security/authentication", { twoFactorEnabled: true })).status, 403);
-    assert.equal((await request(jar, "PATCH", "/security/authentication", { twoFactorEnabled: true })).status, 200);
-    assert.equal((await request(externalBrowser, "GET", "/auth/me")).body.code, "MFA_REQUIRED");
-    assert.equal((await login(externalBrowser, vendor)).body.mfaRequired, true);
+    const unenrolled = await fixture("vendorUnenrolled", false, externalRole.id);
+    const plain = await login(browser(), unenrolled);
+    assert.equal(plain.body.mfaEnrollmentRequired, false);
+    assert.equal(plain.body.mfaRequired, undefined);
+    assert.equal((await request(externalBrowser, "GET", "/security/authentication")).status, 403);
+    assert.equal((await configure(externalBrowser, [[externalRole, true]])).status, 403);
+    assert.equal((await request(externalBrowser, "POST", "/auth/mfa/disable", {})).status, 403);
+    assert.equal((await request(externalBrowser, "POST", "/auth/mfa/enroll", {})).status, 403);
+
+    const permission = await models.Permission.findOne({ where: { key: "manage_two_factor_authentication" } });
+    await models.RolePermission.create({ roleId: externalRole.id, permissionId: permission.id });
+    assert.equal((await request(externalBrowser, "GET", "/security/authentication")).status, 200);
+    assert.equal((await configure(externalBrowser, [[custom, false]])).status, 200);
+    await models.RolePermission.destroy({ where: { roleId: externalRole.id, permissionId: permission.id } });
+    assert.equal((await request(externalBrowser, "GET", "/security/authentication")).status, 403);
+    t.mock.timers.tick(30 * MINUTE);
+    assert.equal((await request(externalBrowser, "GET", "/auth/me")).body.code, "SESSION_EXPIRED");
+  });
+
+  await t.test("next-login enable preserves existing sessions, revokes only that role's trust, and challenges new logins", async () => {
+    const admin = await fixture("nextLoginAdmin");
+    const jar = browser();
+    await signIn(jar, admin);
+    const vendor = await fixture("nextLoginVendor", true, externalRole.id);
+    const active = browser();
+    const old = await login(active, vendor);
+    assert.equal((await configure(jar, [[externalRole, true]], { applyMode: undefined })).body.code, "APPLY_MODE_REQUIRED");
+    assert.equal((await configure(jar, [[externalRole, true]])).status, 200);
+    const retained = await request(active, "GET", "/auth/me");
+    assert.equal(retained.status, 200);
+    assert.equal(retained.body.loginSessionExpiresAt, old.body.loginSessionExpiresAt);
+    const pending = browser();
+    assert.equal((await login(pending, vendor)).body.mfaRequired, true);
+    assert.equal((await verify(pending, vendor)).status, 200);
+    const trust = await models.TrustedDevice.findOne({ where: { userId: vendor.user.id } });
+    assert.ok(trust);
+    const adminTrust = await models.TrustedDevice.findOne({ where: { userId: admin.user.id } });
+    assert.equal((await configure(jar, [[externalRole, false]])).status, 200);
+    assert.equal(await models.TrustedDevice.findByPk(trust.id), null);
+    assert.ok(await models.TrustedDevice.findByPk(adminTrust.id));
+    await request(pending, "POST", "/auth/logout");
+    const off = await login(pending, vendor);
+    assert.equal(off.body.mfaRequired, undefined);
+    assert.equal((await configure(jar, [[externalRole, true]])).status, 200);
+    await request(pending, "POST", "/auth/logout");
+    assert.equal((await login(pending, vendor)).body.mfaRequired, true);
+    // A role switched OFF while a challenge is pending now accepts the password proof.
+    assert.equal((await configure(jar, [[externalRole, false]])).status, 200);
+    assert.equal((await request(pending, "POST", "/auth/mfa/challenge", {})).body.mfaVerified, false);
+  });
+
+  await t.test("force reauthentication revokes all role sessions, blocks stale writes, and preserves other roles", async () => {
+    const admin = await fixture("forceAdmin");
+    const jar = browser();
+    await signIn(jar, admin);
+    const vendor = await fixture("forceVendor", true, externalRole.id);
+    const first = browser();
+    const second = browser();
+    await login(first, vendor);
+    await login(second, vendor);
+    const sid = decodeURIComponent(first.get("connect.sid")).slice(2).split(".")[0];
+    const stale = (await models.LoginSession.findByPk(hashToken(sid))).data;
+    const result = await configure(jar, [[externalRole, true]], { applyMode: "forceReauthentication" });
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    const tombstone = await models.LoginSession.findByPk(hashToken(sid));
+    assert.equal(tombstone.endReason, "rolePolicy");
+    await new Promise((resolve, reject) => store.set(sid, stale, (error) => error ? reject(error) : resolve()));
+    assert.equal((await request(first, "GET", "/auth/me")).status, 401);
+    assert.equal((await request(second, "GET", "/auth/me")).status, 401);
+    assert.equal((await request(jar, "GET", "/auth/me")).status, 200);
+    assert.equal((await login(first, vendor)).body.mfaRequired, true);
+    const event = await models.AuditLog.findOne({
+      where: { entityRef: "role", entityId: externalRole.id, actionType: "auth.mfa.role.enabled" },
+      order: [["sequence", "DESC"]],
+    });
+    assert.equal(event.beforeState.twoFactorRequired, false);
+    assert.equal(event.afterState.twoFactorRequired, true);
+    assert.equal(event.actorId, admin.user.id);
+    assert.equal(event.afterState.revokedSessions >= 2, true);
+  });
+
+  await t.test("bulk updates reject stale or invalid roles and roll back if the audit cannot be written", async () => {
+    const admin = await fixture("bulkAdmin");
+    const jar = browser();
+    await signIn(jar, admin);
+    const a = await models.Role.create({ key: "bulkA", name: "Bulk A" });
+    const b = await models.Role.create({ key: "bulkB", name: "Bulk B" });
+    const stale = { roles: [{ id: a.id, twoFactorRequired: false, expectedVersion: 0 }], confirmDisable: true };
+    assert.equal((await configure(jar, [[a, false], [b, false]])).status, 200);
+    assert.equal((await request(jar, "PATCH", "/security/authentication", stale)).status, 409);
+    assert.equal((await request(jar, "PATCH", "/security/authentication", { roles: [
+      { id: a.id, twoFactorRequired: true, expectedVersion: 1 },
+      { id: 2147483647, twoFactorRequired: true, expectedVersion: 0 },
+    ], applyMode: "nextLogin" })).status, 400);
+    assert.equal((await a.reload()).twoFactorRequired, false);
+    assert.equal((await request(jar, "PATCH", "/security/authentication", { twoFactorEnabled: false, confirmDisable: true })).status, 400);
+    assert.equal((await request(jar, "PATCH", "/security/authentication", { ...stale, roles: [stale.roles[0], stale.roles[0]] })).status, 400);
+    models.AuditLog.addHook("beforeCreate", "rejectRoleAudit", (entry) => {
+      if (entry.actionType.startsWith("auth.mfa.role.")) throw new Error("Simulated audit failure");
+    });
+    try {
+      assert.equal((await configure(jar, [[a, true], [b, true]])).status, 500);
+      assert.equal((await a.reload()).twoFactorRequired, false);
+      assert.equal((await b.reload()).twoFactorRequired, false);
+      assert.equal(a.twoFactorVersion, 1);
+    } finally { models.AuditLog.removeHook("beforeCreate", "rejectRoleAudit"); }
+    const outcomes = await Promise.all([
+      request(jar, "PATCH", "/security/authentication", { roles: [{ id: a.id, twoFactorRequired: true, expectedVersion: 1 }], applyMode: "nextLogin" }),
+      request(jar, "PATCH", "/security/authentication", { roles: [{ id: a.id, twoFactorRequired: true, expectedVersion: 1 }], applyMode: "nextLogin" }),
+    ]);
+    assert.deepEqual(outcomes.map((result) => result.status).sort(), [200, 409]);
+    const events = await models.AuditLog.findAll({ where: { actionType: "auth.mfa.role.disabled", entityRef: "role" } });
+    assert.ok(events.some((entry) => entry.entityId === a.id));
+    assert.ok(events.some((entry) => entry.entityId === b.id));
+    const { verifyChain } = await import("../services/auditLog.js");
+    assert.equal((await verifyChain()).intact, true);
+  });
+
+  await t.test("role reassignment invalidates the session and cannot carry browser trust across roles", async () => {
+    const person = await fixture("reassignment");
+    const jar = browser();
+    await signIn(jar, person);
+    await person.user.update({ roleId: externalRole.id });
+    assert.equal((await request(jar, "GET", "/auth/me")).status, 401);
+    assert.equal((await login(jar, person)).body.mfaRequired, true);
   });
 
   await t.test("mandatory enrollment creates trust only after a correct code; password changes revoke it", async () => {
@@ -240,5 +406,5 @@ test("HTTP authentication security against isolated MySQL", { timeout: 120_000 }
   assert.ok(!log.includes("IntegrationPassw0rd"));
   assert.ok(!log.includes('"encryptedSecret"'));
   assert.ok(log.includes("auth.mfa.trust.used"));
-  assert.ok(log.includes("auth.mfa.policy.disabled"));
+  assert.ok(log.includes("auth.mfa.role.disabled"));
 });

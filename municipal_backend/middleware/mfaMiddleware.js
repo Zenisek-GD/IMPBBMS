@@ -1,5 +1,7 @@
 import { MfaEnrollment } from "../models/mfaModel.js";
-import { twoFactorEnabled } from "../services/trustedDevices.js";
+import { User } from "../models/userModel.js";
+import { Role } from "../models/roleModel.js";
+import { roleRequiresTwoFactor } from "../services/authPolicy.js";
 import { destroyLoginSession } from "../services/loginSession.js";
 
 const allowed = (path) => [
@@ -9,18 +11,27 @@ const allowed = (path) => [
 
 export const requireMfaEnrollment = async (req, res, next) => {
   if (!req.session?.userId || req.path === "/api/auth/login" || req.path === "/api/auth/logout") return next();
-  if (!(await twoFactorEnabled())) {
+  const user = await User.findByPk(req.session.userId, { include: [Role] });
+  if (!user || user.status !== "active" || !user.Role ||
+      (req.session.roleId != null && req.session.roleId !== user.roleId) ||
+      (req.session.roleSessionVersion ?? 0) !== user.Role.sessionVersion) {
+    await destroyLoginSession(req, res);
+    return res.status(401).json({ code: "ROLE_SECURITY_CHANGED", message: "Your role or its security settings changed. Please log in again." });
+  }
+  if (!roleRequiresTwoFactor(user.Role)) {
     req.session.mfaEnrollmentRequired = false;
+    req.session.mfaRequiredAtLogin = false;
     return next();
   }
-  const enrollment = await MfaEnrollment.findOne({ where: { userId: req.session.userId } });
+  // Next-login changes preserve password-only sessions until their fixed deadline.
+  // Forced changes are enforced above with the independent session revision.
+  if (req.session.mfaRequiredAtLogin === false) return next();
+  const enrollment = await MfaEnrollment.findOne({ where: { userId: user.id } });
   if (req.session.mfaVerified && (!enrollment || req.session.mfaEnrollmentId !== enrollment.id)) {
     await destroyLoginSession(req, res);
     return res.status(401).json({ code: "MFA_REQUIRED", message: "Your authenticator was reset. Please log in again." });
   }
   if (enrollment?.status === "active") {
-    // Never let enrollment on another browser, or an administrator reset,
-    // silently turn a password-only session into a verified one.
     if (!req.session.mfaVerified || req.session.mfaEnrollmentId !== enrollment.id) {
       await destroyLoginSession(req, res);
       return res.status(401).json({ code: "MFA_REQUIRED", message: "Please log in again and verify your authenticator code." });

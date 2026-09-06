@@ -1,16 +1,10 @@
 import { Op } from "sequelize";
 import { TrustedDevice } from "../models/authSecurityModel.js";
-import { SystemSetting } from "../models/systemSettingModel.js";
 import { recordAudit, AUDIT_ACTIONS } from "./auditLog.js";
 import {
-  AUTH_POLICY_KEY, TRUST_DURATION_MS, hashToken, credentialVersion,
+  TRUST_DURATION_MS, hashToken, credentialVersion,
   newDeviceToken, cookieOptions, trustCookieName, readDeviceToken, trustedRecordValid,
 } from "./authPolicy.js";
-
-export const twoFactorEnabled = async () => {
-  const row = await SystemSetting.findOne({ where: { key: AUTH_POLICY_KEY } });
-  return row?.value !== "false"; // Missing or malformed policy fails closed.
-};
 
 export const securityAudit = (req, user, actionType, summary, afterState = {}) =>
   recordAudit({
@@ -60,6 +54,7 @@ export const createTrustedDevice = async (req, res, user, enrollment) => {
   const trustedUntil = verifiedAt + TRUST_DURATION_MS;
   const row = await TrustedDevice.create({
     userId: user.id, enrollmentId: enrollment.id, credentialVersion: credentialVersion(user),
+    roleId: user.Role.id, roleVersion: user.Role.twoFactorVersion,
     tokenHash: hashToken(token), verifiedAt: new Date(verifiedAt),
     twoFactorTrustedUntil: new Date(trustedUntil),
   });

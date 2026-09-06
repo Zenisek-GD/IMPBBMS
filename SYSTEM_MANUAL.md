@@ -164,14 +164,23 @@ The frontend loads the current user through the auth context in `municipal-front
 
 ### Two-factor authentication and authenticated sessions
 
-System Administrator → **Security Settings** (`/admin/security-settings`) controls authentication security for every role. **Two-Factor Authentication defaults to ON**. Turning it OFF requires the **Disable Two-Factor Authentication?** confirmation; both enabling and disabling are recorded in the Audit Trail. Session duration remains **30 minutes** with either setting.
+System Administrator → **Security Settings** (`/admin/security-settings`) provides **Two-Factor Authentication by Role**. The role list and current statuses come from the database. Only the System Administrator or a role granted `manage_two_factor_authentication` can read or change this configuration; the backend verifies this on every request.
 
-The system uses the existing six-digit TOTP authenticator enrollment. Accounts without an authenticator have access only to enrollment until they prove a code. Authenticator secrets are encrypted with AES-256-GCM using `MFA_ENCRYPTION_KEY` (or `SESSION_SECRET`), never returned after enrollment. Keep that encryption key stable and outside the database. Codes are single-use, and failed authenticator attempts are locked per account after five failures for 15 minutes.
+Use individual switches or select roles and choose **Enable 2FA for Selected Roles** / **Disable 2FA for Selected Roles**. **Select All** and **Clear Selection** only affect selection. Switches and bulk actions stage edits; **Save Security Settings** reviews and commits them. Disabling requires confirmation listing every affected role. Enabling offers **Apply on Next Login** (existing sessions finish normally) or **Force Re-Authentication Now** (all sessions for the newly enabled roles are invalidated, including the administrator's own session if applicable). Connected browsers detect forced logout on the next request, the five-second authentication check, or tab resume.
 
-There are two independent deadlines:
+Each saved role change and its Audit Trail entry commit in one transaction. The entry identifies the role, previous/new requirement, actor, time, application mode, and number of revoked sessions. A failed audit write rolls back the change. Bulk updates include one entry per changed role. Stale administrator edits return a conflict instead of overwriting newer settings.
+
+After validating the password, the backend reads the user's assigned role. If that role's requirement is OFF, both enrolled and unenrolled accounts proceed directly to the dashboard. If ON, a valid trusted-browser record skips the authenticator challenge; otherwise an enrolled account must verify a code and an unenrolled account must register an authenticator first. Users cannot disable their own authenticator or change their role's 2FA requirement through account APIs. Administrator authenticator resets remain available for lost devices and require enrollment again on a subsequent required login.
+
+New roles default to 2FA required. Keep it enabled for administrative, BAC, approval, budget, accounting, and treasury roles; the administrator can configure every role, including technical, requesting, observer, and bidder roles. Upgrades preserve the previous global policy for existing roles instead of changing administrator choices.
+
+The system uses the existing six-digit TOTP authenticator enrollment. Accounts in roles requiring 2FA without an authenticator have access only to enrollment until they prove a code. Authenticator secrets are encrypted with AES-256-GCM using `MFA_ENCRYPTION_KEY` (or `SESSION_SECRET`), never returned after enrollment. Keep that encryption key stable and outside the database. Codes are single-use, and failed authenticator attempts are locked per account after five failures for 15 minutes.
+
+The role requirement and the two deadlines are independent:
 
 | Record | Purpose | Lifetime |
 | --- | --- | --- |
+| `Roles.two_factor_required` | Whether authenticator verification is required at login | Until a security administrator changes that role |
 | `loginSessionExpiresAt` in a database-backed `LoginSession` | Access to protected pages and APIs | 30 minutes from successful login, regardless of activity |
 | `twoFactorTrustedUntil` in a `TrustedDevice` | Whether this browser must supply an authenticator code at its next login | 30 minutes from successful authenticator verification |
 
@@ -185,7 +194,7 @@ There are two independent deadlines:
 | 10:30 | Existing session continues | Expired | 10:45 |
 | 10:35 | If logging in again: a new authenticator code is required | 11:05 after verification | 11:05 |
 
-A different browser, browser profile, private window or device has no corresponding trusted cookie and must verify its own authenticator code, even when it uses the same IP address. Clearing cookies also removes that browser's proof. Each user/browser receives a cryptographically random 256-bit token in a host-only, HTTP-only, SameSite=Lax cookie; production cookies also use Secure and the `__Host-` prefix. Only the token's SHA-256 hash is stored. Trust is checked against the account, enrollment and credential version; password changes and enrollment resets make old trust unusable. Switching the global policy OFF or ON clears existing trust records.
+A different browser, browser profile, private window or device has no corresponding trusted cookie and must verify its own authenticator code, even when it uses the same IP address. Clearing cookies also removes that browser's proof. Each user/browser receives a cryptographically random 256-bit token in a host-only, HTTP-only, SameSite=Lax cookie; production cookies also use Secure and the `__Host-` prefix. Only the token's SHA-256 hash is stored. Trust is checked against the account, enrollment, credential version, assigned role and role policy revision; password changes and enrollment resets make old trust unusable. Switching a role OFF or ON revokes trust only for users assigned to that role. Role revisions also reject a stale trust record created by a verification request that overlapped a policy change. Changing a user's assigned role invalidates their existing authenticated session.
 
 The backend checks session expiration before protected requests, including account APIs and downloads. At the exact deadline it returns **401** with `code: "SESSION_EXPIRED"` when the expired session is presented. A browser which has already discarded its expired session cookie receives an unauthenticated 401. The frontend clears authenticated views, redirects to Login, and displays:
 
@@ -207,7 +216,7 @@ npm run test:security:unit
 npm run test:security:integration
 ```
 
-The dedicated migration creates only `TrustedDevices` and `LoginSessions` and supplies the default ON policy; it does not drop or alter existing tables. Restart the backend after updating the code. Existing memory-only sessions will require a new login. The integration test creates and removes a uniquely named `impbbms_auth_test_*` MySQL database and leaves the application database untouched.
+The dedicated migration creates missing authentication tables, adds the role requirement/revision columns and browser trust role bindings, and creates the management permission. It preserves the legacy global ON/OFF choice for existing roles on first upgrade; rerunning it preserves individual role settings. It does not drop application data or recreate existing tables. The ordinary safe/alter migration also applies this additive upgrade before syncing. Restart the backend after updating the code. Pre-upgrade trust records without a role binding require one new authenticator verification; subsequent logout/relogin keeps the original 30-minute trust deadline. The integration test creates and removes a uniquely named `impbbms_auth_test_*` MySQL database and leaves the application database untouched.
 
 Production requires HTTPS, `NODE_ENV=production`, a strong `SESSION_SECRET`, and the matching `FRONTEND_ORIGIN`. Set `TRUST_PROXY` to the actual trusted proxy addresses/hops only when deploying behind a reverse proxy. The frontend API origin can be configured with `VITE_API_BASE_URL`.
 

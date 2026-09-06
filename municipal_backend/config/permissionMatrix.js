@@ -3,6 +3,7 @@
 // per-action access-control table during implementation — this is that table.
 
 export const PERMISSIONS = [
+  { key: "manage_two_factor_authentication", module: "security", description: "Configure two-factor authentication requirements by role" },
   // Administration
   { key: "users.manage", module: "administration", description: "Create, edit, and deactivate user accounts" },
 
@@ -352,6 +353,7 @@ export const PERMISSIONS = [
 // dash in that grid means the role simply has no entry here.
 export const ROLE_PERMISSIONS = {
   systemAdministrator: [
+    "manage_two_factor_authentication",
     "template.view", "template.manage",
     "users.manage",
     // Admin/IT is the ONLY holder of this. A bidder's account comes into

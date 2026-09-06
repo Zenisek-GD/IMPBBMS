@@ -5,10 +5,10 @@ import { landingRouteForRole } from '../config/roleLanding'
 // Frontend half of the access control in design doc Section 2.2. This is a
 // navigation guard, not a security boundary — the backend `requireRole`
 // middleware is what actually protects data. Both must be kept in step.
-export default function RoleRoute({ allow }) {
+export default function RoleRoute({ allow = [], permission }) {
   const { user } = useAuth()
 
-  if (!allow.includes(user.role)) {
+  if (!allow.includes(user.role) && !(permission && user.permissions?.includes(permission))) {
     return <Navigate to={landingRouteForRole(user.role)} replace />
   }
 

@@ -4,7 +4,9 @@ export const SESSION_DURATION_MS = 30 * 60 * 1000;
 export const TRUST_DURATION_MS = 30 * 60 * 1000;
 export const PENDING_MFA_TTL_MS = 5 * 60 * 1000;
 export const SESSION_EXPIRED_MESSAGE = "Your session has expired after 30 minutes. Please log in again.";
+// Used only to preserve the old policy during the additive migration.
 export const AUTH_POLICY_KEY = "security.twoFactorEnabled";
+export const roleRequiresTwoFactor = (role) => role?.twoFactorRequired !== false;
 export const hashToken = (value) => crypto.createHash("sha256").update(value).digest("hex");
 export const credentialVersion = (user) => hashToken(user.password);
 export const newDeviceToken = () => crypto.randomBytes(32).toString("hex");
@@ -29,6 +31,7 @@ export const readDeviceToken = (req, userId) => {
 export const trustedRecordValid = (row, user, enrollment, now = Date.now()) =>
   Boolean(row && enrollment?.status === "active" &&
     row.userId === user.id && row.enrollmentId === enrollment.id &&
+    Number.isInteger(row.roleId) && row.roleId === user.Role?.id && row.roleVersion === user.Role?.twoFactorVersion &&
     row.credentialVersion === credentialVersion(user) &&
     now < new Date(row.twoFactorTrustedUntil).getTime());
 

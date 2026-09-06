@@ -47,6 +47,7 @@ import "./config/env.js";
 import mysql from "mysql2/promise";
 import { sequelize } from "./models/db.js";
 import "./models/index.js";
+import { migrateRoleSecurity } from "./services/migrateRoleSecurity.js";
 
 const args = new Set(process.argv.slice(2));
 const mode = args.has("--force")
@@ -153,6 +154,8 @@ const run = async () => {
     await sequelize.close();
     process.exit(drifted === 0 ? 0 : 1);
   }
+
+  if (mode !== "force") await migrateRoleSecurity();
 
   if (mode === "force") {
     if (!args.has("--yes") && !process.stdin.isTTY) {

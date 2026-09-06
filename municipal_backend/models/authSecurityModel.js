@@ -6,6 +6,8 @@ import { User } from "./userModel.js";
 // deadline and survives destruction or regeneration of an authenticated session.
 export const TrustedDevice = sequelize.define("TrustedDevice", {
   userId: { type: DataTypes.INTEGER, allowNull: false, references: { model: User, key: "id" } },
+  roleId: { type: DataTypes.INTEGER, allowNull: true },
+  roleVersion: { type: DataTypes.INTEGER, allowNull: true },
   tokenHash: { type: DataTypes.STRING(64), allowNull: false, unique: true },
   enrollmentId: { type: DataTypes.INTEGER, allowNull: false },
   credentialVersion: { type: DataTypes.STRING(64), allowNull: false },
