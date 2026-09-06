@@ -10,7 +10,7 @@ export const requireRole = (...allowedRoles) => async (req, res, next) => {
   }
 
   const user = await loadCurrentUser(req);
-  if (!user || user.status !== "active") {
+  if (!user) {
     return res.status(401).json({ message: "Not authenticated." });
   }
 

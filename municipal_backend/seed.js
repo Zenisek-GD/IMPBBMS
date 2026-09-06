@@ -1,3 +1,4 @@
+import "./config/developmentOnly.js";
 import "./config/env.js";
 import { sequelize } from "./models/db.js";
 import { Role } from "./models/roleModel.js";

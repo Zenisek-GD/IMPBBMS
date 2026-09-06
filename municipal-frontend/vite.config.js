@@ -8,6 +8,17 @@ export default defineConfig({
   build: {
     sourcemap: false,
   },
+  // Keep local API calls first-party. This is essential for the httpOnly
+  // session cookie: 127.0.0.1 and localhost are different browser sites even
+  // though they point to the same development machine.
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: false,
+      },
+    },
+  },
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] }),

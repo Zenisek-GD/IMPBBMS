@@ -41,7 +41,7 @@ export const downloadDocument = async (id, filename) => {
 
 export const MAX_UPLOAD_MB = 10
 
-export const ACCEPTED_EXTENSIONS = '.pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx'
+export const ACCEPTED_EXTENSIONS = '.pdf,.jpg,.jpeg,.png'
 
 export const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`

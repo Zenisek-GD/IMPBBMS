@@ -1,3 +1,4 @@
+import { sanitizeHtml } from "../services/htmlSanitizer.js";
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
 import {
@@ -28,9 +29,9 @@ import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 const serializeVersion = (version) => ({
   id: version.id,
   versionNo: version.versionNo,
-  bodyHtml: version.bodyHtml,
-  headerHtml: version.headerHtml,
-  footerHtml: version.footerHtml,
+  bodyHtml: sanitizeHtml(version.bodyHtml),
+  headerHtml: sanitizeHtml(version.headerHtml),
+  footerHtml: sanitizeHtml(version.footerHtml),
   css: version.css,
   pageSize: version.pageSize,
   landscape: version.landscape,
@@ -195,9 +196,9 @@ export const createTemplate = async (req, res) => {
       {
         documentTemplateId: template.id,
         versionNo: 1,
-        bodyHtml: req.body.bodyHtml,
-        headerHtml: req.body.headerHtml || null,
-        footerHtml: req.body.footerHtml || null,
+        bodyHtml: sanitizeHtml(req.body.bodyHtml),
+        headerHtml: sanitizeHtml(req.body.headerHtml) || null,
+        footerHtml: sanitizeHtml(req.body.footerHtml) || null,
         css: req.body.css || null,
         pageSize: req.body.pageSize || "A4",
         landscape: Boolean(req.body.landscape),
@@ -280,9 +281,9 @@ export const createVersion = async (req, res) => {
       {
         documentTemplateId: template.id,
         versionNo: await nextVersionNo(template.id),
-        bodyHtml: req.body.bodyHtml,
-        headerHtml: req.body.headerHtml || null,
-        footerHtml: req.body.footerHtml || null,
+        bodyHtml: sanitizeHtml(req.body.bodyHtml),
+        headerHtml: sanitizeHtml(req.body.headerHtml) || null,
+        footerHtml: sanitizeHtml(req.body.footerHtml) || null,
         css: req.body.css || null,
         pageSize: req.body.pageSize || "A4",
         landscape: Boolean(req.body.landscape),

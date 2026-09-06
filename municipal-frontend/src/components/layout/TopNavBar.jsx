@@ -1,4 +1,6 @@
-import { Search } from 'lucide-react'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Search, Menu } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import ThemeToggle from '../ui/ThemeToggle'
 
@@ -22,11 +24,24 @@ import ThemeToggle from '../ui/ThemeToggle'
 // ── DYNAMIC SYSTEM NAME ─────────────────────────────────────────────────────
 // The wordmark is configurable by the system administrator through System
 // Settings → Branding. It falls back to "ProcureNance" when no override is set.
-export default function TopNavBar({ searchPlaceholder, lguName, systemName }) {
+export default function TopNavBar({ sections = [], lguName, systemName, onOpenNavigation }) {
+  const navigate = useNavigate()
+  const [search, setSearch] = useState('')
+  const [noMatch, setNoMatch] = useState(false)
+  const destinations = sections.flatMap((section) => section.items)
+  const findPage = (event) => {
+    event.preventDefault()
+    const query = search.trim().toLowerCase()
+    const match = query && (destinations.find((item) => item.label.toLowerCase() === query)
+      ?? destinations.find((item) => item.label.toLowerCase().includes(query)))
+    if (match) { setSearch(''); setNoMatch(false); navigate(match.href) }
+    else setNoMatch(true)
+  }
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-black/20 bg-brand px-5">
       <div className="flex min-w-0 items-center gap-5">
-        <div className="flex flex-col leading-tight">
+        <button type="button" aria-label="Open navigation" onClick={onOpenNavigation} className="flex h-9 w-9 shrink-0 items-center justify-center text-brand-fg md:hidden"><Menu size={20} /></button>
+        <div className="flex min-w-0 flex-col leading-tight">
           <span className="text-[17px] font-semibold tracking-[-0.01em] text-brand-fg">{systemName || 'ProcureNance'}</span>
           {lguName && (
             <span className="truncate text-[11px] tracking-[0.02em] text-topnav-link">{lguName}</span>
@@ -35,18 +50,23 @@ export default function TopNavBar({ searchPlaceholder, lguName, systemName }) {
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="relative hidden lg:block">
+        <form onSubmit={findPage} className="relative hidden lg:block">
           <Search
             size={15}
             className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-topnav-link"
           />
           <input
             type="search"
-            placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
+            placeholder="Find a page…"
+            aria-label="Find a workspace page"
+            list="workspace-pages"
+            value={search}
+            onChange={(event) => { setSearch(event.target.value); setNoMatch(false) }}
             className="h-9 w-64 rounded-md border border-white/10 bg-white/10 pr-3 pl-9 text-[13px] text-brand-fg placeholder:text-topnav-link focus:border-white/25 focus:outline-none"
           />
-        </div>
+          <datalist id="workspace-pages">{destinations.map((item) => <option key={`${item.href}:${item.label}`} value={item.label} />)}</datalist>
+          {noMatch && <p role="status" className="absolute right-0 mt-1 rounded border border-border-muted bg-surface p-2 text-xs text-navy">No matching page. Choose a page from the suggestions.</p>}
+        </form>
         <ThemeToggle tone="brand" />
         <NotificationBell />
       </div>

@@ -62,7 +62,9 @@ export default function Login() {
       navigate(landingRouteForRole(user.role), { replace: true })
     } catch (err) {
       setNeedsActivation(err.response?.data?.status === 'pendingActivation')
-      setServerError(err.response?.data?.message ?? 'Something went wrong. Please try again.')
+      setServerError(err.response?.status >= 500
+        ? 'The sign-in service is temporarily unavailable. Please wait a moment and try again.'
+        : err.response?.data?.message ?? 'Could not reach the sign-in service. Check your connection and try again.')
     }
   }
 

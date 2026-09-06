@@ -111,5 +111,10 @@ export const markActivationAccessed = async (record) => {
 //
 // Takes the caller's transaction so spending the token and activating the account
 // either both happen or neither does.
-export const consumeActivationToken = (record, options = {}) =>
-  record.update({ usedAt: new Date() }, options);
+export const consumeActivationToken = async (record, options = {}) => {
+  const [used] = await ActivationToken.update({ usedAt: new Date() }, {
+    ...options,
+    where: { id: record.id, usedAt: null, revokedAt: null, expiresAt: { [Op.gt]: new Date() } },
+  });
+  if (used !== 1) throw new Error("Activation token was already consumed or revoked.");
+};

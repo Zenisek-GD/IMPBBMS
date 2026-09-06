@@ -408,6 +408,12 @@ export const reportDelivery = async (req, res) => {
   const { description, deliveredAt } = req.body;
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  if (!req.permissions.has("delivery.report")) {
+    const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
+    if (!vendor || vendor.id !== contract.vendorId) {
+      return res.status(403).json({ message: "You may only report deliveries on your own contracts." });
+    }
+  }
   if (contract.status !== "active") {
     return res.status(409).json({ message: "Deliveries can only be reported against an active contract." });
   }

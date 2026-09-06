@@ -154,10 +154,11 @@ export const logout = async (req, res) => {
   // Read before the session is destroyed — afterwards there is nothing to
   // attribute the entry to.
   const userId = req.session.userId;
-  if (userId) {
-    const user = await User.findByPk(userId, { include: [Role] });
-    if (user) {
-      await recordAudit({
+  try {
+    if (userId) {
+      const user = await User.findByPk(userId, { include: [Role] });
+      if (user) {
+        await recordAudit({
         actionType: AUDIT_ACTIONS.LOGOUT,
         entityRef: "auth",
         entityId: user.id,
@@ -166,8 +167,13 @@ export const logout = async (req, res) => {
         actorName: user.name,
         actorRole: user.Role?.key ?? null,
         ipAddress: req.ip,
-      });
+        });
+      }
     }
+  } catch (error) {
+    // A data-store outage must not prevent revocation of the independent
+    // authenticated session. Do not log a driver message that could expose SQL.
+    console.error("[auth] logout audit unavailable:", error?.name ?? "Error");
   }
 
   await destroyLoginSession(req, res);

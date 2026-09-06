@@ -316,8 +316,8 @@ export const detectAnomalies = async () => {
     try {
       findings.push(...(await rule()));
     } catch (err) {
-      failures.push({ rule: name, error: err.message });
-      console.error(`[anomaly] rule ${name} failed:`, err.message);
+      failures.push({ rule: name, error: err.name });
+      console.error(`[anomaly] rule ${name} failed:`, err.name);
     }
   }
 

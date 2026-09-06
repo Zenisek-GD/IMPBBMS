@@ -10,15 +10,31 @@ const WIDTHS = {
 
 export default function Modal({ title, subtitle, onClose, size = 'md', children }) {
   const panelRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
+      if (event.key === 'Tab') {
+        const controls = [...panelRef.current.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')]
+          .filter((element) => element.getClientRects().length > 0)
+        const first = controls[0]
+        const last = controls.at(-1)
+        if (!first) { event.preventDefault(); return }
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {
+          event.preventDefault(); last.focus()
+        } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) {
+          event.preventDefault(); first.focus()
+        }
+      }
     }
     window.addEventListener('keydown', onKeyDown)
 
     // Focus moves into the dialog on open, so a keyboard user is not left
     // tabbing through the page behind it.
+    const previousFocus = document.activeElement
     panelRef.current?.focus()
 
     // The page behind a modal must not scroll under it.
@@ -28,8 +44,9 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
+      if (previousFocus?.isConnected) previousFocus.focus()
     }
-  }, [onClose])
+  }, [])
 
   return (
     <div

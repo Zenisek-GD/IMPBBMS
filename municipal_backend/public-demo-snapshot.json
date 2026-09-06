@@ -1,0 +1,1119 @@
+{
+  "projects": [
+    {
+      "id": 33,
+      "projectTitle": "Concreting of Barangay San Vicente Farm-to-Market Road (Phase 1)",
+      "description": "Concreting of 1.2 kilometres of farm-to-market road serving four upland barangays, including drainage canals and road shoulders, to reduce haulage cost for local produce.",
+      "implementingUnitId": 9,
+      "implementingUnit": "Municipal Engineering Office",
+      "implementingUnitCode": "ENGR",
+      "category": "completed",
+      "phase": "completion",
+      "phaseLabel": "Delivery & Completion",
+      "progressPercent": 100,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q1",
+      "targetCompletionQuarter": "Q2",
+      "projectCategory": "Infrastructure",
+      "fundSource": "Local Development Fund",
+      "financials": {
+        "budget": 8400000,
+        "awardedAmount": 8127000,
+        "contractAmount": 8127000,
+        "invoicedAmount": 8127000,
+        "disbursedAmount": 6806362.5,
+        "savings": 273000,
+        "savingsPercent": 3.3,
+        "utilisationPercent": 83.8
+      },
+      "awardedTo": "Sierra Verde Construction and Supply, Inc.",
+      "noaNumber": "NOA-2026-0002",
+      "noaDate": "2026-04-17",
+      "contractNo": "CON-2026-0002",
+      "contractStatus": "completed",
+      "referenceNo": "ITB-2026-002",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:22.000Z"
+    },
+    {
+      "id": 32,
+      "projectTitle": "Supply and Delivery of Medical Equipment for the Municipal Health Office",
+      "description": "Procurement of diagnostic and treatment equipment for the Rural Health Unit, including patient monitors, nebulisers, an ECG machine and examination furniture, to restore full service capacity at the main health station.",
+      "implementingUnitId": 10,
+      "implementingUnit": "Municipal Health Office",
+      "implementingUnitCode": "HEALTH",
+      "category": "completed",
+      "phase": "completion",
+      "phaseLabel": "Delivery & Completion",
+      "progressPercent": 100,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q1",
+      "targetCompletionQuarter": "Q3",
+      "projectCategory": "Goods",
+      "fundSource": "General Fund — 20% Development Fund",
+      "financials": {
+        "budget": 2850000,
+        "awardedAmount": 2703500,
+        "contractAmount": 2703500,
+        "invoicedAmount": 2703500,
+        "disbursedAmount": 2558669.65,
+        "savings": 146500,
+        "savingsPercent": 5.1,
+        "utilisationPercent": 94.6
+      },
+      "awardedTo": "Medline Diagnostics Trading Corporation",
+      "noaNumber": "NOA-2026-0001",
+      "noaDate": "2026-04-16",
+      "contractNo": "CON-2026-0001",
+      "contractStatus": "completed",
+      "referenceNo": "ITB-2026-001",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:21.000Z"
+    },
+    {
+      "id": 34,
+      "projectTitle": "Construction of Barangay Malitbog Health Station",
+      "description": "Construction of a one-storey barangay health station with consultation rooms, a birthing area, a pharmacy counter and a potable water system.",
+      "implementingUnitId": 10,
+      "implementingUnit": "Municipal Health Office",
+      "implementingUnitCode": "HEALTH",
+      "category": "ongoing",
+      "phase": "contract",
+      "phaseLabel": "Contract",
+      "progressPercent": 88,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q2",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Infrastructure",
+      "fundSource": "General Fund — 20% Development Fund",
+      "financials": {
+        "budget": 4200000,
+        "awardedAmount": 4085000,
+        "contractAmount": 4085000,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": 115000,
+        "savingsPercent": 2.7,
+        "utilisationPercent": 0
+      },
+      "awardedTo": "Sierra Verde Construction and Supply, Inc.",
+      "noaNumber": "NOA-2026-0003",
+      "noaDate": "2026-04-18",
+      "contractNo": "CON-2026-0003",
+      "contractStatus": "active",
+      "referenceNo": "ITB-2026-003",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:22.000Z"
+    },
+    {
+      "id": 35,
+      "projectTitle": "Supply and Delivery of Information Technology Equipment for Municipal Offices",
+      "description": "Procurement of desktop computers, network switches and uninterruptible power supplies to replace end-of-life units across the Municipal Hall, in support of the digitalisation programme.",
+      "implementingUnitId": 11,
+      "implementingUnit": "Information Technology Office",
+      "implementingUnitCode": "IT",
+      "category": "ongoing",
+      "phase": "bidding",
+      "phaseLabel": "Bid Opening",
+      "progressPercent": 50,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q3",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Goods",
+      "fundSource": "General Fund — MOOE",
+      "financials": {
+        "budget": 1950000,
+        "awardedAmount": null,
+        "contractAmount": null,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": null,
+        "savingsPercent": null,
+        "utilisationPercent": 0
+      },
+      "awardedTo": null,
+      "noaNumber": null,
+      "noaDate": null,
+      "contractNo": null,
+      "contractStatus": null,
+      "referenceNo": "ITB-2026-004",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:22.000Z"
+    },
+    {
+      "id": 36,
+      "projectTitle": "Procurement of Two (2) Units Garbage Compactor Truck",
+      "description": "Acquisition of two garbage compactor trucks to expand solid waste collection coverage to the remaining eight barangays under the Ecological Solid Waste Management Plan.",
+      "implementingUnitId": 8,
+      "implementingUnit": "General Services Office (GSO)",
+      "implementingUnitCode": "GSO",
+      "category": "upcoming",
+      "phase": "planning",
+      "phaseLabel": "Planning",
+      "progressPercent": 13,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q4",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Goods",
+      "fundSource": "General Fund — Capital Outlay",
+      "financials": {
+        "budget": 11500000,
+        "awardedAmount": null,
+        "contractAmount": null,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": null,
+        "savingsPercent": null,
+        "utilisationPercent": 0
+      },
+      "awardedTo": null,
+      "noaNumber": null,
+      "noaDate": null,
+      "contractNo": null,
+      "contractStatus": null,
+      "referenceNo": null,
+      "bidsReceived": 0,
+      "lastUpdatedAt": "2026-09-05T08:20:23.000Z"
+    },
+    {
+      "id": 37,
+      "projectTitle": "Construction of Municipal Evacuation Center",
+      "description": "Construction of a disaster-resilient evacuation centre with a capacity of 500 persons, including sanitation facilities, a generator set and a rainwater collection system.",
+      "implementingUnitId": 9,
+      "implementingUnit": "Municipal Engineering Office",
+      "implementingUnitCode": "ENGR",
+      "category": "upcoming",
+      "phase": "planning",
+      "phaseLabel": "Planning",
+      "progressPercent": 13,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q4",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Infrastructure",
+      "fundSource": "Local Disaster Risk Reduction and Management Fund",
+      "financials": {
+        "budget": 15750000,
+        "awardedAmount": null,
+        "contractAmount": null,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": null,
+        "savingsPercent": null,
+        "utilisationPercent": 0
+      },
+      "awardedTo": null,
+      "noaNumber": null,
+      "noaDate": null,
+      "contractNo": null,
+      "contractStatus": null,
+      "referenceNo": null,
+      "bidsReceived": 0,
+      "lastUpdatedAt": "2026-09-05T08:20:23.000Z"
+    }
+  ],
+  "detailedProjects": [
+    {
+      "id": 33,
+      "projectTitle": "Concreting of Barangay San Vicente Farm-to-Market Road (Phase 1)",
+      "description": "Concreting of 1.2 kilometres of farm-to-market road serving four upland barangays, including drainage canals and road shoulders, to reduce haulage cost for local produce.",
+      "implementingUnitId": 9,
+      "implementingUnit": "Municipal Engineering Office",
+      "implementingUnitCode": "ENGR",
+      "category": "completed",
+      "phase": "completion",
+      "phaseLabel": "Delivery & Completion",
+      "progressPercent": 100,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q1",
+      "targetCompletionQuarter": "Q2",
+      "projectCategory": "Infrastructure",
+      "fundSource": "Local Development Fund",
+      "financials": {
+        "budget": 8400000,
+        "awardedAmount": 8127000,
+        "contractAmount": 8127000,
+        "invoicedAmount": 8127000,
+        "disbursedAmount": 6806362.5,
+        "savings": 273000,
+        "savingsPercent": 3.3,
+        "utilisationPercent": 83.8
+      },
+      "awardedTo": "Sierra Verde Construction and Supply, Inc.",
+      "noaNumber": "NOA-2026-0002",
+      "noaDate": "2026-04-17",
+      "contractNo": "CON-2026-0002",
+      "contractStatus": "completed",
+      "referenceNo": "ITB-2026-002",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:22.000Z",
+      "phases": [
+        {
+          "key": "planning",
+          "label": "Planning",
+          "detail": "Included in the Annual Procurement Plan",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "requisition",
+          "label": "Requisition",
+          "detail": "Purchase requisition raised and funded",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "solicitation",
+          "label": "Solicitation",
+          "detail": "Invitation to bid advertised publicly",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "bidding",
+          "label": "Bid Opening",
+          "detail": "Bids received and opened",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "evaluation",
+          "label": "Evaluation",
+          "detail": "Bids evaluated and post-qualified",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "award",
+          "label": "Award",
+          "detail": "Notice of Award issued",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "contract",
+          "label": "Contract",
+          "detail": "Contract signed and in force",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "completion",
+          "label": "Delivery & Completion",
+          "detail": "Delivered, accepted and paid",
+          "reached": true,
+          "current": true
+        }
+      ],
+      "records": {
+        "requisitions": [
+          {
+            "prNumber": "PR-2026-0002",
+            "status": "approved",
+            "totalAmount": 8400000,
+            "dateRequired": "2026-05-02"
+          }
+        ],
+        "solicitations": [
+          {
+            "referenceNo": "ITB-2026-002",
+            "title": "Concreting of Barangay San Vicente Farm-to-Market Road (Phase 1)",
+            "mode": "Competitive Bidding",
+            "category": "infrastructure",
+            "abc": 8400000,
+            "publishDate": "2026-03-04",
+            "closingDate": "2026-03-25T06:00:00.000Z",
+            "status": "awarded",
+            "bidsReceived": 3
+          }
+        ],
+        "awards": [
+          {
+            "noaNumber": "NOA-2026-0002",
+            "noaDate": "2026-04-17",
+            "amount": 8127000,
+            "awardedTo": "Sierra Verde Construction and Supply, Inc.",
+            "status": "accepted"
+          }
+        ],
+        "contracts": [
+          {
+            "contractNo": "CON-2026-0002",
+            "amount": 8127000,
+            "startDate": "2026-05-03",
+            "deliveryDeadline": "2026-07-01",
+            "status": "completed",
+            "signedByLguAt": "2026-04-29T06:20:00.000Z",
+            "signedByVendorAt": "2026-04-29T06:20:00.000Z"
+          }
+        ],
+        "deliveries": [
+          {
+            "description": "Full delivery received and inspected.",
+            "deliveredAt": "2026-06-13T02:15:00.000Z",
+            "inspectedAt": "2026-06-17T05:40:00.000Z",
+            "status": "accepted"
+          }
+        ],
+        "payments": [
+          {
+            "disbursementNo": "DV-2026-0002",
+            "amount": 6806362.5,
+            "releasedAt": "2026-07-10T06:50:00.000Z",
+            "status": "released"
+          }
+        ]
+      }
+    },
+    {
+      "id": 32,
+      "projectTitle": "Supply and Delivery of Medical Equipment for the Municipal Health Office",
+      "description": "Procurement of diagnostic and treatment equipment for the Rural Health Unit, including patient monitors, nebulisers, an ECG machine and examination furniture, to restore full service capacity at the main health station.",
+      "implementingUnitId": 10,
+      "implementingUnit": "Municipal Health Office",
+      "implementingUnitCode": "HEALTH",
+      "category": "completed",
+      "phase": "completion",
+      "phaseLabel": "Delivery & Completion",
+      "progressPercent": 100,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q1",
+      "targetCompletionQuarter": "Q3",
+      "projectCategory": "Goods",
+      "fundSource": "General Fund — 20% Development Fund",
+      "financials": {
+        "budget": 2850000,
+        "awardedAmount": 2703500,
+        "contractAmount": 2703500,
+        "invoicedAmount": 2703500,
+        "disbursedAmount": 2558669.65,
+        "savings": 146500,
+        "savingsPercent": 5.1,
+        "utilisationPercent": 94.6
+      },
+      "awardedTo": "Medline Diagnostics Trading Corporation",
+      "noaNumber": "NOA-2026-0001",
+      "noaDate": "2026-04-16",
+      "contractNo": "CON-2026-0001",
+      "contractStatus": "completed",
+      "referenceNo": "ITB-2026-001",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:21.000Z",
+      "phases": [
+        {
+          "key": "planning",
+          "label": "Planning",
+          "detail": "Included in the Annual Procurement Plan",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "requisition",
+          "label": "Requisition",
+          "detail": "Purchase requisition raised and funded",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "solicitation",
+          "label": "Solicitation",
+          "detail": "Invitation to bid advertised publicly",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "bidding",
+          "label": "Bid Opening",
+          "detail": "Bids received and opened",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "evaluation",
+          "label": "Evaluation",
+          "detail": "Bids evaluated and post-qualified",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "award",
+          "label": "Award",
+          "detail": "Notice of Award issued",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "contract",
+          "label": "Contract",
+          "detail": "Contract signed and in force",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "completion",
+          "label": "Delivery & Completion",
+          "detail": "Delivered, accepted and paid",
+          "reached": true,
+          "current": true
+        }
+      ],
+      "records": {
+        "requisitions": [
+          {
+            "prNumber": "PR-2026-0001",
+            "status": "approved",
+            "totalAmount": 2850000,
+            "dateRequired": "2026-05-01"
+          }
+        ],
+        "solicitations": [
+          {
+            "referenceNo": "ITB-2026-001",
+            "title": "Supply and Delivery of Medical Equipment for the Municipal Health Office",
+            "mode": "Competitive Bidding",
+            "category": "goods",
+            "abc": 2850000,
+            "publishDate": "2026-03-03",
+            "closingDate": "2026-03-24T06:00:00.000Z",
+            "status": "awarded",
+            "bidsReceived": 3
+          }
+        ],
+        "awards": [
+          {
+            "noaNumber": "NOA-2026-0001",
+            "noaDate": "2026-04-16",
+            "amount": 2703500,
+            "awardedTo": "Medline Diagnostics Trading Corporation",
+            "status": "accepted"
+          }
+        ],
+        "contracts": [
+          {
+            "contractNo": "CON-2026-0001",
+            "amount": 2703500,
+            "startDate": "2026-05-02",
+            "deliveryDeadline": "2026-06-30",
+            "status": "completed",
+            "signedByLguAt": "2026-04-28T06:20:00.000Z",
+            "signedByVendorAt": "2026-04-28T06:20:00.000Z"
+          }
+        ],
+        "deliveries": [
+          {
+            "description": "Full delivery received and inspected.",
+            "deliveredAt": "2026-06-12T02:15:00.000Z",
+            "inspectedAt": "2026-06-16T05:40:00.000Z",
+            "status": "accepted"
+          }
+        ],
+        "payments": [
+          {
+            "disbursementNo": "DV-2026-0001",
+            "amount": 2558669.65,
+            "releasedAt": "2026-07-09T06:50:00.000Z",
+            "status": "released"
+          }
+        ]
+      }
+    },
+    {
+      "id": 34,
+      "projectTitle": "Construction of Barangay Malitbog Health Station",
+      "description": "Construction of a one-storey barangay health station with consultation rooms, a birthing area, a pharmacy counter and a potable water system.",
+      "implementingUnitId": 10,
+      "implementingUnit": "Municipal Health Office",
+      "implementingUnitCode": "HEALTH",
+      "category": "ongoing",
+      "phase": "contract",
+      "phaseLabel": "Contract",
+      "progressPercent": 88,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q2",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Infrastructure",
+      "fundSource": "General Fund — 20% Development Fund",
+      "financials": {
+        "budget": 4200000,
+        "awardedAmount": 4085000,
+        "contractAmount": 4085000,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": 115000,
+        "savingsPercent": 2.7,
+        "utilisationPercent": 0
+      },
+      "awardedTo": "Sierra Verde Construction and Supply, Inc.",
+      "noaNumber": "NOA-2026-0003",
+      "noaDate": "2026-04-18",
+      "contractNo": "CON-2026-0003",
+      "contractStatus": "active",
+      "referenceNo": "ITB-2026-003",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:22.000Z",
+      "phases": [
+        {
+          "key": "planning",
+          "label": "Planning",
+          "detail": "Included in the Annual Procurement Plan",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "requisition",
+          "label": "Requisition",
+          "detail": "Purchase requisition raised and funded",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "solicitation",
+          "label": "Solicitation",
+          "detail": "Invitation to bid advertised publicly",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "bidding",
+          "label": "Bid Opening",
+          "detail": "Bids received and opened",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "evaluation",
+          "label": "Evaluation",
+          "detail": "Bids evaluated and post-qualified",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "award",
+          "label": "Award",
+          "detail": "Notice of Award issued",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "contract",
+          "label": "Contract",
+          "detail": "Contract signed and in force",
+          "reached": true,
+          "current": true
+        },
+        {
+          "key": "completion",
+          "label": "Delivery & Completion",
+          "detail": "Delivered, accepted and paid",
+          "reached": false,
+          "current": false
+        }
+      ],
+      "records": {
+        "requisitions": [
+          {
+            "prNumber": "PR-2026-0003",
+            "status": "approved",
+            "totalAmount": 4200000,
+            "dateRequired": "2026-05-03"
+          }
+        ],
+        "solicitations": [
+          {
+            "referenceNo": "ITB-2026-003",
+            "title": "Construction of Barangay Malitbog Health Station",
+            "mode": "Competitive Bidding",
+            "category": "infrastructure",
+            "abc": 4200000,
+            "publishDate": "2026-03-05",
+            "closingDate": "2026-03-26T06:00:00.000Z",
+            "status": "awarded",
+            "bidsReceived": 3
+          }
+        ],
+        "awards": [
+          {
+            "noaNumber": "NOA-2026-0003",
+            "noaDate": "2026-04-18",
+            "amount": 4085000,
+            "awardedTo": "Sierra Verde Construction and Supply, Inc.",
+            "status": "accepted"
+          }
+        ],
+        "contracts": [
+          {
+            "contractNo": "CON-2026-0003",
+            "amount": 4085000,
+            "startDate": "2026-05-04",
+            "deliveryDeadline": "2026-07-02",
+            "status": "active",
+            "signedByLguAt": "2026-04-30T06:20:00.000Z",
+            "signedByVendorAt": "2026-04-30T06:20:00.000Z"
+          }
+        ],
+        "deliveries": [
+          {
+            "description": "Partial delivery received; inspection pending.",
+            "deliveredAt": "2026-06-14T02:15:00.000Z",
+            "inspectedAt": null,
+            "status": "underInspection"
+          }
+        ],
+        "payments": []
+      }
+    },
+    {
+      "id": 35,
+      "projectTitle": "Supply and Delivery of Information Technology Equipment for Municipal Offices",
+      "description": "Procurement of desktop computers, network switches and uninterruptible power supplies to replace end-of-life units across the Municipal Hall, in support of the digitalisation programme.",
+      "implementingUnitId": 11,
+      "implementingUnit": "Information Technology Office",
+      "implementingUnitCode": "IT",
+      "category": "ongoing",
+      "phase": "bidding",
+      "phaseLabel": "Bid Opening",
+      "progressPercent": 50,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q3",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Goods",
+      "fundSource": "General Fund — MOOE",
+      "financials": {
+        "budget": 1950000,
+        "awardedAmount": null,
+        "contractAmount": null,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": null,
+        "savingsPercent": null,
+        "utilisationPercent": 0
+      },
+      "awardedTo": null,
+      "noaNumber": null,
+      "noaDate": null,
+      "contractNo": null,
+      "contractStatus": null,
+      "referenceNo": "ITB-2026-004",
+      "bidsReceived": 3,
+      "lastUpdatedAt": "2026-09-05T08:20:22.000Z",
+      "phases": [
+        {
+          "key": "planning",
+          "label": "Planning",
+          "detail": "Included in the Annual Procurement Plan",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "requisition",
+          "label": "Requisition",
+          "detail": "Purchase requisition raised and funded",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "solicitation",
+          "label": "Solicitation",
+          "detail": "Invitation to bid advertised publicly",
+          "reached": true,
+          "current": false
+        },
+        {
+          "key": "bidding",
+          "label": "Bid Opening",
+          "detail": "Bids received and opened",
+          "reached": true,
+          "current": true
+        },
+        {
+          "key": "evaluation",
+          "label": "Evaluation",
+          "detail": "Bids evaluated and post-qualified",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "award",
+          "label": "Award",
+          "detail": "Notice of Award issued",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "contract",
+          "label": "Contract",
+          "detail": "Contract signed and in force",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "completion",
+          "label": "Delivery & Completion",
+          "detail": "Delivered, accepted and paid",
+          "reached": false,
+          "current": false
+        }
+      ],
+      "records": {
+        "requisitions": [
+          {
+            "prNumber": "PR-2026-0004",
+            "status": "approved",
+            "totalAmount": 1950000,
+            "dateRequired": "2026-05-04"
+          }
+        ],
+        "solicitations": [
+          {
+            "referenceNo": "ITB-2026-004",
+            "title": "Supply and Delivery of Information Technology Equipment for Municipal Offices",
+            "mode": "Competitive Bidding",
+            "category": "goods",
+            "abc": 1950000,
+            "publishDate": "2026-08-27",
+            "closingDate": "2026-09-17T06:00:00.000Z",
+            "status": "published",
+            "bidsReceived": 3
+          }
+        ],
+        "awards": [],
+        "contracts": [],
+        "deliveries": [],
+        "payments": []
+      }
+    },
+    {
+      "id": 36,
+      "projectTitle": "Procurement of Two (2) Units Garbage Compactor Truck",
+      "description": "Acquisition of two garbage compactor trucks to expand solid waste collection coverage to the remaining eight barangays under the Ecological Solid Waste Management Plan.",
+      "implementingUnitId": 8,
+      "implementingUnit": "General Services Office (GSO)",
+      "implementingUnitCode": "GSO",
+      "category": "upcoming",
+      "phase": "planning",
+      "phaseLabel": "Planning",
+      "progressPercent": 13,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q4",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Goods",
+      "fundSource": "General Fund — Capital Outlay",
+      "financials": {
+        "budget": 11500000,
+        "awardedAmount": null,
+        "contractAmount": null,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": null,
+        "savingsPercent": null,
+        "utilisationPercent": 0
+      },
+      "awardedTo": null,
+      "noaNumber": null,
+      "noaDate": null,
+      "contractNo": null,
+      "contractStatus": null,
+      "referenceNo": null,
+      "bidsReceived": 0,
+      "lastUpdatedAt": "2026-09-05T08:20:23.000Z",
+      "phases": [
+        {
+          "key": "planning",
+          "label": "Planning",
+          "detail": "Included in the Annual Procurement Plan",
+          "reached": true,
+          "current": true
+        },
+        {
+          "key": "requisition",
+          "label": "Requisition",
+          "detail": "Purchase requisition raised and funded",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "solicitation",
+          "label": "Solicitation",
+          "detail": "Invitation to bid advertised publicly",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "bidding",
+          "label": "Bid Opening",
+          "detail": "Bids received and opened",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "evaluation",
+          "label": "Evaluation",
+          "detail": "Bids evaluated and post-qualified",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "award",
+          "label": "Award",
+          "detail": "Notice of Award issued",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "contract",
+          "label": "Contract",
+          "detail": "Contract signed and in force",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "completion",
+          "label": "Delivery & Completion",
+          "detail": "Delivered, accepted and paid",
+          "reached": false,
+          "current": false
+        }
+      ],
+      "records": {
+        "requisitions": [],
+        "solicitations": [],
+        "awards": [],
+        "contracts": [],
+        "deliveries": [],
+        "payments": []
+      }
+    },
+    {
+      "id": 37,
+      "projectTitle": "Construction of Municipal Evacuation Center",
+      "description": "Construction of a disaster-resilient evacuation centre with a capacity of 500 persons, including sanitation facilities, a generator set and a rainwater collection system.",
+      "implementingUnitId": 9,
+      "implementingUnit": "Municipal Engineering Office",
+      "implementingUnitCode": "ENGR",
+      "category": "upcoming",
+      "phase": "planning",
+      "phaseLabel": "Planning",
+      "progressPercent": 13,
+      "procurementMode": "Competitive Bidding",
+      "fiscalYear": 2026,
+      "targetStartQuarter": "Q4",
+      "targetCompletionQuarter": "Q4",
+      "projectCategory": "Infrastructure",
+      "fundSource": "Local Disaster Risk Reduction and Management Fund",
+      "financials": {
+        "budget": 15750000,
+        "awardedAmount": null,
+        "contractAmount": null,
+        "invoicedAmount": null,
+        "disbursedAmount": 0,
+        "savings": null,
+        "savingsPercent": null,
+        "utilisationPercent": 0
+      },
+      "awardedTo": null,
+      "noaNumber": null,
+      "noaDate": null,
+      "contractNo": null,
+      "contractStatus": null,
+      "referenceNo": null,
+      "bidsReceived": 0,
+      "lastUpdatedAt": "2026-09-05T08:20:23.000Z",
+      "phases": [
+        {
+          "key": "planning",
+          "label": "Planning",
+          "detail": "Included in the Annual Procurement Plan",
+          "reached": true,
+          "current": true
+        },
+        {
+          "key": "requisition",
+          "label": "Requisition",
+          "detail": "Purchase requisition raised and funded",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "solicitation",
+          "label": "Solicitation",
+          "detail": "Invitation to bid advertised publicly",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "bidding",
+          "label": "Bid Opening",
+          "detail": "Bids received and opened",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "evaluation",
+          "label": "Evaluation",
+          "detail": "Bids evaluated and post-qualified",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "award",
+          "label": "Award",
+          "detail": "Notice of Award issued",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "contract",
+          "label": "Contract",
+          "detail": "Contract signed and in force",
+          "reached": false,
+          "current": false
+        },
+        {
+          "key": "completion",
+          "label": "Delivery & Completion",
+          "detail": "Delivered, accepted and paid",
+          "reached": false,
+          "current": false
+        }
+      ],
+      "records": {
+        "requisitions": [],
+        "solicitations": [],
+        "awards": [],
+        "contracts": [],
+        "deliveries": [],
+        "payments": []
+      }
+    }
+  ],
+  "overview": {
+    "lgu": {
+      "name": "Municipality of Roxas, Oriental Mindoro",
+      "address": "Municipal Hall Compound, Poblacion, Roxas, Oriental Mindoro",
+      "lguType": "municipality",
+      "incomeClass": "2nd",
+      "capitalizationThreshold": 50000
+    },
+    "totalProjects": 6,
+    "completed": 2,
+    "ongoing": 2,
+    "upcoming": 2,
+    "totalBudget": 44650000,
+    "totalContracted": 14915500,
+    "budgetOfContracted": 15450000,
+    "contractedProjects": 3,
+    "totalDisbursed": 9365032.15
+  },
+  "filters": {
+    "lgu": {
+      "name": "Municipality of Roxas, Oriental Mindoro",
+      "address": "Municipal Hall Compound, Poblacion, Roxas, Oriental Mindoro",
+      "lguType": "municipality",
+      "incomeClass": "2nd",
+      "capitalizationThreshold": 50000
+    },
+    "categories": [
+      {
+        "key": "all",
+        "label": "All Projects"
+      },
+      {
+        "key": "completed",
+        "label": "Completed"
+      },
+      {
+        "key": "ongoing",
+        "label": "Ongoing"
+      },
+      {
+        "key": "upcoming",
+        "label": "Upcoming"
+      }
+    ],
+    "departments": [
+      {
+        "id": 3,
+        "code": "BACSEC",
+        "name": "BAC Secretariat"
+      },
+      {
+        "id": 2,
+        "code": "BAC",
+        "name": "Bids and Awards Committee"
+      },
+      {
+        "id": 8,
+        "code": "GSO",
+        "name": "General Services Office (GSO)"
+      },
+      {
+        "id": 11,
+        "code": "IT",
+        "name": "Information Technology Office"
+      },
+      {
+        "id": 12,
+        "code": "INTAUDIT",
+        "name": "Internal Audit Service"
+      },
+      {
+        "id": 6,
+        "code": "ACCTG",
+        "name": "Municipal Accounting Office"
+      },
+      {
+        "id": 5,
+        "code": "BUDGET",
+        "name": "Municipal Budget Office"
+      },
+      {
+        "id": 9,
+        "code": "ENGR",
+        "name": "Municipal Engineering Office"
+      },
+      {
+        "id": 10,
+        "code": "HEALTH",
+        "name": "Municipal Health Office"
+      },
+      {
+        "id": 14,
+        "code": "MPDO",
+        "name": "Municipal Planning and Development Office"
+      },
+      {
+        "id": 7,
+        "code": "TREAS",
+        "name": "Municipal Treasurer's Office"
+      },
+      {
+        "id": 1,
+        "code": "OMAYOR",
+        "name": "Office of the Mayor"
+      },
+      {
+        "id": 13,
+        "code": "SB",
+        "name": "Office of the Sangguniang Bayan"
+      },
+      {
+        "id": 4,
+        "code": "TWG",
+        "name": "Technical Working Group"
+      }
+    ],
+    "fiscalYears": [
+      2026
+    ]
+  }
+}

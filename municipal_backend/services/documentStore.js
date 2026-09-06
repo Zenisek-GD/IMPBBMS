@@ -11,10 +11,6 @@ export const ALLOWED_TYPES = {
   "application/pdf": [".pdf"],
   "image/jpeg": [".jpg", ".jpeg"],
   "image/png": [".png"],
-  "application/msword": [".doc"],
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-  "application/vnd.ms-excel": [".xls"],
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
 };
 
 // Deliberately excluded: SVG and HTML. Both can carry script, and a browser
@@ -26,7 +22,7 @@ const extensionOf = (filename) => {
 
 export const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
+  limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 8, parts: 9, fieldSize: 2048, fieldNameSize: 100 },
   fileFilter: (req, file, callback) => {
     const permitted = ALLOWED_TYPES[file.mimetype];
     if (!permitted) {
@@ -43,6 +39,21 @@ export const upload = multer({
 
 export const checksumOf = (buffer) =>
   crypto.createHash("sha256").update(buffer).digest("hex");
+
+// MIME and extensions are attacker controlled. Verify signatures as a separate
+// control; this does not replace malware scanning or document disarm.
+export const validateFileContent = ({ buffer, mimetype }) => {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) return "The file is empty.";
+  const hex = buffer.subarray(0, 8).toString("hex");
+  const valid = {
+    "application/pdf": buffer.subarray(0, 5).toString("ascii") === "%PDF-",
+    "image/png": hex === "89504e470d0a1a0a",
+    "image/jpeg": hex.startsWith("ffd8ff"),
+  };
+  // Office formats can contain macros or embedded executables. Accept scanned
+  // PDF/images until a quarantine and malware-scanning service is configured.
+  return valid[mimetype] === true ? null : "Upload a PDF, PNG or JPEG with valid file content.";
+};
 
 // Strips any path components a client may have sent and neutralises characters
 // that cause trouble in a Content-Disposition header.

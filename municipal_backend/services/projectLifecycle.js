@@ -208,6 +208,10 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null } = {})
     id: entry.id,
     projectTitle: entry.projectTitle,
     description: entry.description,
+    // The public list already identifies the implementing office by name. Its
+    // stable id is included as well so the Worker demo snapshot can apply the
+    // same office filter without issuing a second database request.
+    implementingUnitId: entry.implementingUnitId ?? null,
     implementingUnit: entry.implementingUnit?.name ?? null,
     implementingUnitCode: entry.implementingUnit?.code ?? null,
     category,

@@ -1,7 +1,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import puppeteer from "puppeteer-core";
+
+const isCloudflareWorker = process.env.CLOUDFLARE_WORKER === "true";
+let puppeteer;
+let browserBinding;
+
+if (isCloudflareWorker) {
+  // Browser Run provides managed Chromium to Workers. It replaces the local
+  // Chrome executable used by normal Node deployments.
+  ({ default: puppeteer } = await import("@cloudflare/puppeteer"));
+  ({ env: { BROWSER: browserBinding } } = await import("cloudflare:workers"));
+} else {
+  ({ default: puppeteer } = await import("puppeteer-core"));
+}
 
 // ── HTML → PDF ───────────────────────────────────────────────────────────────
 // Templates are authored as HTML because that is the only format in which an
@@ -69,8 +81,10 @@ export const resolveBrowserExecutable = () => {
 export class BrowserUnavailableError extends Error {
   constructor() {
     super(
-      "No Chrome, Chromium or Edge installation was found, so PDFs cannot be rendered. " +
-        "Install one, or set CHROME_PATH in the backend .env to its executable."
+      isCloudflareWorker
+        ? "The Cloudflare Browser Run binding is unavailable, so PDFs cannot be rendered."
+        : "No Chrome, Chromium or Edge installation was found, so PDFs cannot be rendered. " +
+          "Install one, or set CHROME_PATH in the backend .env to its executable."
     );
     this.name = "BrowserUnavailableError";
     this.code = "BROWSER_UNAVAILABLE";
@@ -84,6 +98,13 @@ export class BrowserUnavailableError extends Error {
 let browserPromise = null;
 
 const getBrowser = async () => {
+  if (isCloudflareWorker) {
+    if (!browserBinding) throw new BrowserUnavailableError();
+    // Browser Run sessions consume quota while open, so each render closes its
+    // session in renderPdf's finally block rather than keeping it process-wide.
+    return puppeteer.launch(browserBinding);
+  }
+
   const executablePath = resolveBrowserExecutable();
   if (!executablePath) throw new BrowserUnavailableError();
 
@@ -96,7 +117,7 @@ const getBrowser = async () => {
         // where this will sit if it is ever deployed. It is acceptable *only*
         // because the page is fed sanitised HTML and denied network access
         // below — never point this renderer at arbitrary remote URLs.
-        args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        args: ["--disable-dev-shm-usage", "--disable-gpu"],
       })
       .catch((err) => {
         browserPromise = null;
@@ -108,6 +129,7 @@ const getBrowser = async () => {
 };
 
 export const closeBrowser = async () => {
+  if (isCloudflareWorker) return;
   if (!browserPromise) return;
   const browser = await browserPromise.catch(() => null);
   browserPromise = null;
@@ -116,10 +138,12 @@ export const closeBrowser = async () => {
 
 // Shut the browser down with the process rather than leaving an orphaned
 // Chrome behind every time nodemon restarts.
-for (const signal of ["SIGINT", "SIGTERM", "beforeExit"]) {
-  process.once(signal, () => {
-    closeBrowser();
-  });
+if (!isCloudflareWorker) {
+  for (const signal of ["SIGINT", "SIGTERM", "beforeExit"]) {
+    process.once(signal, () => {
+      closeBrowser();
+    });
+  }
 }
 
 const MARGIN_DEFAULT = { top: "25mm", right: "20mm", bottom: "25mm", left: "20mm" };
@@ -132,6 +156,7 @@ export const renderPdf = async (
   const page = await browser.newPage();
 
   try {
+    await page.setJavaScriptEnabled(false);
     // ── No network, ever ─────────────────────────────────────────────────────
     // A template is authored by a user, and an <img src="http://..."> inside one
     // would make the server fetch a URL of the author's choosing — a
@@ -163,5 +188,6 @@ export const renderPdf = async (
     return Buffer.from(pdf);
   } finally {
     await page.close().catch(() => {});
+    if (isCloudflareWorker) await browser.close().catch(() => {});
   }
 };

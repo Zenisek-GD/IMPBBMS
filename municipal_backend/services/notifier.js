@@ -41,6 +41,8 @@ export const NOTIFICATION_EVENTS = {
   SECURITY_ALERT: "security.alert",
 
   AIP_STATUS: "aip.status",
+  CDP_UPDATED: "planning.cdp.updated",
+  CDP_APPROVED: "planning.cdp.approved",
   BUDGET_CALL: "budget.call",
   BUDGET_STATUS: "budget.status",
   BUDGET_ENACTED: "budget.enacted",

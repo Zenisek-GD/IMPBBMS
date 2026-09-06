@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { advanceAuthEpoch } from '../api/client'
 import * as authApi from '../api/auth'
 import { AuthContext } from './auth-context'
+import { apiClient } from '../api/client'
 
 const EXPIRED_MESSAGE = 'Your session has expired after 30 minutes. Please log in again.'
 
@@ -146,6 +147,22 @@ export function AuthProvider({ children }) {
       document.documentElement.style.visibility = ''
     }
   }, [setUser])
+
+  useEffect(() => {
+    if (!user) return
+    const interceptor = apiClient.interceptors.response.use(undefined, (error) => {
+      const path = error.config?.url ?? ''
+      // Incorrect passwords/codes have their own inline errors. Only a
+      // rejected workspace session should close the authenticated UI.
+      if (error.response?.status === 401 && (!path.startsWith('/auth/') || path === '/auth/me')) {
+        setUser(null)
+      } else if (error.response?.data?.code === 'MFA_ENROLLMENT_REQUIRED') {
+        setUser((current) => current ? { ...current, mfaEnrollmentRequired: true } : current)
+      }
+      return Promise.reject(error)
+    })
+    return () => apiClient.interceptors.response.eject(interceptor)
+  }, [user])
 
   const login = useCallback(async (email, password) => {
     await logoutPending.current?.catch(() => {})

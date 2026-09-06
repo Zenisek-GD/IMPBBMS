@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ShieldCheck, Smartphone, KeyRound, Copy, Check, AlertTriangle, Download } from 'lucide-react'
 import * as authApi from '../../api/auth'
 import { useAuth } from '../../context/useAuth'
@@ -20,7 +21,7 @@ import Button from '../../components/ui/Button'
 const inputClass =
   'w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none'
 
-function CodeInput({ value, onChange, onSubmit, autoFocus, label = 'Six-digit code' }) {
+function CodeInput({ value, onChange, onSubmit, autoFocus, disabled, label = 'Six-digit code' }) {
   const ref = useRef(null)
   useEffect(() => {
     if (autoFocus) ref.current?.focus()
@@ -37,6 +38,7 @@ function CodeInput({ value, onChange, onSubmit, autoFocus, label = 'Six-digit co
         inputMode="numeric"
         autoComplete="one-time-code"
         maxLength={6}
+        disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value.replace(/\D/g, '').slice(0, 6))}
         onKeyDown={(event) => {
@@ -49,9 +51,10 @@ function CodeInput({ value, onChange, onSubmit, autoFocus, label = 'Six-digit co
   )
 }
 
-export function RecoveryCodeList({ codes, onAcknowledge }) {
+export function RecoveryCodeList({ codes, onAcknowledge, busy = false }) {
   const [copied, setCopied] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [copyError, setCopyError] = useState('')
 
   const asText = codes.join('\n')
 
@@ -77,9 +80,14 @@ export function RecoveryCodeList({ codes, onAcknowledge }) {
           variant="secondary"
           icon={copied ? Check : Copy}
           onClick={async () => {
-            await navigator.clipboard.writeText(asText)
-            setCopied(true)
-            setSaved(true)
+            try {
+              await navigator.clipboard.writeText(asText)
+              setCopied(true)
+              setSaved(true)
+              setCopyError('')
+            } catch {
+              setCopyError('Copying was blocked by your browser. Download the codes or write them down and confirm below.')
+            }
           }}
         >
           {copied ? 'COPIED' : 'COPY'}
@@ -102,26 +110,50 @@ export function RecoveryCodeList({ codes, onAcknowledge }) {
           DOWNLOAD
         </Button>
         {onAcknowledge && (
-          <Button icon={ShieldCheck} disabled={!saved} onClick={onAcknowledge}>
-            I HAVE SAVED THEM
+          <Button icon={ShieldCheck} disabled={!saved || busy} onClick={onAcknowledge}>
+            {busy ? 'OPENING WORKSPACE…' : 'I HAVE SAVED THEM'}
           </Button>
         )}
       </div>
+      {copyError && <p role="alert" className="text-[13px] text-danger">{copyError}</p>}
+      {onAcknowledge && (
+        <label className="flex items-center gap-2 text-[13px] text-text-secondary">
+          <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} />
+          I have saved a copy of these recovery codes in a safe place.
+        </label>
+      )}
       {onAcknowledge && !saved && (
-        <p className="text-[11px] text-text-faint">Copy or download the codes before continuing.</p>
+        <p className="text-[11px] text-text-faint">Copy, download, or write down the codes before continuing.</p>
       )}
     </div>
   )
 }
 
 export default function MfaEnrollment() {
-  const { setUser } = useAuth()
+  const { setUser, logout } = useAuth()
+  const navigate = useNavigate()
   const [enrollment, setEnrollment] = useState(null)
   const [token, setToken] = useState('')
   const [codes, setCodes] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
+  const [starting, setStarting] = useState(true)
+  const [alreadyEnabled, setAlreadyEnabled] = useState(false)
+  const submitting = useRef(false)
+
+  const begin = async () => {
+    setStarting(true)
+    setError('')
+    try {
+      setEnrollment(await authApi.beginMfaEnrollment())
+    } catch (err) {
+      if (err.response?.status === 409) setAlreadyEnabled(true)
+      else setError(err.response?.data?.message ?? 'Could not start enrolment. Please try again.')
+    } finally {
+      setStarting(false)
+    }
+  }
 
   // Guarded because React's development double-mount would otherwise fire two
   // concurrent enrolments. The server is now safe against that race too, but
@@ -133,13 +165,12 @@ export default function MfaEnrollment() {
     if (started.current) return
     started.current = true
 
-    authApi
-      .beginMfaEnrollment()
-      .then(setEnrollment)
-      .catch((err) => setError(err.response?.data?.message ?? 'Could not start enrolment.'))
+    void begin()
   }, [])
 
   const confirm = async () => {
+    if (submitting.current || !enrollment || token.length !== 6) return
+    submitting.current = true
     setError('')
     setBusy(true)
     try {
@@ -151,6 +182,7 @@ export default function MfaEnrollment() {
       setError(err.response?.data?.message ?? 'That code was not accepted.')
       setToken('')
     } finally {
+      submitting.current = false
       setBusy(false)
     }
   }
@@ -158,7 +190,21 @@ export default function MfaEnrollment() {
   const finish = async () => {
     // Re-read the session so the app learns the enrolment requirement has been
     // satisfied and stops routing back here.
-    setUser(await authApi.fetchCurrentUser())
+    if (submitting.current) return
+    submitting.current = true
+    setBusy(true)
+    setError('')
+    try {
+      const currentUser = await authApi.fetchCurrentUser()
+      if (currentUser.mfaEnrollmentRequired) throw new Error('MFA session not yet confirmed')
+      setUser(currentUser)
+      navigate('/home', { replace: true })
+    } catch {
+      setError('Your workspace could not be opened. Keep your recovery codes safe and try again.')
+    } finally {
+      submitting.current = false
+      setBusy(false)
+    }
   }
 
   return (
@@ -167,6 +213,12 @@ export default function MfaEnrollment() {
         title="Set up two-factor authentication"
         subtitle="Your assigned role requires authenticator verification. Register your authenticator to continue."
       />
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" disabled={busy} onClick={async () => {
+          await logout()
+          navigate('/login', { replace: true })
+        }}>Sign out</Button>
+      </div>
 
       {error && (
         <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -174,9 +226,14 @@ export default function MfaEnrollment() {
         </p>
       )}
 
-      {codes ? (
+      {alreadyEnabled ? (
+        <Card title="Two-factor authentication is already enabled" icon={ShieldCheck} bodyClassName="p-4">
+          <p className="mb-3 text-sm text-text-secondary">Continue to your workspace. You can manage your authenticator and recovery codes from your profile.</p>
+          <Button disabled={busy} onClick={finish}>Continue to workspace</Button>
+        </Card>
+      ) : codes ? (
         <Card title="Save your recovery codes" icon={KeyRound} bodyClassName="p-4">
-          <RecoveryCodeList codes={codes} onAcknowledge={finish} />
+          <RecoveryCodeList codes={codes} onAcknowledge={finish} busy={busy} />
         </Card>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -189,7 +246,7 @@ export default function MfaEnrollment() {
             {enrollment ? (
               <>
                 <div className="flex justify-center rounded border border-border-muted bg-white p-4">
-                  <img src={enrollment.qrDataUri} alt="Enrolment QR code" width={220} height={220} />
+                  <img src={enrollment.qrDataUri} alt="Enrolment QR code" width={220} height={220} className="h-auto max-w-full" />
                 </div>
 
                 <button
@@ -212,7 +269,8 @@ export default function MfaEnrollment() {
                 )}
               </>
             ) : (
-              <p className="text-[13px] text-text-faint">Preparing your enrolment…</p>
+              starting ? <p role="status" className="text-[13px] text-text-faint">Preparing your enrolment…</p>
+                : <Button variant="secondary" onClick={begin}>Retry enrolment</Button>
             )}
           </Card>
 
@@ -221,7 +279,7 @@ export default function MfaEnrollment() {
               This proves the app has your key. Nothing changes until it does — if the scan failed, you can
               simply start again.
             </p>
-            <CodeInput value={token} onChange={setToken} onSubmit={confirm} autoFocus={Boolean(enrollment)} />
+            <CodeInput value={token} onChange={setToken} onSubmit={confirm} autoFocus={Boolean(enrollment)} disabled={busy || !enrollment} />
             <Button
               className="mt-3"
               icon={ShieldCheck}

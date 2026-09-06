@@ -52,7 +52,8 @@ const allowed = (permissions, source) => {
 
 export function useDashboardData(needs) {
   const permissions = usePermissions()
-  const [state, setState] = useState({ loading: true, data: {} })
+  const [state, setState] = useState({ data: {}, failedSources: [] })
+  const [attempt, setAttempt] = useState(0)
 
   // `needs` is a fresh array on every render at the call site, so it is joined
   // into a stable string before being used as an effect dependency — otherwise
@@ -68,20 +69,20 @@ export function useDashboardData(needs) {
       .map((name) =>
         SOURCES[name]
           .load()
-          .then((value) => [name, value])
+          .then((value) => ({ name, value, failed: false }))
           // A single failing source must not blank the whole dashboard.
-          .catch(() => [name, undefined])
+          .catch(() => ({ name, value: undefined, failed: true }))
       )
 
     Promise.all(jobs).then((results) => {
       if (cancelled) return
-      setState({ loading: false, data: Object.fromEntries(results) })
+      setState({ key, attempt, permissions, data: Object.fromEntries(results.map(({ name, value }) => [name, value])), failedSources: results.filter((result) => result.failed).map((result) => result.name) })
     })
 
     return () => {
       cancelled = true
     }
-  }, [key, permissions])
+  }, [key, permissions, attempt])
 
   const data = state.data
 
@@ -102,5 +103,5 @@ export function useDashboardData(needs) {
     [data, permissions]
   )
 
-  return { loading: state.loading, data, queue }
+  return { loading: state.key !== key || state.attempt !== attempt || state.permissions !== permissions, data, queue, failedSources: state.failedSources, retry: () => setAttempt((current) => current + 1) }
 }

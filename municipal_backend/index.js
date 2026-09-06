@@ -32,39 +32,60 @@ import path from "path";
 import session from "express-session";
 import { DatabaseSessionStore, startAuthExpirationSweep } from "./services/sessionStore.js";
 import cors from "cors";
+import { validateProductionConfig } from "./config/security.js";
+import { isAllowedFrontendOrigin } from "./config/frontendOrigins.js";
+import { protectRequests } from "./middleware/securityMiddleware.js";
+import { rateLimit } from "./middleware/rateLimitMiddleware.js";
 import router from "./routes/index.js";
 import { wrapRouterStack, errorHandler } from "./middleware/asyncHandler.js";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
+validateProductionConfig();
 const app = express();
+app.disable("x-powered-by");
+app.set("query parser", "simple");
+// Only the Worker adapter is trusted to supply forwarded headers.
+if (process.env.CLOUDFLARE_WORKER === "true") app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 // Configure only the proxy addresses/hops actually used by this deployment.
 if (process.env.TRUST_PROXY) app.set("trust proxy", process.env.TRUST_PROXY === "1" ? 1 : process.env.TRUST_PROXY);
 
-app.use(cors({
-  origin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5173",
-  credentials: true,
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(process.cwd(), "public")));
-
-// Production refuses to start without a private session signing key.
-const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-only-insecure-secret";
-if (!process.env.SESSION_SECRET && process.env.NODE_ENV === "production") {
-  throw new Error("SESSION_SECRET is required in production.");
+// The Worker serves the SPA and API from the same workers.dev origin, so it
+// does not need CORS at all. Keeping CORS local-only avoids advertising the
+// localhost origin to production browsers and keeps the session cookie
+// first-party.
+if (process.env.CLOUDFLARE_WORKER !== "true") {
+  app.use(cors({
+    origin(origin, callback) {
+      callback(null, !origin || isAllowedFrontendOrigin(origin));
+    },
+    credentials: true,
+  }));
 }
+app.use(protectRequests);
+app.use("/api", rateLimit({ bucket: "api", max: 900 }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false, limit: "64kb", parameterLimit: 100 }));
+if (process.env.CLOUDFLARE_WORKER !== "true") {
+  app.use(express.static(path.join(process.cwd(), "public")));
+}
+
+// Production configuration is validated above before serving requests.
+const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-only-insecure-secret";
+
+// A MemoryStore is suitable only for the single, long-running local Node
+// process. Worker isolates are intentionally ephemeral, so Cloudflare uses a
+// D1-backed store loaded only in that runtime. Dynamic import keeps Node local
+// development free of Worker-only module imports.
+const sessionStore = process.env.CLOUDFLARE_WORKER === "true"
+  ? (await import("./services/cloudflareSessionStore.js")).createCloudflareSessionStore()
+  : new DatabaseSessionStore();
 
 app.use(session({
   secret: SESSION_SECRET,
-  store: new DatabaseSessionStore(),
   rolling: false,
+  store: sessionStore,
   resave: false,
   saveUninitialized: false,
+  name: process.env.NODE_ENV === "production" ? "__Host-procurenance.sid" : "connect.sid",
   cookie: {
     maxAge: 5 * 60 * 1000,
     httpOnly: true,
@@ -105,7 +126,7 @@ await attachIntegrityHooks().catch((err) =>
 // reported. Waiting for an administrator to remember to press a button would
 // mean tampering sits undetected for as long as nobody thinks to look.
 const SCAN_MINUTES = Number(process.env.SECURITY_SCAN_MINUTES ?? 30);
-if (!process.env.ELECTRON && SCAN_MINUTES > 0) {
+if (!process.env.ELECTRON && process.env.CLOUDFLARE_WORKER !== "true" && SCAN_MINUTES > 0) {
   const scan = () =>
     runSecurityScan(null, null)
       .then((result) => {
@@ -121,10 +142,10 @@ if (!process.env.ELECTRON && SCAN_MINUTES > 0) {
   setInterval(scan, SCAN_MINUTES * 60_000).unref?.();
 }
 
-startAuthExpirationSweep();
+if (process.env.CLOUDFLARE_WORKER !== "true") startAuthExpirationSweep();
 
 export default app;
 
-if (!process.env.ELECTRON) {
+if (!process.env.ELECTRON && process.env.CLOUDFLARE_WORKER !== "true") {
   app.listen(PORT, () => console.log(`🔥 XianFire running at http://localhost:${PORT}`));
 }

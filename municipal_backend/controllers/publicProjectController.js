@@ -5,6 +5,7 @@ import { User } from "../models/userModel.js";
 import { Department } from "../models/departmentModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
+import { sanitizeHtml } from "../services/htmlSanitizer.js";
 import {
   Announcement,
   acceptsRegistrations,
@@ -232,7 +233,9 @@ export const getProjectTimeline = async (req, res) => {
         action: ACTION_LABELS[entry.actionType] ?? readableStatus(entry.actionType),
         actionType: entry.actionType,
         stage: ACTION_STAGES[entry.actionType] ?? null,
-        summary: entry.summary,
+        // Internal audit prose can include bidder identities, email addresses
+        // and confidential remarks. Publish the reviewed action label only.
+        summary: ACTION_LABELS[entry.actionType] ?? readableStatus(entry.actionType),
         // Named for accountability, except where blind evaluation forbids it.
         actorName: anonymise ? null : entry.actorName,
         actorRole: roleNames.get(entry.actorRole) ?? entry.actorRole,
@@ -240,7 +243,7 @@ export const getProjectTimeline = async (req, res) => {
         statusFrom: readableStatus(before.status),
         statusTo: readableStatus(after.status),
         // The stated reason for a return, rejection or revision.
-        note: typeof after.remarks === "string" && after.remarks.trim() ? after.remarks.trim() : null,
+        note: null,
         source: "auditLog",
         // Lets a reviewer tie a public event back to the verifiable chain.
         recordHash: entry.hash,
@@ -329,7 +332,9 @@ export const getProjectTimeline = async (req, res) => {
 //
 // This is an allow-list. A new attachment point is private until someone adds
 // it here deliberately.
-const PUBLIC_ENTITY_REFS = ["rfq", "contract"];
+// Contract uploads may contain signatures and private supporting evidence.
+// Publish reviewed copies through the generated-document approval workflow.
+const PUBLIC_ENTITY_REFS = ["rfq"];
 
 const publicDocumentScope = (project) =>
   PUBLIC_ENTITY_REFS.map((entityRef) => ({
@@ -436,7 +441,7 @@ export const publicAnnouncement = (announcement, now) => ({
   body: announcement.body,
   // The rich body when the office wrote one; `body` remains the plain-text
   // fallback, so a portal that renders only text still works.
-  bodyHtml: announcement.bodyHtml ?? null,
+  bodyHtml: sanitizeHtml(announcement.bodyHtml) || null,
   category: announcement.category,
   referenceNo: announcement.referenceNo,
   pinned: announcement.pinned,

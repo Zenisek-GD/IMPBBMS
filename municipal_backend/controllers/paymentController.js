@@ -1,3 +1,4 @@
+const workflowConflict = () => Object.assign(new Error("This financial record changed. Reload it before trying again."), { code: "WORKFLOW_CONFLICT" });
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
 import { Invoice, Payment } from "../models/paymentModel.js";
@@ -158,9 +159,15 @@ export const submitInvoice = async (req, res) => {
 
   const year = new Date().getFullYear();
 
-  const invoice = await withSequenceRetry(async () =>
-    Invoice.create({
-      invoiceNo: await nextSequenceNo(Invoice, "invoiceNo", "INV", year),
+  const invoice = await withSequenceRetry(() => sequelize.transaction(async (transaction) => {
+    // All invoices for this contract serialize on the parent row, including
+    // invoices against different deliveries. Recheck the ceiling under the lock.
+    await contract.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    const duplicate = await Invoice.findOne({ where: { deliveryId: delivery.id, status: { [Op.ne]: "cancelled" } }, transaction });
+    const currentBilled = Number(await Invoice.sum("amount", { where: { contractId: contract.id, status: { [Op.ne]: "cancelled" } }, transaction }) ?? 0);
+    if (duplicate || value > Number(contract.amount) - currentBilled) throw workflowConflict();
+    return Invoice.create({
+      invoiceNo: await nextSequenceNo(Invoice, "invoiceNo", "INV", year, { transaction }),
       supplierInvoiceRef: supplierInvoiceRef ?? null,
       amount: value,
       submittedAt: new Date(),
@@ -168,8 +175,8 @@ export const submitInvoice = async (req, res) => {
       deliveryId: delivery.id,
       vendorId: vendor.id,
       status: "submitted",
-    })
-  );
+    }, { transaction });
+  }));
 
   // Goes to the Accountant, who acts on it next. The Treasurer has nothing to
   // do until a voucher has been certified.
@@ -202,7 +209,11 @@ export const certifyInvoice = async (req, res) => {
   }
 
   if (decision === "return") {
-    await invoice.update({ status: "returned", remarks: remarks.trim() });
+    await sequelize.transaction(async (transaction) => {
+      await invoice.reload({ transaction, lock: transaction.LOCK.UPDATE });
+      if (invoice.status !== "submitted") throw workflowConflict();
+      await invoice.update({ status: "returned", remarks: remarks.trim() }, { transaction });
+    });
     await notifyUsers([invoice.vendor?.userId], {
       type: NOTIFICATION_EVENTS.PAYMENT_STATUS,
       title: `Invoice returned — ${invoice.invoiceNo}`,
@@ -228,6 +239,8 @@ export const certifyInvoice = async (req, res) => {
 
   await withSequenceRetry(() =>
     sequelize.transaction(async (transaction) => {
+      await invoice.reload({ transaction, lock: transaction.LOCK.UPDATE });
+      if (invoice.status !== "submitted") throw workflowConflict();
       await invoice.update({ status: "certified", remarks: remarks?.trim() ?? null }, { transaction });
       await Payment.create(
       {
@@ -318,8 +331,8 @@ export const releasePayment = async (req, res) => {
   // the money was applied to the contract, it simply went to the BIR or into
   // retention rather than to the supplier's bank account. Accumulating the net
   // here would leave every contract looking permanently underpaid.
-  const paidAfterThis = Number(contract?.amountPaid ?? 0) + Number(payment.grossAmount);
-  const retentionAfterThis =
+  let paidAfterThis = Number(contract?.amountPaid ?? 0) + Number(payment.grossAmount);
+  let retentionAfterThis =
     Number(contract?.retentionHeld ?? 0) + Number(payment.retentionAmount ?? 0);
 
   const deliveries = contract?.deliveries ?? [];
@@ -327,10 +340,20 @@ export const releasePayment = async (req, res) => {
     deliveries.length > 0 && deliveries.every((delivery) => delivery.status === "accepted");
   // Float tolerance: DECIMAL round-trips through JS numbers, and a contract
   // settled to the last centavo should not be left open by a rounding artefact.
-  const paidInFull = paidAfterThis >= contractAmount - 0.005;
-  const closes = deliveredInFull && paidInFull;
+  let paidInFull = paidAfterThis >= contractAmount - 0.005;
+  let closes = deliveredInFull && paidInFull;
 
   await sequelize.transaction(async (transaction) => {
+    await payment.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (payment.status !== "prepared") throw workflowConflict();
+    if (contract) {
+      await contract.reload({ transaction, lock: transaction.LOCK.UPDATE });
+      paidAfterThis = Number(contract.amountPaid ?? 0) + Number(payment.grossAmount);
+      retentionAfterThis = Number(contract.retentionHeld ?? 0) + Number(payment.retentionAmount ?? 0);
+      if (paidAfterThis > Number(contract.amount) + 0.005) throw workflowConflict();
+      paidInFull = paidAfterThis >= Number(contract.amount) - 0.005;
+      closes = deliveredInFull && paidInFull;
+    }
     await payment.update(
       {
         status: "released",

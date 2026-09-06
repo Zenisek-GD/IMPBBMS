@@ -196,7 +196,7 @@ export const recordAudit = (payload) => {
     } catch (err) {
       // Auditing must never break the action it is recording. A failure here
       // is itself worth shouting about, but not worth rolling back a payment.
-      console.error("[audit] failed to record:", err.message);
+      console.error("[audit] failed to record:", err.name);
       return null;
     }
   };

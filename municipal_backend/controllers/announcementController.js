@@ -43,7 +43,7 @@ const serialize = (announcement) => ({
   status: announcement.status,
   referenceNo: announcement.referenceNo,
   pinned: announcement.pinned,
-  bodyHtml: announcement.bodyHtml,
+  bodyHtml: sanitizeHtml(announcement.bodyHtml),
   publishedAt: announcement.publishedAt,
   publishAt: announcement.publishAt,
   archivedAt: announcement.archivedAt,

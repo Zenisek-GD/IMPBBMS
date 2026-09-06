@@ -56,7 +56,7 @@ function StatCard({ label, value, hint, tone }) {
 export default function RoleWorkspace() {
   const { user } = useAuth()
   const config = dashboardFor(user?.role)
-  const { loading, data, queue } = useDashboardData(config.needs)
+  const { loading, data, queue, failedSources, retry } = useDashboardData(config.needs)
 
   const nav = ROLE_NAV[user?.role]
   const quickLinks = nav?.sections?.flatMap((section) => section.items) ?? []
@@ -74,6 +74,13 @@ export default function RoleWorkspace() {
         title={`${user?.roleName ?? 'Dashboard'}`}
         subtitle={`Signed in as ${user?.name}${user?.departmentName ? ` · ${user.departmentName}` : ''}`}
       />
+
+      {!loading && failedSources.length > 0 && (
+        <div role="alert" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-text-secondary">
+          <p>Some dashboard information could not be loaded. Totals and pending items may be incomplete.</p>
+          <button type="button" onClick={retry} className="mt-2 font-medium text-navy underline">Retry dashboard</button>
+        </div>
+      )}
 
       {/* What this office is for. Worth the four lines: several of these roles
           hold authority nobody can bypass, and the system never said so.
@@ -95,7 +102,7 @@ export default function RoleWorkspace() {
         <p className="text-[13px] text-text-faint">Loading your dashboard…</p>
       ) : (
         <>
-          {stats.length > 0 && (
+          {stats.length > 0 && failedSources.length === 0 && (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {stats.map((stat) => (
                 <StatCard key={stat.label} {...stat} />
@@ -112,7 +119,7 @@ export default function RoleWorkspace() {
             >
               {queue.length === 0 ? (
                 <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-                  Nothing is waiting on you right now.
+                  {failedSources.length ? 'Pending items could not be fully checked. Retry the dashboard or open the relevant page.' : 'Nothing is waiting on you right now.'}
                 </p>
               ) : (
                 <ul className="divide-y divide-border-muted">

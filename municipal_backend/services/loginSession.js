@@ -1,4 +1,4 @@
-import { SESSION_DURATION_MS, cookieOptions, roleRequiresTwoFactor } from "./authPolicy.js";
+import { SESSION_DURATION_MS, cookieOptions, roleRequiresTwoFactor, credentialStamp } from "./authPolicy.js";
 
 export const regenerateSession = (req) =>
   new Promise((resolve, reject) => req.session.regenerate((err) => err ? reject(err) : resolve()));
@@ -11,7 +11,7 @@ export const startLoginSession = async (req, user, { enrollment, trustedUntil = 
   Object.assign(req.session, {
     roleId: user.Role.id, roleSessionVersion: user.Role.sessionVersion,
     mfaRequiredAtLogin: roleRequiresTwoFactor(user.Role),
-    userId: user.id, authAt: now, loginSessionExpiresAt: now + SESSION_DURATION_MS,
+    userId: user.id, authAt: now, credentialHash: credentialStamp(user), loginSessionExpiresAt: now + SESSION_DURATION_MS,
     twoFactorTrustedUntil: trustedUntil, mfaVerified: verified,
     mfaEnrollmentRequired: enrollmentRequired, mfaEnrollmentId: verified ? enrollment?.id : null,
     auditActor: { actorId: user.id, actorName: user.name, actorRole: user.Role?.key ?? null, ipAddress: req.ip },
@@ -23,5 +23,5 @@ export const startLoginSession = async (req, user, { enrollment, trustedUntil = 
 export const destroyLoginSession = async (req, res) => {
   await new Promise((resolve, reject) => req.session.destroy((err) => err ? reject(err) : resolve()));
   // Deliberately clear only authentication, never the separate trust cookies.
-  res.clearCookie("connect.sid", cookieOptions());
+  res.clearCookie?.("connect.sid", cookieOptions());
 };

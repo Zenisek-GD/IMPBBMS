@@ -24,7 +24,29 @@
     SOFTWARE.
     */
     
-import { Sequelize } from "sequelize";
+import { Sequelize, Utils } from "sequelize";
+import mysql2 from "mysql2";
+
+// Sequelize sends parameterised MySQL statements through mysql2's `execute`,
+// which uses MySQL's COM_STMT_PREPARE protocol. Hyperdrive currently rejects
+// that protocol. Keep Sequelize's parameterisation, but on the Worker format
+// the values with mysql2's own escaping and send the resulting ordinary query
+// over Hyperdrive. This is the same safe escaping mysql2 uses for `query()`;
+// it simply avoids the unsupported prepared-statement wire command.
+const hyperdriveMysql2 = {
+  ...mysql2,
+  createConnection(config) {
+    const connection = mysql2.createConnection(config);
+    connection.execute = (sql, values, callback) => {
+      if (typeof values === "function") {
+        callback = values;
+        values = undefined;
+      }
+      return connection.query({ sql: mysql2.format(sql, values) }, callback);
+    };
+    return connection;
+  },
+};
 
 // Credentials come from the environment, falling back to the local development
 // defaults. Hardcoding them meant the same file had to be edited to deploy, and
@@ -43,8 +65,38 @@ export const sequelize = new Sequelize(
     host: process.env.DB_HOST ?? "127.0.0.1",
     port: Number(process.env.DB_PORT ?? 3306),
     dialect: "mysql",
+    // Sequelize otherwise loads mysql2 through a dynamic require, which is not
+    // supported by the Cloudflare Workers bundler. Supplying the static import
+    // keeps the same driver while making the Worker-compatible path explicit.
+    dialectModule: process.env.CLOUDFLARE_WORKER === "true" ? hyperdriveMysql2 : mysql2,
+    // mysql2 uses eval() for an optimisation that Workers deliberately
+    // disallow. Hyperdrive supplies the credentials at Worker startup; this
+    // option selects mysql2's compatible static parser there.
+    dialectOptions:
+      process.env.CLOUDFLARE_WORKER === "true" ? { disableEval: true } : undefined,
+    // A Workers TCP socket belongs to the request that created it. Reusing a
+    // Sequelize-pool connection in another request produces Cloudflare's
+    // cross-request I/O error. Hyperdrive does the real connection pooling at
+    // the edge, so in the Worker destroy a mysql2 connection as soon as its
+    // query releases it. Local development retains Sequelize's usual pool.
+    pool:
+      process.env.CLOUDFLARE_WORKER === "true"
+        ? { max: 5, min: 0, maxUses: 1, acquire: 30_000, idle: 1_000 }
+        : undefined,
     // Query logging is deafening in normal use and hides real errors. On by
     // default only when explicitly asked for.
     logging: process.env.DB_LOGGING === "true" ? console.log : false,
   }
 );
+
+// The existing MySQL schema was created on Windows, where table names are
+// case-insensitive and Sequelize's default `SystemSettings` resolved to the
+// lowercase `systemsettings` table. Aiven runs Linux MySQL, where the names are
+// case-sensitive. Keep Sequelize's normal pluralisation, but consistently use
+// the lowercase physical table name so both databases address the same schema.
+const defineModel = sequelize.define.bind(sequelize);
+sequelize.define = (modelName, attributes, options = {}) =>
+  defineModel(modelName, attributes, {
+    ...options,
+    tableName: options.tableName ?? Utils.pluralize(modelName).toLowerCase(),
+  });

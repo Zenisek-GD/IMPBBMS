@@ -41,6 +41,11 @@ export const listSessions = async (req, res) => {
 
 export const scheduleSession = async (req, res) => {
   const { rfqId, title, purpose, scheduledAt, meetingUrl } = req.body;
+  if (meetingUrl) {
+    let url;
+    try { url = new URL(meetingUrl); } catch { return res.status(400).json({ message: "Enter a valid HTTPS meeting URL." }); }
+    if (url.protocol !== "https:" || url.username || url.password) return res.status(400).json({ message: "Enter a valid HTTPS meeting URL." });
+  }
 
   if (!scheduledAt) return res.status(400).json({ message: "A scheduled date and time is required." });
 
