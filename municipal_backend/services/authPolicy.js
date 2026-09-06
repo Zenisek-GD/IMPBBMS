@@ -7,6 +7,12 @@ export const SESSION_EXPIRED_MESSAGE = "Your session has expired after 30 minute
 export const AUTH_POLICY_KEY = "security.twoFactorEnabled";
 export const hashToken = (value) => crypto.createHash("sha256").update(value).digest("hex");
 export const credentialVersion = (user) => hashToken(user.password);
+// Authenticated sessions must be invalidated when any access-bearing account
+// attribute changes. MFA trust deliberately remains password-only so changing
+// a profile detail does not silently invalidate an authenticator trust record.
+export const credentialStamp = (user) => hashToken(JSON.stringify([
+  user.password, user.email, user.roleId, user.departmentId, user.status,
+]));
 export const newDeviceToken = () => crypto.randomBytes(32).toString("hex");
 export const cookieOptions = () => ({
   httpOnly: true,

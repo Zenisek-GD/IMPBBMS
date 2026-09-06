@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { sequelize } from "../models/db.js";
 import {
   DevelopmentPlan,
   DevelopmentGoal,
@@ -27,6 +28,20 @@ import { notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js
 // checked against.
 
 const num = (value) => (value === null || value === undefined ? 0 : Number(value));
+
+// Every role with planning visibility reads the same development-plan record.
+// The notification is supplementary to that shared source of truth: the
+// frontend refreshes the planning screen while open, and the notification
+// tells an off-page user that there is something new to review.
+const notifyPlanningViewers = (plan, { type = NOTIFICATION_EVENTS.CDP_UPDATED, title, body }) =>
+  notifyByPermission("planning.view", {
+    type,
+    title,
+    body,
+    link: "/planning",
+    refEntity: "developmentPlan",
+    refId: plan.id,
+  });
 
 const serializeGoal = (goal) => ({
   id: goal.id,
@@ -130,14 +145,35 @@ export const createPlan = async (req, res) => {
   const error = validatePlan(req.body);
   if (error) return res.status(400).json({ message: error });
 
-  const plan = await DevelopmentPlan.create({
-    title: req.body.title.trim(),
-    startYear: Number(req.body.startYear),
-    endYear: Number(req.body.endYear),
-    vision: req.body.vision?.trim() || null,
-    remarks: req.body.remarks?.trim() || null,
-    status: "draft",
-    preparedById: req.currentUser.id,
+  // Older clients create an empty draft then add its goals separately. The
+  // current form collects them in the same conversation, so validate and save
+  // them with the plan. A transaction makes it impossible to leave a plan
+  // behind without the goals that the successful response says it has.
+  const initialGoals = normaliseInitialGoals(req.body.goals);
+  if (initialGoals.error) return res.status(400).json({ message: initialGoals.error });
+
+  const plan = await sequelize.transaction(async (transaction) => {
+    const created = await DevelopmentPlan.create(
+      {
+        title: req.body.title.trim(),
+        startYear: Number(req.body.startYear),
+        endYear: Number(req.body.endYear),
+        vision: req.body.vision?.trim() || null,
+        remarks: req.body.remarks?.trim() || null,
+        status: "draft",
+        preparedById: req.currentUser.id,
+      },
+      { transaction }
+    );
+
+    if (initialGoals.goals.length > 0) {
+      await DevelopmentGoal.bulkCreate(
+        initialGoals.goals.map((goal) => ({ ...goal, developmentPlanId: created.id })),
+        { transaction }
+      );
+    }
+
+    return created;
   });
 
   await auditFromRequest(req, {
@@ -145,7 +181,17 @@ export const createPlan = async (req, res) => {
     entityRef: "developmentPlan",
     entityId: plan.id,
     summary: `${plan.title} (${plan.startYear}–${plan.endYear})`,
-    afterState: { status: plan.status, startYear: plan.startYear, endYear: plan.endYear },
+    afterState: {
+      status: plan.status,
+      startYear: plan.startYear,
+      endYear: plan.endYear,
+      goals: initialGoals.goals.length,
+    },
+  });
+
+  await notifyPlanningViewers(plan, {
+    title: "New development plan recorded",
+    body: `${plan.title} is available for planning review.`,
   });
 
   res.status(201).json(serializePlan(await DevelopmentPlan.findByPk(plan.id, planIncludes)));
@@ -171,6 +217,11 @@ export const updatePlan = async (req, res) => {
     endYear: Number(merged.endYear),
     vision: merged.vision?.trim() || null,
     remarks: merged.remarks?.trim() || null,
+  });
+
+  await notifyPlanningViewers(plan, {
+    title: "Development plan updated",
+    body: `${plan.title} was updated and is available for review.`,
   });
 
   res.json(serializePlan(await DevelopmentPlan.findByPk(plan.id, planIncludes)));
@@ -220,14 +271,46 @@ export const adoptPlan = async (req, res) => {
     afterState: { status: "adopted", resolutionNo: plan.resolutionNo, goals: plan.goals.length },
   });
 
+  await notifyPlanningViewers(plan, {
+    type: NOTIFICATION_EVENTS.CDP_APPROVED,
+    title: "Development plan approval recorded",
+    body: `${plan.title} was recorded under Resolution No. ${plan.resolutionNo}.`,
+  });
+
   res.json(serializePlan(await DevelopmentPlan.findByPk(plan.id, planIncludes)));
 };
 
 // ── Goals ────────────────────────────────────────────────────────────────────
 const validateGoal = (payload) => {
-  if (!payload.title?.trim()) return "A goal title is required.";
+  if (!payload || typeof payload !== "object") return "A development goal is required.";
+  if (typeof payload.title !== "string" || !payload.title.trim()) return "A goal title is required.";
   if (!SECTORS.includes(payload.sector)) return "A valid development sector is required.";
+  if (payload.subsector != null && typeof payload.subsector !== "string") return "A goal programme must be text.";
+  if (payload.description != null && typeof payload.description !== "string") return "A goal description must be text.";
   return null;
+};
+
+const normaliseInitialGoals = (payload) => {
+  // Keep the existing add-goal endpoint and old API clients compatible: an
+  // omitted `goals` property means an empty draft. Once a caller chooses to
+  // send goals, though, an empty or invalid list is an actionable form error.
+  if (payload === undefined) return { goals: [] };
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return { error: "Add at least one development goal before creating the plan." };
+  }
+
+  const goals = [];
+  for (const [index, goal] of payload.entries()) {
+    const error = validateGoal(goal);
+    if (error) return { error: `Goal ${index + 1}: ${error}` };
+    goals.push({
+      sector: goal.sector,
+      subsector: goal.subsector?.trim() || null,
+      title: goal.title.trim(),
+      description: goal.description?.trim() || null,
+    });
+  }
+  return { goals };
 };
 
 export const createGoal = async (req, res) => {
@@ -248,11 +331,18 @@ export const createGoal = async (req, res) => {
     description: req.body.description?.trim() || null,
   });
 
+  await notifyPlanningViewers(plan, {
+    title: "Development plan goal added",
+    body: `A goal was added to ${plan.title}.`,
+  });
+
   res.status(201).json(serializeGoal(goal));
 };
 
 export const updateGoal = async (req, res) => {
-  const goal = await DevelopmentGoal.findByPk(req.params.goalId);
+  const goal = await DevelopmentGoal.findByPk(req.params.goalId, {
+    include: [{ model: DevelopmentPlan, as: "plan" }],
+  });
   if (!goal) return res.status(404).json({ message: "Goal not found." });
 
   const merged = { ...serializeGoal(goal), ...req.body };
@@ -265,6 +355,11 @@ export const updateGoal = async (req, res) => {
     title: merged.title.trim(),
     description: merged.description?.trim() || null,
     status: ["active", "achieved", "dropped"].includes(merged.status) ? merged.status : goal.status,
+  });
+
+  await notifyPlanningViewers(goal.plan, {
+    title: "Development plan goal updated",
+    body: `A goal in ${goal.plan.title} was updated.`,
   });
 
   res.json(serializeGoal(goal));

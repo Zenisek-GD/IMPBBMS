@@ -33,7 +33,7 @@ import {
 
 // Identities stay masked for the whole time scoring is open. The BAC
 // Chairperson closing evaluation is what reveals them — see closeEvaluation().
-const isBlindStage = (rfq) => rfq.status === "opened";
+const isBlindStage = (rfq) => !["evaluated", "awarded"].includes(rfq.status);
 
 const rfqIncludes = {
   include: [
@@ -70,7 +70,7 @@ const serializeBid = (bid, { blind, includeFinancial }) => ({
   blindLabel: bid.blindLabel,
   status: bid.status,
   submittedAt: bid.submittedAt,
-  remarks: bid.remarks,
+  remarks: blind ? null : bid.remarks,
   vendorId: blind ? null : bid.vendorId,
   vendorName: blind ? bid.blindLabel : (bid.vendor?.businessName ?? null),
   // IRR Sec. 58: the financial envelope is opened only after the technical

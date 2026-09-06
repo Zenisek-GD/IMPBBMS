@@ -9,7 +9,12 @@ import path from "path";
 // `override: false` is dotenv's default and is the behaviour we want: a variable
 // already set in the real environment (a deployment, a CI job, a one-off
 // `SMTP_HOST= npm run seed`) wins over the file.
-dotenv.config({ path: path.join(process.cwd(), ".env") });
+// Cloudflare Workers receive configuration through encrypted secrets and
+// bindings, not a readable .env file. Skipping dotenv there also prevents an
+// unnecessary virtual-file-system lookup at Worker startup.
+if (process.env.CLOUDFLARE_WORKER !== "true") {
+  dotenv.config({ path: path.join(process.cwd(), ".env") });
+}
 
 // Resolved from the process working directory rather than import.meta.url so
 // running `npm run seed --prefix municipal_backend` from the repository root

@@ -160,6 +160,20 @@ export default function PublicHeader({ lguName, systemName }) {
                 role="menu"
                 className="absolute right-0 mt-2 w-64 overflow-hidden rounded-lg border border-border-muted bg-surface py-1 shadow-lg"
               >
+                <div className="border-b border-border-muted pb-1 md:hidden">
+                  {SECTIONS.map((section) => (
+                    <Link
+                      key={section.key}
+                      to={section.to}
+                      role="menuitem"
+                      aria-current={activeSection === section.key ? 'page' : undefined}
+                      onClick={() => setOpen(false)}
+                      className={itemClass}
+                    >
+                      {section.label}
+                    </Link>
+                  ))}
+                </div>
                 {user ? (
                   <>
                     <div className="border-b border-border-muted px-4 py-3">

@@ -1,3 +1,4 @@
+import { sequelize } from "../models/db.js";
 import crypto from "crypto";
 import { Op } from "sequelize";
 import { OtpChallenge, OTP_PURPOSE_LABELS } from "../models/otpChallengeModel.js";
@@ -155,7 +156,8 @@ export const verifyOtp = async ({ reference, code, userId, purpose }) => {
     return { ok: false, status: 400, message: "A verification code is required." };
   }
 
-  const challenge = await OtpChallenge.findOne({ where: { reference } });
+  return sequelize.transaction(async (transaction) => {
+  const challenge = await OtpChallenge.findOne({ where: { reference }, transaction, lock: transaction.LOCK.UPDATE });
 
   // One message for every failure mode below. Distinguishing "no such challenge"
   // from "wrong code" from "not your challenge" would tell a prober which of
@@ -173,18 +175,18 @@ export const verifyOtp = async ({ reference, code, userId, purpose }) => {
   if (new Date(challenge.expiresAt) <= new Date()) return reject();
 
   if (challenge.attempts >= challenge.maxAttempts) {
-    await challenge.update({ voidedAt: new Date() });
+    await challenge.update({ voidedAt: new Date() }, { transaction });
     return reject("Too many incorrect attempts. Request a new code.");
   }
 
   // Counted before the comparison, so a failed guess costs a attempt even if the
   // request is abandoned mid-flight.
-  await challenge.increment("attempts");
+  await challenge.increment("attempts", { transaction });
 
   if (!constantTimeEqual(challenge.codeHash, hashCode(code))) {
     const remaining = challenge.maxAttempts - (challenge.attempts + 1);
     if (remaining <= 0) {
-      await challenge.update({ voidedAt: new Date() });
+      await challenge.update({ voidedAt: new Date() }, { transaction });
       return reject("Too many incorrect attempts. Request a new code.");
     }
     return reject(
@@ -198,7 +200,7 @@ export const verifyOtp = async ({ reference, code, userId, purpose }) => {
     consumedAt: now,
     ticketHash: hashTicket(ticket),
     ticketExpiresAt: new Date(now.getTime() + TICKET_TTL_MINUTES * 60 * 1000),
-  });
+  }, { transaction });
 
   return {
     ok: true,
@@ -207,6 +209,7 @@ export const verifyOtp = async ({ reference, code, userId, purpose }) => {
     ticketExpiresAt: challenge.ticketExpiresAt,
     ticketTtlMinutes: TICKET_TTL_MINUTES,
   };
+  });
 };
 
 /**
@@ -238,6 +241,7 @@ export const consumeTicket = async ({
   if (challenge.userId !== userId) return reject();
   if (challenge.purpose !== purpose) return reject();
   if (!challenge.consumedAt || !challenge.ticketHash) return reject();
+  if (challenge.voidedAt) return reject();
   if (challenge.ticketUsedAt) return reject("That verification has already been used.");
   if (!challenge.ticketExpiresAt || new Date(challenge.ticketExpiresAt) <= new Date()) {
     return reject("Your verification has expired. Please request a new code.");
@@ -248,7 +252,8 @@ export const consumeTicket = async ({
   if (contextRef !== null && challenge.contextRef !== contextRef) return reject();
   if (contextId !== null && Number(challenge.contextId) !== Number(contextId)) return reject();
 
-  await challenge.update({ ticketUsedAt: new Date() });
+  const [consumed] = await OtpChallenge.update({ ticketUsedAt: new Date() }, { where: { id: challenge.id, ticketUsedAt: null, voidedAt: null, ticketExpiresAt: { [Op.gt]: new Date() } } });
+  if (consumed !== 1) return reject();
   return { ok: true, challenge };
 };
 
@@ -261,10 +266,6 @@ export const serializeChallenge = (issued) => ({
   // Enough to reassure the user which inbox to check, without publishing the
   // full accredited address to anyone who can reach the endpoint.
   sentTo: maskEmail(issued.deliveredTo),
-  // Whether the message went to a real SMTP server or to the server console.
-  // Surfaced so a developer running without credentials is not left staring at
-  // an empty inbox wondering what broke.
-  delivery: issued.delivery?.transport ?? "unknown",
 });
 
 // b****r@example.com — recognisable to its owner, not much use to anyone else.

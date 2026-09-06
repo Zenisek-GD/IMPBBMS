@@ -1,4 +1,6 @@
 import { User } from "../models/userModel.js";
+import crypto from "node:crypto";
+import { otpTtlMinutes } from "../config/mail.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
 import { recordAudit, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { sendPasswordChangedEmail } from "../services/mailer.js";
@@ -23,6 +25,12 @@ import { sendPasswordChangedEmail } from "../services/mailer.js";
 // client: a caller who was told nothing about whether the address exists has to
 // be handed *something* to submit a code against, and the reference is issued for
 // non-existent addresses too.
+const dummyChallenge = (email) => ({
+  reference: crypto.randomUUID(),
+  expiresAt: new Date(Date.now() + otpTtlMinutes * 60000),
+  expiresInMinutes: otpTtlMinutes,
+  sentTo: maskEmail(email),
+});
 const genericRequestResponse = (email) => ({
   message:
     `If ${maskEmail(email)} has an account with us, a 6-digit verification code is on its way. ` +
@@ -32,13 +40,13 @@ const genericRequestResponse = (email) => ({
 // Design doc Section 12 requires server-side validation on all inputs — the
 // frontend runs the same rules, but these are the ones that actually count.
 export const validatePassword = (password) => {
-  if (typeof password !== "string" || password.length < 8) {
-    return "Password must be at least 8 characters.";
+  if (typeof password !== "string" || password.length < 12) {
+    return "Password must be at least 12 characters.";
   }
-  if (password.length > 200) {
+  if (Buffer.byteLength(password, "utf8") > 72) {
     // bcrypt truncates at 72 bytes, so anything beyond that adds no strength; the
     // limit exists to stop a multi-megabyte string being fed to the hasher.
-    return "Password must be 200 characters or fewer.";
+    return "Password must be 72 UTF-8 bytes or fewer.";
   }
   if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
     return "Password must contain at least one letter and one number.";
@@ -81,7 +89,7 @@ export const forgotPassword = async (req, res) => {
   // would be a way to complete an activation without the invitation. Those bidders
   // need a fresh invitation from an official instead.
   if (!user || user.status !== "active") {
-    return res.json(genericRequestResponse(email));
+    return res.json({ ...genericRequestResponse(email), challenge: dummyChallenge(email) });
   }
 
   const issued = await issueOtp({ user, purpose: "passwordReset", deliveredTo: user.email });
@@ -89,7 +97,7 @@ export const forgotPassword = async (req, res) => {
   // A rate-limit refusal is reported plainly here. It only ever happens to a
   // caller who has already been issued codes for this account in the last few
   // minutes, so it tells them nothing they did not already know.
-  if (!issued.ok) return res.status(issued.status).json({ message: issued.message });
+  if (!issued.ok) return res.json({ ...genericRequestResponse(email), challenge: dummyChallenge(email) });
 
   await recordAudit({
     actionType: AUDIT_ACTIONS.OTP_ISSUED,
@@ -137,7 +145,7 @@ export const verifyResetCode = async (req, res) => {
       ipAddress: req.ip,
       afterState: { purpose: "passwordReset" },
     });
-    return res.status(verification.status).json({ message: verification.message });
+    return res.status(400).json(genericFailure);
   }
 
   await recordAudit({

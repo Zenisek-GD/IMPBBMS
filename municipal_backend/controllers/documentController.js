@@ -1,10 +1,10 @@
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
-import { Bid } from "../models/biddingModel.js";
+import { Bid, Rfq } from "../models/biddingModel.js";
 import { Invoice } from "../models/paymentModel.js";
 import { User } from "../models/userModel.js";
-import { checksumOf, safeFilename } from "../services/documentStore.js";
+import { checksumOf, safeFilename, validateFileContent } from "../services/documentStore.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 
 // Design doc Section 12: "File uploads and document access restricted by
@@ -13,7 +13,7 @@ import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 // Access is decided per attachment point rather than globally, because a
 // supplier must reach their own documents and nobody else's, while reviewers
 // need to reach everyone's. Returns { read, write } for the caller.
-const accessFor = async (req, entityRef, entityId) => {
+export const accessFor = async (req, entityRef, entityId) => {
   const has = (permission) => req.permissions.has(permission);
 
   // The vendor profile belonging to this caller, if any.
@@ -63,11 +63,14 @@ const accessFor = async (req, entityRef, entityId) => {
       // owner" means THIS bid's vendor, not any vendor. Checking only that the
       // caller has a vendor profile would let one bidder read, replace or delete
       // a competitor's bid documents, which are confidential until opening.
-      const bid = await Bid.findByPk(entityId);
+      const bid = await Bid.findByPk(entityId, { include: [{ model: Rfq, as: "rfq" }] });
       const isOwner = Boolean(ownVendor) && bid?.vendorId === ownVendor.id;
+      // Raw attachments are neither redacted nor separated into envelopes.
+      // They cannot be disclosed to reviewers while sealed or under blind scoring.
+      const disclosed = bid && !bid.financialSealed && ["evaluated", "awarded"].includes(bid.rfq?.status);
       return {
-        read: isOwner || has("bidding.view") || has("bidding.evaluate") || has("bidding.technicalInput"),
-        write: isOwner,
+        read: isOwner || (disclosed && (has("bidding.view") || has("bidding.evaluate") || has("bidding.technicalInput"))),
+        write: isOwner && !bid.submittedAt && bid.rfq?.status === "published" && new Date(bid.rfq.closingDate) > new Date(),
       };
     }
 
@@ -130,6 +133,8 @@ export const uploadDocument = async (req, res) => {
   const { entityRef, entityId, docType, label } = req.body;
 
   if (!req.file) return res.status(400).json({ message: "No file was received." });
+  const contentError = validateFileContent(req.file);
+  if (contentError) return res.status(400).json({ message: contentError });
   if (!entityRef || !entityId) {
     return res.status(400).json({ message: "entityRef and entityId are required." });
   }

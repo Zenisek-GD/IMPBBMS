@@ -96,13 +96,13 @@ const safeCss = (css) => {
   // A stylesheet cannot be parsed with the tag sanitiser, so it gets its own
   // narrow rule: nothing that loads a resource, and nothing that can close the
   // <style> element and escape into markup.
-  return CSS_BANNED.test(css) ? "" : css;
+  return CSS_BANNED.test(css) || /[\\<>@]/.test(css) ? "" : css;
 };
 
 export const assembleDocument = ({ bodyHtml, css, title }) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title ?? "Document")}</title>
 <style>${BASE_CSS}${safeCss(css)}</style>
-</head><body>${bodyHtml}</body></html>`;
+</head><body>${sanitizeHtml(bodyHtml)}</body></html>`;
 
 // ── The one function callers use ─────────────────────────────────────────────
 // Returns the full printable HTML plus the running header/footer fragments and

@@ -1,3 +1,4 @@
+import "./config/developmentOnly.js";
 import "./config/env.js";
 import { sequelize } from "./models/db.js";
 import { User } from "./models/userModel.js";
@@ -1160,7 +1161,7 @@ try {
   if (renamed) console.log(`✅ named ${renamed} demo officials`);
 
   // Suppliers. The first is linked to the seeded vendor account so signing in
-  // as vendor@civicbid.test lands on a profile with real history behind it.
+  // as vendor@procurenance.com lands on a profile with real history behind it.
   const vendors = {};
   for (const [key, profile] of Object.entries(VENDORS)) {
     const vendor = await Vendor.create({

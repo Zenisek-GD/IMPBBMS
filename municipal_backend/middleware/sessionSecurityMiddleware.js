@@ -3,6 +3,7 @@ import { destroyLoginSession } from "../services/loginSession.js";
 import { LoginSession } from "../models/authSecurityModel.js";
 import { expireStoredSession } from "../services/sessionStore.js";
 import { hashToken } from "../services/authPolicy.js";
+import { isAllowedFrontendOrigin } from "../config/frontendOrigins.js";
 
 export const sessionSecurity = async (req, res, next) => {
   res.set("Cache-Control", "no-store, private");
@@ -25,8 +26,7 @@ export const sessionSecurity = async (req, res, next) => {
 export const requireSameOrigin = (req, res, next) => {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
   const origin = req.get("origin");
-  const allowed = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
-  if ((origin && origin !== allowed) || (!origin && req.get("sec-fetch-site") === "cross-site")) {
+  if ((origin && !isAllowedFrontendOrigin(origin)) || (!origin && req.get("sec-fetch-site") === "cross-site")) {
     return res.status(403).json({ message: "This request origin is not allowed." });
   }
   next();

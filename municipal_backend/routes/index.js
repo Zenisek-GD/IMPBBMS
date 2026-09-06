@@ -72,7 +72,6 @@ router.use("/api/auth", authRoutes);
 // Authentication security is applied above to every route; enrollment and
 // logout remain reachable through the explicit enrollment allowlist.
 
-
 // Bidder account activation. Session-less: the caller holds an invitation token,
 // not a cookie, because the account they are activating cannot be signed into
 // until they finish. See routes/activationRoutes.js.

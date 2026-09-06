@@ -5,12 +5,14 @@ import './index.css'
 import App from './App.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { ThemeProvider } from './context/ThemeContext.jsx'
+import AppErrorBoundary from './components/ui/AppErrorBoundary.jsx'
 
 // ThemeProvider sits inside AuthProvider because the theme is a property of the
 // signed-in account — it needs the session before it can know whose preference
 // to apply.
 createRoot(document.getElementById('root')).render(
   <StrictMode>
+    <AppErrorBoundary>
     <BrowserRouter>
       <AuthProvider>
         <ThemeProvider>
@@ -18,5 +20,6 @@ createRoot(document.getElementById('root')).render(
         </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>
+    </AppErrorBoundary>
   </StrictMode>,
 )

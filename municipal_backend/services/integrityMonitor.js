@@ -159,7 +159,7 @@ export const roleGrantFingerprint = async (roleId) => {
 // design: fingerprinting must never be the thing that breaks a requisition
 // being saved. A missed fingerprint surfaces later as a finding to investigate,
 // which is the safe direction to fail in.
-export const recordFingerprint = async (entityRef, row) => {
+export const recordFingerprint = async (entityRef, row, options = {}) => {
   try {
     const fingerprint = fingerprintOf(entityRef, row);
     await RecordFingerprint.upsert({
@@ -167,17 +167,17 @@ export const recordFingerprint = async (entityRef, row) => {
       entityId: row.id,
       fingerprint,
       lastAuditSequence: null,
-    });
+    }, { transaction: options.transaction });
   } catch (err) {
-    console.error(`[integrity] could not fingerprint ${entityRef}#${row?.id}:`, err.message);
+    console.error(`[integrity] could not fingerprint ${entityRef}#${row?.id}:`, err.name);
   }
 };
 
-export const forgetFingerprint = async (entityRef, id) => {
+export const forgetFingerprint = async (entityRef, id, options = {}) => {
   try {
-    await RecordFingerprint.destroy({ where: { entityRef, entityId: id } });
+    await RecordFingerprint.destroy({ where: { entityRef, entityId: id }, transaction: options.transaction });
   } catch (err) {
-    console.error(`[integrity] could not clear ${entityRef}#${id}:`, err.message);
+    console.error(`[integrity] could not clear ${entityRef}#${id}:`, err.name);
   }
 };
 
@@ -193,15 +193,15 @@ export const attachIntegrityHooks = async () => {
 
   for (const [entityRef, spec] of Object.entries(WATCHED)) {
     const model = await spec.load();
-    model.addHook("afterCreate", (row) => recordFingerprint(entityRef, row));
-    model.addHook("afterUpdate", (row) => recordFingerprint(entityRef, row));
-    model.addHook("afterSave", (row) => recordFingerprint(entityRef, row));
-    model.addHook("afterDestroy", (row) => forgetFingerprint(entityRef, row.id));
+    model.addHook("afterCreate", (row, options) => recordFingerprint(entityRef, row, options));
+    model.addHook("afterUpdate", (row, options) => recordFingerprint(entityRef, row, options));
+    model.addHook("afterSave", (row, options) => recordFingerprint(entityRef, row, options));
+    model.addHook("afterDestroy", (row, options) => forgetFingerprint(entityRef, row.id, options));
     // Bulk writes bypass per-row hooks unless asked; the seed and the
     // appropriation release both use bulkCreate, and a row created without a
     // fingerprint would be reported as an unauthorised insert on the next sweep.
-    model.addHook("afterBulkCreate", (rows) =>
-      Promise.all(rows.map((row) => recordFingerprint(entityRef, row)))
+    model.addHook("afterBulkCreate", (rows, options) =>
+      Promise.all(rows.map((row) => recordFingerprint(entityRef, row, options)))
     );
 
     // ── The same problem, in the other direction ──────────────────────────────
@@ -242,7 +242,7 @@ export const recordRoleGrants = async (roleId) => {
     if (!fingerprint) return;
     await RecordFingerprint.upsert({ entityRef: "rolePermissions", entityId: roleId, fingerprint });
   } catch (err) {
-    console.error(`[integrity] could not fingerprint role grants ${roleId}:`, err.message);
+    console.error(`[integrity] could not fingerprint role grants ${roleId}:`, err.name);
   }
 };
 

@@ -1,5 +1,7 @@
 import { DataTypes } from "sequelize";
-import bcrypt from "bcrypt";
+// bcryptjs is API-compatible with bcrypt but does not depend on a native Node
+// add-on, so the same password hashes work in both Node and Cloudflare Workers.
+import bcrypt from "bcryptjs";
 import { sequelize } from "./db.js";
 import { Role } from "./roleModel.js";
 import { Department } from "./departmentModel.js";
@@ -78,13 +80,21 @@ const BCRYPT_COST = 12;
 User.beforeCreate(async (user) => {
   user.password = await bcrypt.hash(user.password, BCRYPT_COST);
 });
-User.beforeUpdate(async (user) => {
+User.beforeUpdate(async (user, options) => {
+  if (user.changed("password") || user.changed("email")) {
+    // Outstanding mailbox proofs must not survive a credential/channel change.
+    const { OtpChallenge } = await import("./otpChallengeModel.js");
+    await OtpChallenge.update({ voidedAt: new Date() }, {
+      where: { userId: user.id, voidedAt: null }, transaction: options.transaction,
+    });
+  }
   if (user.changed("password")) {
     user.password = await bcrypt.hash(user.password, BCRYPT_COST);
   }
 });
 
 User.prototype.comparePassword = function (plainPassword) {
+  if (typeof plainPassword !== "string" || plainPassword.length > 200) return Promise.resolve(false);
   return bcrypt.compare(plainPassword, this.password);
 };
 

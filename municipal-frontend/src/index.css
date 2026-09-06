@@ -1,5 +1,7 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
+
+/* The deployed CSP permits local fonts only. Use the existing system-font
+   fallbacks without issuing a remote stylesheet request that browsers block. */
 
 /* Dark mode is driven by a class on <html>, not by the OS query alone — the
    theme belongs to the signed-in account, so the app has to be able to force it

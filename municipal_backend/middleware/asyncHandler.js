@@ -59,7 +59,20 @@ export const wrapRouterStack = (layerOwner) => {
 export const errorHandler = (err, req, res, next) => {
   if (res.headersSent) return next(err);
 
-  console.error(`[error] ${req.method} ${req.originalUrl}:`, err?.message ?? err);
+  // Keep the HTTP response deliberately generic, but record the database's
+  // own error text privately. Without it, a missing remote table or an Aiven
+  // permission/configuration error is indistinguishable from an application
+  // bug when investigating a deployment. Never log the request body, query
+  // string, SQL statement, or bound values here: those can contain tokens or
+  // personal information.
+  const databaseMessage = err?.parent?.message ?? err?.original?.message;
+  console.error(
+    `[error] ${req.method} ${req.path}: ${err?.name ?? "Error"}` +
+      (databaseMessage ? ` (${databaseMessage})` : "")
+  );
+
+  if (err?.type === "entity.too.large") return res.status(413).json({ message: "Request body is too large." });
+  if (err?.code === "WORKFLOW_CONFLICT") return res.status(409).json({ message: "This record changed. Reload it before trying again." });
 
   // Malformed JSON bodies arrive here from express.json() as a SyntaxError.
   if (err?.type === "entity.parse.failed") {

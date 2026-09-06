@@ -58,6 +58,7 @@ const from = () => `"${mailConfig.fromName}" <${mailConfig.fromAddress}>`;
 // full body: this mode exists so a developer can follow the flow, and it only
 // ever runs when nothing is configured to send.
 const printToConsole = ({ to, subject, text }) => {
+  if (process.env.NODE_ENV === "production") throw new Error("Console mail is disabled in production.");
   console.log(`\n┌─ mail (not sent — no SMTP configured) ${"─".repeat(28)}`);
   console.log(`│ To:      ${to}`);
   console.log(`│ Subject: ${subject}`);

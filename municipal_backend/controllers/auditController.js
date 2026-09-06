@@ -92,8 +92,9 @@ export const exportAuditLog = async (req, res) => {
 
   const escape = (value) => {
     if (value === null || value === undefined) return "";
-    const text = String(value);
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    const raw = String(value);
+    const text = /^[\s]*[=+@-]|^[\t\r\n]/.test(raw) ? "\'" + raw : raw;
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
 
   const rows = entries.map((entry) =>

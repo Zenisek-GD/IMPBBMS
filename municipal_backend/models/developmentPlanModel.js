@@ -58,9 +58,10 @@ DevelopmentPlan.belongsTo(User, { as: "preparedBy", foreignKey: "preparedById" }
 // these, so the sector is the enum and the specific programme is free text in
 // `subsector`. Storing the loose words as the enum instead would have produced
 // a list nobody could roll up.
-export const SECTORS = ["social", "economic", "infrastructure", "environment", "institutional"];
+export const SECTORS = ["general", "social", "economic", "infrastructure", "environment", "institutional"];
 
 export const SECTOR_LABELS = {
+  general: "General / cross-sectoral",
   social: "Social (health, education, housing, social welfare)",
   economic: "Economic (agriculture, enterprise, tourism, employment)",
   infrastructure: "Infrastructure (roads, buildings, water, power)",

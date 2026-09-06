@@ -1,2 +1,13 @@
 # Claude Code local worktrees and configuration
 .claude/
+.wrangler-dry-run/
+.wrangler/
+.wrangler-mysql2-static/
+.wrangler-node-compat/
+.dev.vars*
+.env*
+!.env.example
+!municipal-frontend/.env.production
+**/backup-*.sql
+**/*.dump
+security-artifacts/

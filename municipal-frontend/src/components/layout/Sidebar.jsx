@@ -35,7 +35,7 @@ const itemClass = (collapsed, isActive) =>
     collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
   } ${isActive ? 'bg-navy-tint text-navy' : 'text-text-secondary hover:bg-navy-tint/60 hover:text-navy'}`
 
-export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle, onLogout }) {
+export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle, onLogout, onNavigate }) {
   const { user } = useAuth()
 
   return (
@@ -86,6 +86,8 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
                 <NavLink
                   key={`${item.href}:${item.label}`}
                   to={item.href}
+                  onClick={onNavigate}
+                  aria-label={item.label}
                   title={collapsed ? item.label : undefined}
                   className={({ isActive }) => itemClass(collapsed, isActive)}
                 >
@@ -118,6 +120,8 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
           <div className="flex flex-col gap-0.5">
             <NavLink
               to="/profile"
+              onClick={onNavigate}
+              aria-label="My Profile"
               title={collapsed ? 'My Profile' : undefined}
               className={({ isActive }) => itemClass(collapsed, isActive)}
             >

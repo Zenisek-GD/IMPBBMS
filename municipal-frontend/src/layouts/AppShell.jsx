@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import Sidebar from '../components/layout/Sidebar'
 import TopNavBar from '../components/layout/TopNavBar'
@@ -16,6 +16,9 @@ import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts'
 // `nav` should always resolve here — but fall back defensively just in case.
 export default function AppShell() {
   const { user, logout } = useAuth()
+  const location = useLocation()
+  const [mobileNavLocation, setMobileNavLocation] = useState(null)
+  const mobileNavOpen = mobileNavLocation === location.key
   const nav = ROLE_NAV[user?.role] ?? ROLE_NAV.departmentRequester
 
   const [lguName, setLguName] = useState('')
@@ -35,6 +38,10 @@ export default function AppShell() {
   // Bind Alt+<key> shortcuts for every sidebar destination in this role.
   useKeyboardShortcuts(effectiveSections)
 
+  // ── Idle session timeout ──────────────────────────────────────────────────
+  // The server returns `sessionTimeoutMs` per role — admin-side officers get a
+  // shorter window.  The hook watches for user activity and shows a warning
+  // before logging out automatically.
   // `logout` clears the local session whether or not the server answers, so this
   // always ends with the shell unmounting — which is the behaviour that was
   // missing. If the server could not be reached the session cookie is httpOnly
@@ -105,8 +112,9 @@ export default function AppShell() {
 
   return (
     <div className="flex h-screen flex-col bg-canvas">
-      <TopNavBar searchPlaceholder={nav.searchPlaceholder} lguName={lguName} systemName={systemName} />
+      <TopNavBar sections={effectiveSections} lguName={lguName} systemName={systemName} onOpenNavigation={() => setMobileNavLocation(location.key)} />
       <div className="flex flex-1 overflow-hidden">
+        <div className="hidden h-full md:block">
         <Sidebar
           brandTitle={nav.brandTitle}
           brandSubtitle={nav.brandSubtitle}
@@ -115,10 +123,22 @@ export default function AppShell() {
           onToggle={toggleSidebar}
           onLogout={() => setConfirmingLogout(true)}
         />
-        <main className="flex-1 overflow-y-auto bg-canvas">
+        </div>
+        <main className="min-w-0 flex-1 overflow-y-auto bg-canvas">
           <Outlet />
         </main>
       </div>
+      {mobileNavOpen && (
+        <Modal title="Navigation" size="sm" onClose={() => setMobileNavLocation(null)}>
+          <div className="flex h-[60dvh] justify-center">
+            <Sidebar brandTitle={nav.brandTitle} brandSubtitle={nav.brandSubtitle}
+              sections={effectiveSections} collapsed={false}
+              onToggle={() => setMobileNavLocation(null)}
+              onNavigate={() => setMobileNavLocation(null)}
+              onLogout={() => { setMobileNavLocation(null); setConfirmingLogout(true) }} />
+          </div>
+        </Modal>
+      )}
 
       {/* Signing out used to happen on the first click, which in a system where
           half the screens hold half-finished work is a keystroke away from

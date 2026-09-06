@@ -1,53 +1,57 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
+import NotFound from './pages/NotFound'
 import AppShell from './layouts/AppShell'
 import Login from './pages/Login'
-import ForgotPassword from './pages/ForgotPassword'
-import ActivateAccount from './pages/ActivateAccount'
-import ComingSoon from './pages/ComingSoon'
 import ProtectedRoute from './routes/ProtectedRoute'
 import RoleRoute from './routes/RoleRoute'
 import RoleHome from './routes/RoleHome'
-import RoleWorkspace from './pages/dashboards/RoleWorkspace'
-import MyProfile from './pages/account/MyProfile'
 import MfaEnrollment from './pages/account/MfaEnrollment'
-import PublicMessages from './pages/messages/PublicMessages'
-import AdminUsers from './pages/dashboards/AdminUsers'
-import AdminDepartments from './pages/dashboards/AdminDepartments'
-import AdminSettings from './pages/dashboards/AdminSettings'
-import AdminSecuritySettings from './pages/dashboards/AdminSecuritySettings'
-import AdminThresholds from './pages/dashboards/AdminThresholds'
-import BidOpportunities from './pages/supplier/BidOpportunities'
-import DevelopmentPlanning from './pages/planning/DevelopmentPlanning'
-import BudgetPreparation from './pages/budget/BudgetPreparation'
-import AppEntries from './pages/app/AppEntries'
-import PurchaseRequisitions from './pages/pr/PurchaseRequisitions'
-import RfqManagement from './pages/bidding/RfqManagement'
-import VendorVerification from './pages/bidding/VendorVerification'
-import EvaluationWorkspace from './pages/bidding/EvaluationWorkspace'
-import Observers from './pages/bidding/Observers'
-import Protests from './pages/bidding/Protests'
-import Contracts from './pages/contracts/Contracts'
-import Deliveries from './pages/contracts/Deliveries'
-import LiveConference from './pages/contracts/LiveConference'
-import Invoices from './pages/finance/Invoices'
-import UnexpendedMonitor from './pages/finance/UnexpendedMonitor'
-import Appropriations from './pages/finance/Appropriations'
-import PendingItems from './pages/finance/PendingItems'
-import AuditLog from './pages/audit/AuditLog'
-import SecurityConsole from './pages/audit/SecurityConsole'
-import DssDashboard from './pages/insights/DssDashboard'
-import TransparencyPortal from './pages/insights/TransparencyPortal'
 import PublicTransparency from './pages/public/PublicTransparency'
 import PublicProjectDetail from './pages/public/PublicProjectDetail'
-import AnnouncementsAdmin from './pages/announcements/AnnouncementsAdmin'
-import InvitationToBid from './pages/announcements/InvitationToBid'
-import TemplateManager from './pages/documents/TemplateManager'
-import GeneratedDocuments from './pages/documents/GeneratedDocuments'
+
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
+const ActivateAccount = lazy(() => import('./pages/ActivateAccount'))
+const ComingSoon = lazy(() => import('./pages/ComingSoon'))
+const RoleWorkspace = lazy(() => import('./pages/dashboards/RoleWorkspace'))
+const MyProfile = lazy(() => import('./pages/account/MyProfile'))
+const PublicMessages = lazy(() => import('./pages/messages/PublicMessages'))
+const AdminUsers = lazy(() => import('./pages/dashboards/AdminUsers'))
+const AdminDepartments = lazy(() => import('./pages/dashboards/AdminDepartments'))
+const AdminSettings = lazy(() => import('./pages/dashboards/AdminSettings'))
+const AdminSecuritySettings = lazy(() => import('./pages/dashboards/AdminSecuritySettings'))
+const AdminThresholds = lazy(() => import('./pages/dashboards/AdminThresholds'))
+const BidOpportunities = lazy(() => import('./pages/supplier/BidOpportunities'))
+const DevelopmentPlanning = lazy(() => import('./pages/planning/DevelopmentPlanning'))
+const BudgetPreparation = lazy(() => import('./pages/budget/BudgetPreparation'))
+const AppEntries = lazy(() => import('./pages/app/AppEntries'))
+const PurchaseRequisitions = lazy(() => import('./pages/pr/PurchaseRequisitions'))
+const RfqManagement = lazy(() => import('./pages/bidding/RfqManagement'))
+const VendorVerification = lazy(() => import('./pages/bidding/VendorVerification'))
+const EvaluationWorkspace = lazy(() => import('./pages/bidding/EvaluationWorkspace'))
+const Observers = lazy(() => import('./pages/bidding/Observers'))
+const Protests = lazy(() => import('./pages/bidding/Protests'))
+const Contracts = lazy(() => import('./pages/contracts/Contracts'))
+const Deliveries = lazy(() => import('./pages/contracts/Deliveries'))
+const LiveConference = lazy(() => import('./pages/contracts/LiveConference'))
+const Invoices = lazy(() => import('./pages/finance/Invoices'))
+const UnexpendedMonitor = lazy(() => import('./pages/finance/UnexpendedMonitor'))
+const Appropriations = lazy(() => import('./pages/finance/Appropriations'))
+const PendingItems = lazy(() => import('./pages/finance/PendingItems'))
+const AuditLog = lazy(() => import('./pages/audit/AuditLog'))
+const SecurityConsole = lazy(() => import('./pages/audit/SecurityConsole'))
+const DssDashboard = lazy(() => import('./pages/insights/DssDashboard'))
+const TransparencyPortal = lazy(() => import('./pages/insights/TransparencyPortal'))
+const AnnouncementsAdmin = lazy(() => import('./pages/announcements/AnnouncementsAdmin'))
+const InvitationToBid = lazy(() => import('./pages/announcements/InvitationToBid'))
+const TemplateManager = lazy(() => import('./pages/documents/TemplateManager'))
+const GeneratedDocuments = lazy(() => import('./pages/documents/GeneratedDocuments'))
 
 // Each route declares which roles may reach it, mirroring the permission
 // matrix in design doc Section 2.3. The backend enforces the same rules.
 function App() {
   return (
+    <Suspense fallback={<p role="status" className="p-6 text-sm text-text-secondary">Loading page?</p>}>
     <Routes>
       <Route path="/login" element={<Login />} />
 
@@ -87,15 +91,18 @@ function App() {
         <Route path="/home" element={<RoleHome />} />
         <Route path="/coming-soon" element={<ComingSoon />} />
 
+        {/* MFA is deliberately outside AppShell. The shell fetches the normal
+            workspace settings, shortcuts, and notifications on mount. Those
+            endpoints correctly reject an account until MFA is completed, and
+            mounting them during enrolment created a noisy burst of blocked
+            requests that could compete with the QR-code request itself. */}
+        <Route path="/account/two-factor" element={<MfaEnrollment />} />
+
         <Route element={<AppShell />}>
           {/* Every signed-in account has one, whatever the role — it is reached
               from the sidebar footer rather than a header dropdown, so it needs
               no RoleRoute guard. */}
           <Route path="/profile" element={<MyProfile />} />
-
-          {/* Two-factor set-up. Reachable by every signed-in account whatever
-              its role, and the one page an un-enrolled session may open. */}
-          <Route path="/account/two-factor" element={<MfaEnrollment />} />
 
           {/* Public correspondence. The five offices a message can be routed to
               — see MESSAGE_ROUTING on the server. The API scopes the list to
@@ -543,7 +550,9 @@ function App() {
           </Route>
         </Route>
       </Route>
+      <Route path="*" element={<NotFound />} />
     </Routes>
+    </Suspense>
   )
 }
 

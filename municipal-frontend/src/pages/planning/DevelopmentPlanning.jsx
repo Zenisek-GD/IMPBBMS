@@ -43,7 +43,12 @@ function PlanForm({ onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
 
   return (
-    <Modal title="New development plan" onClose={onClose}>
+    <Modal
+      title="New development plan"
+      subtitle="Record the plan details and vision. After saving, use the clearly marked Add Goal button on the draft plan before recording adoption."
+      size="xl"
+      onClose={onClose}
+    >
       <div className="flex flex-col gap-3">
         <label className="text-xs text-text-secondary">
           Title
@@ -71,7 +76,12 @@ function PlanForm({ onClose, onSaved }) {
         </div>
         <label className="text-xs text-text-secondary">
           Vision
-          <textarea rows={3} value={vision} onChange={(e) => setVision(e.target.value)} className={`mt-1 ${inputClass}`} />
+          <textarea
+            rows={8}
+            value={vision}
+            onChange={(e) => setVision(e.target.value)}
+            className={`mt-1 min-h-40 resize-y leading-relaxed ${inputClass}`}
+          />
         </label>
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -83,6 +93,11 @@ function PlanForm({ onClose, onSaved }) {
             disabled={saving}
             onClick={async () => {
               setError('')
+              if (!vision.trim()) {
+                setError('Enter the plan’s primary goal before creating the plan.')
+                setError('Enter the plan vision before creating the plan.')
+                return
+              }
               setSaving(true)
               try {
                 await planningApi.createPlan({ title, startYear, endYear, vision })
@@ -248,7 +263,12 @@ function ResolutionForm({ title, label, onClose, onConfirm }) {
       <div className="flex flex-col gap-3">
         <label className="text-xs text-text-secondary">
           {label}
-          <input value={resolutionNo} onChange={(e) => setResolutionNo(e.target.value)} className={`mt-1 ${inputClass}`} />
+          <input
+            value={resolutionNo}
+            onChange={(e) => setResolutionNo(e.target.value)}
+            placeholder="e.g. Resolution No. 2026-014"
+            className={`mt-1 ${inputClass}`}
+          />
         </label>
         <label className="text-xs text-text-secondary">
           Date
@@ -665,6 +685,14 @@ export default function DevelopmentPlanning() {
 
   const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
 
+  // Planning changes are shared records. Refresh an open Planning page on the
+  // same cadence as the notification bell so a Mayor or Sanggunian user sees a
+  // colleague's saved update without manually reloading the browser.
+  useEffect(() => {
+    const timer = window.setInterval(refresh, 30_000)
+    return () => window.clearInterval(timer)
+  }, [refresh])
+
   useEffect(() => {
     let cancelled = false
     Promise.all([
@@ -788,22 +816,22 @@ export default function DevelopmentPlanning() {
                   <div className="flex flex-wrap items-center gap-3">
                     <Badge tone={PLAN_STATUS_TONES[plan.status]}>{PLAN_STATUS_LABELS[plan.status]}</Badge>
                     {plan.status === 'draft' && canManageCdp && (
-                      <button
-                        type="button"
+                      <Button
+                        size="sm"
+                        icon={Plus}
                         onClick={() => setAddingGoalTo(plan)}
-                        className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                       >
                         ADD GOAL
-                      </button>
+                      </Button>
                     )}
                     {plan.status === 'draft' && canAdopt && (
-                      <button
-                        type="button"
+                      <Button
+                        size="sm"
+                        icon={Check}
                         onClick={() => setAdoptingPlan(plan)}
-                        className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                       >
                         RECORD ADOPTION
-                      </button>
+                      </Button>
                     )}
                     {plan.status === 'adopted' && canPrioritise && (
                       <button
@@ -825,7 +853,9 @@ export default function DevelopmentPlanning() {
 
                 <div className="flex flex-col gap-1">
                   {plan.goals.length === 0 ? (
-                    <p className="text-[13px] text-text-faint">No goals recorded yet.</p>
+                    <p className="text-[13px] text-text-faint">
+                      No goals recorded yet. A Planning Officer must use ADD GOAL before adoption can be recorded.
+                    </p>
                   ) : (
                     plan.goals.map((goal) => (
                       <div
@@ -840,7 +870,7 @@ export default function DevelopmentPlanning() {
                         )}
                         <span className="flex-1 text-navy">{goal.title}</span>
                         {goal.subsector && <span className="text-[11px] text-text-faint">{goal.subsector}</span>}
-                        <Badge tone="neutral">{goal.sector}</Badge>
+                        <Badge tone="neutral">{goal.sectorLabel ?? goal.sector}</Badge>
                         {goal.isMayorPriority && (
                           <Badge tone="warning">MAYOR&apos;S PRIORITY FY {goal.priorityFiscalYear}</Badge>
                         )}
@@ -902,17 +932,18 @@ export default function DevelopmentPlanning() {
                           </button>
                         )}
                         {canAdvance && (
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
+                            variant={next.opensForm ? 'primary' : 'secondary'}
+                            icon={next.opensForm ? Check : undefined}
                             onClick={() =>
                               next.opensForm
                                 ? setAdoptingProgram(program)
                                 : run(() => planningApi.transitionProgram(program.id, next.action)).catch(() => {})
                             }
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
                             {next.label}
-                          </button>
+                          </Button>
                         )}
                         {returnPermission && permissions.has(returnPermission) && (
                           <button
@@ -947,7 +978,12 @@ export default function DevelopmentPlanning() {
         </>
       )}
 
-      {creatingPlan && <PlanForm onClose={() => setCreatingPlan(false)} onSaved={refresh} />}
+      {creatingPlan && (
+        <PlanForm
+          onClose={() => setCreatingPlan(false)}
+          onSaved={refresh}
+        />
+      )}
       {addingGoalTo && (
         <GoalForm
           plan={addingGoalTo}

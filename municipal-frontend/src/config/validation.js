@@ -5,8 +5,8 @@ import { z } from 'zod'
 // the one that actually enforces this; keep the two in step.
 export const passwordSchema = z
   .string()
-  .min(8, 'Password must be at least 8 characters.')
-  .max(200, 'Password must be 200 characters or fewer.')
+  .min(12, 'Password must be at least 12 characters.')
+  .refine((value) => new TextEncoder().encode(value).length <= 72, 'Password must be 72 UTF-8 bytes or fewer.')
   .refine((value) => /[A-Za-z]/.test(value), 'Password must contain at least one letter.')
   .refine((value) => /[0-9]/.test(value), 'Password must contain at least one number.')
 

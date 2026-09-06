@@ -164,6 +164,7 @@ export default function PublicProjectDetail() {
   // the request is even issued.
   const [loaded, setLoaded] = useState({ id: null, status: 'loading', project: null })
   const [extras, setExtras] = useState({ id: null, timeline: null, documents: [] })
+  const [extrasAttempt, setExtrasAttempt] = useState(0)
   const [branding, setBranding] = useState(null)
 
   useEffect(() => {
@@ -193,25 +194,39 @@ export default function PublicProjectDetail() {
         setLoaded({ id, status: err?.response?.status === 404 ? 'notFound' : 'failed', project: null })
       })
 
+    return () => { cancelled = true }
+  }, [id])
+
+  useEffect(() => {
+    let cancelled = false
     // The timeline and documents are fetched alongside rather than on tab
     // switch, so moving between tabs is instant and a citizen who lands here
     // from a link is not made to wait twice.
-    Promise.all([
-      publicApi.fetchProjectTimeline(id).catch(() => null),
-      publicApi.fetchProjectDocuments(id).catch(() => []),
+    Promise.allSettled([
+      publicApi.fetchProjectTimeline(id),
+      publicApi.fetchProjectDocuments(id),
     ]).then(([timeline, documents]) => {
-      if (!cancelled) setExtras({ id, timeline, documents })
+      if (!cancelled) setExtras({
+        id,
+        attempt: extrasAttempt,
+        timeline: timeline.status === 'fulfilled' ? timeline.value : null,
+        timelineFailed: timeline.status === 'rejected',
+        documents: documents.status === 'fulfilled' ? documents.value : [],
+        documentsFailed: documents.status === 'rejected',
+      })
     })
 
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, extrasAttempt])
 
   const status = loaded.id === id ? loaded.status : 'loading'
   const project = loaded.id === id ? loaded.project : null
   const timeline = extras.id === id ? extras.timeline : null
   const documents = extras.id === id ? extras.documents : []
+  const extrasLoading = extras.id !== id || extras.attempt !== extrasAttempt
+  const retryExtras = () => setExtrasAttempt((attempt) => attempt + 1)
 
   if (status === 'loading') {
     return (
@@ -497,7 +512,14 @@ export default function PublicProjectDetail() {
         {tab === 'timeline' && (
           <div className="mt-4">
             <Section title="Complete Project Timeline" icon={History}>
-              {timeline ? (
+              {extrasLoading ? (
+                <p role="status" className="px-4 py-10 text-center text-[13px] text-text-faint">Loading timeline…</p>
+              ) : extras.timelineFailed ? (
+                <div role="alert" className="px-4 py-10 text-center text-sm text-danger">
+                  <p>The timeline could not be loaded. Please try again.</p>
+                  <button type="button" className="mt-2 underline" onClick={retryExtras}>Retry</button>
+                </div>
+              ) : timeline ? (
                 <ProjectTimeline
                   events={timeline.events}
                   disclosure={timeline.disclosure}
@@ -513,7 +535,14 @@ export default function PublicProjectDetail() {
         {tab === 'documents' && (
           <div className="mt-4">
             <Section title="Supporting Documents" icon={Paperclip}>
-              {documents.length === 0 ? (
+              {extrasLoading ? (
+                <p role="status" className="px-4 py-10 text-center text-[13px] text-text-faint">Loading documents…</p>
+              ) : extras.documentsFailed ? (
+                <div role="alert" className="px-4 py-10 text-center text-sm text-danger">
+                  <p>Documents could not be loaded. Please try again.</p>
+                  <button type="button" className="mt-2 underline" onClick={retryExtras}>Retry</button>
+                </div>
+              ) : documents.length === 0 ? (
                 <div className="px-4 py-10 text-center">
                   <p className="text-[13px] text-text-faint">
                     No public documents are attached to this project.

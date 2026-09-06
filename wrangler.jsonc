@@ -1,0 +1,39 @@
+{
+  "$schema": "./municipal_backend/node_modules/wrangler/config-schema.json",
+  "name": "procurenance",
+  "main": "./municipal_backend/cloudflare-worker.js",
+  "compatibility_date": "2026-09-05",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "no_handle_cross_request_promise_resolution"
+  ],
+  "workers_dev": true,
+  "vars": {
+    "NODE_ENV": "production"
+  },
+  "assets": {
+    "directory": "./municipal-frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "877823dff29b44edb4f9f85b48f52672"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "SESSIONS",
+      "database_name": "procurenance-sessions",
+      "database_id": "884b3159-43f5-4518-817d-efd1e55922fe"
+    }
+  ],
+  "browser": {
+    "binding": "BROWSER"
+  },
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  }
+}

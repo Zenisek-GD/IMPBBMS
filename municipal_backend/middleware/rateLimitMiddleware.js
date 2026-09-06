@@ -1,55 +1,48 @@
-// Design doc Section 12: "Rate limiting on public-facing and authentication
-// endpoints." In-memory and per-process, which is fine for a single Node
-// instance — move to Redis if this is ever run behind multiple workers.
+import crypto from "node:crypto";
 const WINDOW_MS = 15 * 60 * 1000;
-
 const buckets = new Map();
+let workerDb;
+if (process.env.CLOUDFLARE_WORKER === "true") {
+  const { env } = await import("cloudflare:workers");
+  if (!env.SESSIONS) throw new Error("SESSIONS is required for shared rate limiting.");
+  workerDb = env.SESSIONS;
+}
 
-const bucketFor = (name) => {
-  if (!buckets.has(name)) buckets.set(name, new Map());
-  return buckets.get(name);
+export const takeAttempt = async (bucket, key, max, { db = workerDb, now = Date.now() } = {}) => {
+  const id = crypto.createHmac("sha256", process.env.SESSION_SECRET || "local-rate-limit")
+    .update(bucket + ":" + key).digest("hex");
+  if (db) {
+    const row = await db.prepare(
+      "INSERT INTO rate_limits (key, attempts, expires_at) VALUES (?, 1, ?) " +
+      "ON CONFLICT(key) DO UPDATE SET " +
+      "attempts = CASE WHEN rate_limits.expires_at <= ? THEN 1 ELSE MIN(rate_limits.attempts + 1, ?) END, " +
+      "expires_at = CASE WHEN rate_limits.expires_at <= ? THEN excluded.expires_at ELSE rate_limits.expires_at END " +
+      "RETURNING attempts, expires_at"
+    ).bind(id, now + WINDOW_MS, now, max + 1, now).first();
+    return { allowed: row.attempts <= max, retryAfter: Math.max(1, Math.ceil((row.expires_at - now) / 1000)) };
+  }
+  // Local development only. Bound memory under address churn.
+  for (const [storedKey, row] of buckets) if (row.expires_at <= now) buckets.delete(storedKey);
+  let row = buckets.get(id);
+  if (!row && buckets.size >= 10000) return { allowed: false, retryAfter: 900 };
+  if (!row) { row = { attempts: 0, expires_at: now + WINDOW_MS }; buckets.set(id, row); }
+  row.attempts = Math.min(row.attempts + 1, max + 1);
+  return { allowed: row.attempts <= max, retryAfter: Math.max(1, Math.ceil((row.expires_at - now) / 1000)) };
 };
 
-// Drop stale entries so the maps can't grow without bound.
-setInterval(() => {
-  const cutoff = Date.now() - WINDOW_MS;
-  for (const bucket of buckets.values()) {
-    for (const [key, timestamps] of bucket) {
-      const recent = timestamps.filter((time) => time > cutoff);
-      if (recent.length) bucket.set(key, recent);
-      else bucket.delete(key);
-    }
-  }
-}, WINDOW_MS).unref();
-
-// Each endpoint gets its own bucket on purpose: someone who mistypes their
-// password repeatedly must still be able to request a reset link, so a shared
-// counter across login/forgot/reset would lock them out of the fix.
-export const rateLimit = ({ bucket, max, key: selectKey = (req) => req.ip }) => (req, res, next) => {
-  const store = bucketFor(bucket);
-  const key = selectKey(req);
-  const cutoff = Date.now() - WINDOW_MS;
-  const recent = (store.get(key) ?? []).filter((time) => time > cutoff);
-
-  if (recent.length >= max) {
-    return res.status(429).json({
-      message: "Too many attempts. Please try again in a few minutes.",
-    });
-  }
-
-  recent.push(Date.now());
-  store.set(key, recent);
-  next();
+export const rateLimit = ({ bucket, max, key = (req) => req.ip }) => (req, res, next) => {
+  takeAttempt(bucket, key(req), max).then((result) => {
+    if (result.allowed) return next();
+    res.setHeader("Retry-After", result.retryAfter);
+    res.status(429).json({ message: "Too many attempts. Please try again in a few minutes." });
+  }).catch(next);
 };
 
-// Forgets an address's attempts on a bucket.
-//
-// Rate limiting on sign-in exists to stop someone guessing passwords, and a
-// *successful* sign-in is not a guess. Counting it meant a legitimate user
-// moving between accounts — an administrator checking how a screen looks to
-// each role, say — could lock themselves out with ten correct passwords in a
-// row, while an attacker's failures cost exactly the same. Clearing on success
-// keeps the ceiling firmly against failures, which is what it is for.
+// A successful password check is not a failed guess. Clear the matching
+// counter without making authentication wait on a best-effort D1 cleanup.
 export const clearRateLimit = (bucket, key) => {
-  buckets.get(bucket)?.delete(key);
+  const id = crypto.createHmac("sha256", process.env.SESSION_SECRET || "local-rate-limit")
+    .update(bucket + ":" + key).digest("hex");
+  buckets.delete(id);
+  if (workerDb) workerDb.prepare("DELETE FROM rate_limits WHERE key = ?").bind(id).run().catch(() => {});
 };

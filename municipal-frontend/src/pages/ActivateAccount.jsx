@@ -326,7 +326,7 @@ export default function ActivateAccount() {
           label="Create a password"
           type="password"
           autoComplete="new-password"
-          hint="At least 8 characters, with a letter and a number."
+          hint="At least 12 characters, with a letter and a number."
           error={errors.password?.message}
           registration={register('password')}
         />

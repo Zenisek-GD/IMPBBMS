@@ -8,7 +8,11 @@ const allowed = (path) => [
 ].some((prefix) => path === prefix || path.startsWith(prefix + "/"));
 
 export const requireMfaEnrollment = async (req, res, next) => {
-  if (!req.session?.userId || req.path === "/api/auth/login" || req.path === "/api/auth/logout") return next();
+  // Public records, activation, and sign-out must remain available even if the
+  // separate MFA store is down; none of these paths grants protected access.
+  if (!req.session?.userId || req.path === "/api/auth/login" || req.path === "/api/auth/logout" ||
+      req.path === "/api/public" || req.path.startsWith("/api/public/") ||
+      req.path === "/api/activation" || req.path.startsWith("/api/activation/")) return next();
   if (!(await twoFactorEnabled())) {
     req.session.mfaEnrollmentRequired = false;
     return next();

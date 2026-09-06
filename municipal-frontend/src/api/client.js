@@ -1,8 +1,14 @@
 import axios from 'axios'
 
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api',
+  // In development Vite proxies this path to Express, keeping the httpOnly
+  // session cookie first-party whether the browser uses localhost or 127.0.0.1.
+  // Cloudflare builds use the same path because the Worker serves UI and API
+  // from one origin.
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
   withCredentials: true,
+  headers: { 'X-Requested-With': 'XMLHttpRequest' },
+  timeout: 30000,
 })
 
 let authEpoch = 0
