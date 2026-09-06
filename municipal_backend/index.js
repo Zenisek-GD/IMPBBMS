@@ -30,6 +30,7 @@ import "./config/env.js";
 import express from "express";
 import path from "path";
 import session from "express-session";
+import { DatabaseSessionStore, startAuthExpirationSweep } from "./services/sessionStore.js";
 import cors from "cors";
 import router from "./routes/index.js";
 import { wrapRouterStack, errorHandler } from "./middleware/asyncHandler.js";
@@ -41,6 +42,8 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+// Configure only the proxy addresses/hops actually used by this deployment.
+if (process.env.TRUST_PROXY) app.set("trust proxy", process.env.TRUST_PROXY === "1" ? 1 : process.env.TRUST_PROXY);
 
 app.use(cors({
   origin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5173",
@@ -50,24 +53,20 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(process.cwd(), "public")));
 
-// The session secret signs the cookie that authenticates every request. A
-// hardcoded one is a published one: anyone with the source can forge a session.
-// It falls back to a development value only, and says so loudly if that happens
-// outside development.
+// Production refuses to start without a private session signing key.
 const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-only-insecure-secret";
 if (!process.env.SESSION_SECRET && process.env.NODE_ENV === "production") {
-  console.warn(
-    "⚠  SESSION_SECRET is not set. Sessions are signed with a publicly known " +
-      "development key — set SESSION_SECRET before serving real users."
-  );
+  throw new Error("SESSION_SECRET is required in production.");
 }
 
 app.use(session({
   secret: SESSION_SECRET,
+  store: new DatabaseSessionStore(),
+  rolling: false,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    maxAge: 1000 * 60 * 60 * 8,
+    maxAge: 5 * 60 * 1000,
     httpOnly: true,
     sameSite: "lax",
     // Requires HTTPS in production; left off locally so development works.
@@ -121,6 +120,8 @@ if (!process.env.ELECTRON && SCAN_MINUTES > 0) {
   setTimeout(scan, 60_000).unref?.();
   setInterval(scan, SCAN_MINUTES * 60_000).unref?.();
 }
+
+startAuthExpirationSweep();
 
 export default app;
 

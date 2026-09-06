@@ -25,9 +25,9 @@ setInterval(() => {
 // Each endpoint gets its own bucket on purpose: someone who mistypes their
 // password repeatedly must still be able to request a reset link, so a shared
 // counter across login/forgot/reset would lock them out of the fix.
-export const rateLimit = ({ bucket, max }) => (req, res, next) => {
+export const rateLimit = ({ bucket, max, key: selectKey = (req) => req.ip }) => (req, res, next) => {
   const store = bucketFor(bucket);
-  const key = req.ip;
+  const key = selectKey(req);
   const cutoff = Date.now() - WINDOW_MS;
   const recent = (store.get(key) ?? []).filter((time) => time > cutoff);
 

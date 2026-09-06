@@ -29,9 +29,12 @@ import { requireAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.post("/login", rateLimit({ bucket: "login", max: 10 }), login);
+router.post("/login",
+  rateLimit({ bucket: "login", max: 10 }),
+  rateLimit({ bucket: "loginAccount", max: 10, key: (req) => String(req.body?.email ?? "").trim().toLowerCase().slice(0, 254) }),
+  login);
 router.post("/logout", logout);
-router.get("/me", me);
+router.get("/me", requireAuth, me);
 
 // ── Two-factor authentication ────────────────────────────────────────────────
 // The sign-in challenge is deliberately NOT behind requireAuth: at this point
@@ -53,27 +56,27 @@ router.post("/mfa/disable", requireAuth, rateLimit({ bucket: "mfaEnroll", max: 2
 
 // Personal display settings — theme and sidebar state. Rate limited only
 // lightly: toggling a theme is cheap and legitimate to do repeatedly.
-router.patch("/preferences", rateLimit({ bucket: "preferences", max: 120 }), updatePreferences);
+router.patch("/preferences", requireAuth, rateLimit({ bucket: "preferences", max: 120 }), updatePreferences);
 
 // ── Password change (requirement 10) ────────────────────────────────────────
 // Three steps: prove you know the current password and a code is sent, submit the
 // code for a one-time ticket, then set the new password with that ticket.
 router.post(
-  "/change-password/request",
+  "/change-password/request", requireAuth,
   rateLimit({ bucket: "changePasswordRequest", max: 10 }),
   requestPasswordChange
 );
 router.post(
-  "/change-password/verify",
+  "/change-password/verify", requireAuth,
   rateLimit({ bucket: "changePasswordVerify", max: 20 }),
   verifyPasswordChangeCode
 );
-router.post("/change-password", rateLimit({ bucket: "changePassword", max: 10 }), changeOwnPassword);
+router.post("/change-password", requireAuth, rateLimit({ bucket: "changePassword", max: 10 }), changeOwnPassword);
 
 // ── Profile change (requirement 14) ─────────────────────────────────────────
-router.post("/profile/request", rateLimit({ bucket: "profileRequest", max: 10 }), requestProfileUpdate);
-router.post("/profile/verify", rateLimit({ bucket: "profileVerify", max: 20 }), verifyProfileUpdateCode);
-router.patch("/profile", rateLimit({ bucket: "profileUpdate", max: 10 }), updateProfile);
+router.post("/profile/request", requireAuth, rateLimit({ bucket: "profileRequest", max: 10 }), requestProfileUpdate);
+router.post("/profile/verify", requireAuth, rateLimit({ bucket: "profileVerify", max: 20 }), verifyProfileUpdateCode);
+router.patch("/profile", requireAuth, rateLimit({ bucket: "profileUpdate", max: 10 }), updateProfile);
 
 // ── Password reset (requirement 9) ──────────────────────────────────────────
 // Same three-step shape as the change flow above, minus the current password —

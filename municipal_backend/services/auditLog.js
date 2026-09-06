@@ -259,6 +259,15 @@ export const AUDIT_ACTIONS = {
   LOGIN_SUCCESS: "auth.login.success",
   LOGIN_FAILED: "auth.login.failed",
   LOGOUT: "auth.logout",
+  SESSION_EXPIRED: "auth.session.expired",
+  AUTOMATIC_LOGOUT: "auth.logout.automatic",
+  LOGIN_NEW_DEVICE: "auth.login.newDevice",
+  MFA_CHALLENGE_SUCCESS: "auth.mfa.challenge.success",
+  MFA_TRUST_CREATED: "auth.mfa.trust.created",
+  MFA_TRUST_USED: "auth.mfa.trust.used",
+  MFA_TRUST_EXPIRED: "auth.mfa.trust.expired",
+  MFA_POLICY_ENABLED: "auth.mfa.policy.enabled",
+  MFA_POLICY_DISABLED: "auth.mfa.policy.disabled",
 
   // ── Bidder onboarding ─────────────────────────────────────────────────────
   // The chain of accountability from a bidder handing in papers to a usable

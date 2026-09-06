@@ -14,6 +14,7 @@ import PublicMessages from './pages/messages/PublicMessages'
 import AdminUsers from './pages/dashboards/AdminUsers'
 import AdminDepartments from './pages/dashboards/AdminDepartments'
 import AdminSettings from './pages/dashboards/AdminSettings'
+import AdminSecuritySettings from './pages/dashboards/AdminSecuritySettings'
 import AdminThresholds from './pages/dashboards/AdminThresholds'
 import BidOpportunities from './pages/supplier/BidOpportunities'
 import DevelopmentPlanning from './pages/planning/DevelopmentPlanning'
@@ -240,6 +241,7 @@ function App() {
             <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/admin/departments" element={<AdminDepartments />} />
             <Route path="/admin/settings" element={<AdminSettings />} />
+            <Route path="/admin/security-settings" element={<AdminSecuritySettings />} />
             {/* Was <AdminSettings /> as well, which made the "Thresholds"
                 sidebar entry a second link to the settings page. */}
             <Route path="/admin/thresholds" element={<AdminThresholds />} />

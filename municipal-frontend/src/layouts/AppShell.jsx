@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet } from 'react-router-dom'
-import { LogOut, Clock } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import Sidebar from '../components/layout/Sidebar'
 import TopNavBar from '../components/layout/TopNavBar'
 import Modal from '../components/ui/Modal'
@@ -10,7 +10,6 @@ import { useAuth } from '../context/useAuth'
 import { fetchSettings, fetchNavShortcuts } from '../api/settings'
 import { updatePreferences } from '../api/auth'
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts'
-import useIdleTimeout from '../hooks/useIdleTimeout'
 
 // Wraps every authenticated page whose role has a real nav config. Roles
 // without one are routed to /coming-soon instead (see roleLanding.js), so
@@ -35,20 +34,6 @@ export default function AppShell() {
 
   // Bind Alt+<key> shortcuts for every sidebar destination in this role.
   useKeyboardShortcuts(effectiveSections)
-
-  // ── Idle session timeout ──────────────────────────────────────────────────
-  // The server returns `sessionTimeoutMs` per role — admin-side officers get a
-  // shorter window.  The hook watches for user activity and shows a warning
-  // before logging out automatically.
-  const { showWarning: showIdleWarning, countdown, dismiss: dismissIdle } = useIdleTimeout({
-    timeoutMs: user?.sessionTimeoutMs ?? 0,
-    onLogout: async () => {
-      try {
-        sessionStorage.setItem('logout.reason', 'idle')
-      } catch { /* private mode */ }
-      await logout()
-    },
-  })
 
   // `logout` clears the local session whether or not the server answers, so this
   // always ends with the shell unmounting — which is the behaviour that was
@@ -168,36 +153,6 @@ export default function AppShell() {
         </Modal>
       )}
 
-      {/* Idle timeout warning — appears 2 minutes before auto-logout for
-          admin-side roles.  Any activity resets the timer, or the officer can
-          click "Stay signed in" explicitly. */}
-      {showIdleWarning && (
-        <Modal
-          title="Session expiring"
-          size="sm"
-          onClose={dismissIdle}
-        >
-          <div className="flex flex-col gap-4">
-            <div className="flex items-start gap-3">
-              <Clock size={20} className="mt-0.5 shrink-0 text-warning" />
-              <p className="text-[13px] leading-relaxed text-text-secondary">
-                Your session will expire in{' '}
-                <span className="font-semibold text-text-primary">
-                  {countdown > 60
-                    ? `${Math.floor(countdown / 60)}m ${countdown % 60}s`
-                    : `${countdown}s`}
-                </span>{' '}
-                due to inactivity. Any unsaved work will be lost.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="primary" onClick={dismissIdle}>
-                Stay signed in
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   )
 }

@@ -15,7 +15,10 @@ import { Role } from "../models/roleModel.js";
 import { generateSecret, verifyToken, buildOtpAuthUri, TOTP_PARAMETERS } from "../services/totp.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import { recordAudit, auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
-import { sessionTtlForRole, serializeUser, userIncludes, regenerateSession } from "./authController.js";
+import { serializeUser, userIncludes } from "./authController.js";
+import { startLoginSession } from "../services/loginSession.js";
+import { credentialVersion, sessionDetails } from "../services/authPolicy.js";
+import { createTrustedDevice, revokeUserTrust, securityAudit, twoFactorEnabled } from "../services/trustedDevices.js";
 
 // Enrolment and verification of the second factor. The rule this file exists to
 // enforce: knowing the password is not enough, and no code path here may be
@@ -29,46 +32,55 @@ export const isLocked = (enrollment, now = new Date()) =>
 // Shared by the enrolment confirmation and the sign-in check, so the two cannot
 // drift into applying different rules. Returns { ok } or { ok: false, ... }.
 export const consumeToken = async (enrollment, token, { now = new Date(), ip } = {}) => {
-  if (isLocked(enrollment, now)) {
-    const minutes = Math.ceil((new Date(enrollment.lockedUntil) - now) / MINUTE);
-    return { ok: false, locked: true, message: `Too many incorrect codes. Try again in ${minutes} minute(s).` };
-  }
+  return sequelize.transaction(async (transaction) => {
+    const locked = await MfaEnrollment.findByPk(enrollment.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!locked) return { ok: false, message: "Start again from the sign-in page." };
+    enrollment = locked;
+    if (isLocked(enrollment, now)) {
+      const minutes = Math.ceil((new Date(enrollment.lockedUntil) - now) / MINUTE);
+      return { ok: false, locked: true, message: `Too many incorrect codes. Try again in ${minutes} minute(s).` };
+    }
 
-  const secret = decryptSecret(enrollment.encryptedSecret);
-  const step = verifyToken(secret, token, { at: now });
+    const secret = decryptSecret(enrollment.encryptedSecret);
+    const step = verifyToken(secret, token, { at: now });
 
-  // ── Replay ────────────────────────────────────────────────────────────────
-  // A correct code from a step already spent is refused. Without this, a code
-  // captured by a phishing proxy stays usable for the rest of its window, which
-  // is the whole attack TOTP is supposed to make expensive.
-  if (step !== null && enrollment.lastUsedStep !== null && BigInt(step) <= BigInt(enrollment.lastUsedStep)) {
-    await enrollment.update({ failedAttempts: enrollment.failedAttempts + 1 });
-    return { ok: false, replay: true, message: "That code has already been used. Wait for the next one." };
-  }
+    // ── Replay ────────────────────────────────────────────────────────────────
+    // A correct code from a step already spent is refused. Without this, a code
+    // captured by a phishing proxy stays usable for the rest of its window, which
+    // is the whole attack TOTP is supposed to make expensive.
+    if (step !== null && enrollment.lastUsedStep !== null && BigInt(step) <= BigInt(enrollment.lastUsedStep)) {
+      const failed = enrollment.failedAttempts + 1;
+      await enrollment.update({
+        failedAttempts: failed >= MFA_LOCK_THRESHOLD ? 0 : failed,
+        lockedUntil: failed >= MFA_LOCK_THRESHOLD ? new Date(now.getTime() + MFA_LOCK_MINUTES * MINUTE) : null,
+      }, { transaction });
+      return { ok: false, replay: true, message: "That code has already been used. Wait for the next one." };
+    }
 
-  if (step === null) {
-    const failed = enrollment.failedAttempts + 1;
-    const lock = failed >= MFA_LOCK_THRESHOLD;
+    if (step === null) {
+      const failed = enrollment.failedAttempts + 1;
+      const lock = failed >= MFA_LOCK_THRESHOLD;
+      await enrollment.update({
+        failedAttempts: lock ? 0 : failed,
+        lockedUntil: lock ? new Date(now.getTime() + MFA_LOCK_MINUTES * MINUTE) : enrollment.lockedUntil,
+      }, { transaction });
+      return {
+        ok: false,
+        message: lock
+          ? `Too many incorrect codes. This account is locked for ${MFA_LOCK_MINUTES} minutes.`
+          : "That code is not correct. Check your authenticator app and try again.",
+        attemptsRemaining: lock ? 0 : MFA_LOCK_THRESHOLD - failed,
+      };
+    }
+
     await enrollment.update({
-      failedAttempts: lock ? 0 : failed,
-      lockedUntil: lock ? new Date(now.getTime() + MFA_LOCK_MINUTES * MINUTE) : enrollment.lockedUntil,
-    });
-    return {
-      ok: false,
-      message: lock
-        ? `Too many incorrect codes. This account is locked for ${MFA_LOCK_MINUTES} minutes.`
-        : "That code is not correct. Check your authenticator app and try again.",
-      attemptsRemaining: lock ? 0 : MFA_LOCK_THRESHOLD - failed,
-    };
-  }
-
-  await enrollment.update({
-    lastUsedStep: step,
-    lastUsedAt: now,
-    failedAttempts: 0,
-    lockedUntil: null,
+      lastUsedStep: step,
+      lastUsedAt: now,
+      failedAttempts: 0,
+      lockedUntil: null,
+    }, { transaction });
+    return { ok: true, step, ip };
   });
-  return { ok: true, step, ip };
 };
 
 // A recovery code stands in for the app when the phone is gone. Single use, and
@@ -79,7 +91,10 @@ export const consumeRecoveryCode = async (userId, code, { ip } = {}) => {
   const row = await MfaRecoveryCode.findOne({ where: { userId, codeHash: hash, usedAt: null } });
   if (!row) return { ok: false, message: "That recovery code is not valid, or has already been used." };
 
-  await row.update({ usedAt: new Date(), usedFromIp: ip ?? null });
+  const [changed] = await MfaRecoveryCode.update(
+    { usedAt: new Date(), usedFromIp: ip ?? null }, { where: { id: row.id, usedAt: null } }
+  );
+  if (!changed) return { ok: false, message: "That recovery code has already been used." };
   const remaining = await MfaRecoveryCode.count({ where: { userId, usedAt: null } });
   return { ok: true, remaining };
 };
@@ -183,7 +198,10 @@ export const confirmEnrollment = async (req, res) => {
   }
 
   const result = await consumeToken(enrollment, req.body.token, { ip: req.ip });
-  if (!result.ok) return res.status(400).json(result);
+  if (!result.ok) {
+    await securityAudit(req, req.currentUser, AUDIT_ACTIONS.MFA_CHALLENGE_FAILED, "2FA enrollment verification failed", { result: "Denied" });
+    return res.status(400).json(result);
+  }
 
   // Recovery codes are generated at activation, not at issue: a user who never
   // finished enrolling has no use for them, and generating early would leave
@@ -201,8 +219,10 @@ export const confirmEnrollment = async (req, res) => {
 
   // The session was created before enrolment was required; clear the flag so
   // the enforcement middleware stops redirecting.
-  req.session.mfaEnrollmentRequired = false;
-  req.session.mfaVerified = true;
+  const user = await User.findByPk(req.currentUser.id, { include: userIncludes });
+  await securityAudit(req, user, AUDIT_ACTIONS.MFA_CHALLENGE_SUCCESS, "2FA verification successful");
+  const trustedUntil = await createTrustedDevice(req, res, user, enrollment);
+  await startLoginSession(req, user, { enrollment, trustedUntil, verified: true });
 
   await auditFromRequest(req, {
     actionType: AUDIT_ACTIONS.MFA_ENABLED,
@@ -214,6 +234,7 @@ export const confirmEnrollment = async (req, res) => {
 
   res.json({
     enabled: true,
+    ...sessionDetails(req),
     // Shown once. They are stored hashed, so this is the only time they can be
     // displayed — the UI must make the user save them before moving on.
     recoveryCodes: codes,
@@ -276,6 +297,7 @@ export const disableMfa = async (req, res) => {
 
   await sequelize.transaction(async (transaction) => {
     await MfaRecoveryCode.destroy({ where: { userId: user.id }, transaction });
+    await revokeUserTrust(user.id, { transaction });
     await enrollment.destroy({ transaction });
   });
 
@@ -311,6 +333,7 @@ export const resetUserMfa = async (req, res) => {
 
   await sequelize.transaction(async (transaction) => {
     await MfaRecoveryCode.destroy({ where: { userId: user.id }, transaction });
+    await revokeUserTrust(user.id, { transaction });
     await enrollment.destroy({ transaction });
   });
 
@@ -330,6 +353,9 @@ export const resetUserMfa = async (req, res) => {
 // id and nothing else — no permissions are loaded and no protected route will
 // accept it, so being stuck here grants exactly nothing.
 export const verifyLoginChallenge = async (req, res) => {
+  if (req.session.pendingMfaExpired) {
+    return res.status(440).json({ message: "This sign-in took too long. Start again." });
+  }
   const pendingId = req.session.pendingMfaUserId;
   if (!pendingId) {
     return res.status(400).json({ message: "Start again from the sign-in page." });
@@ -337,7 +363,7 @@ export const verifyLoginChallenge = async (req, res) => {
 
   // The pending state is deliberately short-lived. A half-finished sign-in left
   // open on a shared machine should not still be usable an hour later.
-  if (!req.session.pendingMfaExpiresAt || Date.now() > req.session.pendingMfaExpiresAt) {
+  if (!req.session.pendingMfaExpiresAt || Date.now() >= req.session.pendingMfaExpiresAt) {
     delete req.session.pendingMfaUserId;
     delete req.session.pendingMfaExpiresAt;
     return res.status(440).json({ message: "This sign-in took too long. Start again." });
@@ -345,17 +371,37 @@ export const verifyLoginChallenge = async (req, res) => {
 
   const user = await User.findByPk(pendingId, { include: [{ model: Role }] });
   const enrollment = user ? await MfaEnrollment.findOne({ where: { userId: user.id } }) : null;
-  if (!user || enrollment?.status !== "active") {
+  if (!user || user.status !== "active" || enrollment?.status !== "active" ||
+      req.session.pendingCredentialVersion !== credentialVersion(user) ||
+      req.session.pendingEnrollmentId !== enrollment.id) {
     delete req.session.pendingMfaUserId;
     return res.status(400).json({ message: "Start again from the sign-in page." });
   }
 
+  if (!(await twoFactorEnabled())) {
+    await startLoginSession(req, user);
+    await securityAudit(req, user, AUDIT_ACTIONS.LOGIN_SUCCESS, "Login successful", { method: "password", twoFactorEnabled: false });
+    const full = await User.findByPk(user.id, { include: userIncludes });
+    return res.json({ ...serializeUser(full), ...sessionDetails(req) });
+  }
   const usingRecovery = Boolean(req.body.recoveryCode);
+  if (usingRecovery && isLocked(enrollment)) {
+    return res.status(429).json({ message: "Too many incorrect codes. Try again later." });
+  }
   const result = usingRecovery
     ? await consumeRecoveryCode(user.id, req.body.recoveryCode, { ip: req.ip })
     : await consumeToken(enrollment, req.body.token, { ip: req.ip });
 
   if (!result.ok) {
+    if (usingRecovery) await sequelize.transaction(async (transaction) => {
+      const locked = await MfaEnrollment.findByPk(enrollment.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!locked) return;
+      const failed = locked.failedAttempts + 1;
+      await locked.update({
+        failedAttempts: failed >= MFA_LOCK_THRESHOLD ? 0 : failed,
+        lockedUntil: failed >= MFA_LOCK_THRESHOLD ? new Date(Date.now() + MFA_LOCK_MINUTES * MINUTE) : locked.lockedUntil,
+      }, { transaction });
+    });
     await recordAudit({
       actionType: AUDIT_ACTIONS.MFA_CHALLENGE_FAILED,
       outcome: "denied",
@@ -369,15 +415,12 @@ export const verifyLoginChallenge = async (req, res) => {
     return res.status(401).json(result);
   }
 
-  // Only now does a real session exist. Rotate the identifier as the session
-  // crosses from pending to authenticated (regenerate discards the pending
-  // fields with the old session), and record when it authenticated so a later
-  // password change can invalidate it.
-  await regenerateSession(req);
-  req.session.userId = user.id;
-  req.session.mfaVerified = true;
-  req.session.authAt = Date.now();
-  req.session.cookie.maxAge = sessionTtlForRole(user.Role.key);
+  await securityAudit(req, user, AUDIT_ACTIONS.MFA_CHALLENGE_SUCCESS, "2FA verification successful", {
+    method: usingRecovery ? "recoveryCode" : "authenticator",
+  });
+  // Only a successful authenticator verification creates a browser trust period.
+  const trustedUntil = usingRecovery ? null : await createTrustedDevice(req, res, user, enrollment);
+  await startLoginSession(req, user, { enrollment, trustedUntil, verified: true });
 
   await recordAudit({
     actionType: AUDIT_ACTIONS.LOGIN_SUCCESS,
@@ -407,6 +450,7 @@ export const verifyLoginChallenge = async (req, res) => {
   const full = await User.findByPk(user.id, { include: userIncludes });
   res.json({
     ...serializeUser(full),
+    ...sessionDetails(req),
     ...(usingRecovery ? { recoveryCodesRemaining: result.remaining } : {}),
   });
 };

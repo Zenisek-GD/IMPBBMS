@@ -100,7 +100,7 @@ Login state is loaded from the backend session, then the app routes the user to 
 Backend scripts are defined in `municipal_backend/package.json`:
 - `npm run xian-start` starts the backend once.
 - `npm run xian` starts the backend with nodemon.
-- `npm run migrate` drops and recreates all Sequelize tables using `sync({ force: true })`.
+- `npm run migrate` safely creates missing tables; destructive recreation requires explicit `--force --yes`.
 - `npm run seed` loads demo roles, departments, permissions, procurement modes, settings, and users.
 
 The database connection in `municipal_backend/models/db.js` reads from the environment, with local development defaults:
@@ -162,29 +162,56 @@ The frontend loads the current user through the auth context in `municipal-front
 - If no user is active, the app redirects to `/login`.
 - On successful login, the user is routed to a role-specific landing page.
 
-### Two-factor authentication
-**Every account in the system requires a second factor.** A password is a secret its holder can be tricked into typing somewhere else, and every account here can approve spending, issue a document under the municipality's name, or read the whole procurement record.
+### Two-factor authentication and authenticated sessions
 
-The scheme is **TOTP (RFC 6238)** — the six-digit codes produced by Google Authenticator, Microsoft Authenticator, Authy, 1Password and any other standard app. SHA-1, six digits, thirty-second steps, which are the parameters every client assumes.
+System Administrator → **Security Settings** (`/admin/security-settings`) controls authentication security for every role. **Two-Factor Authentication defaults to ON**. Turning it OFF requires the **Disable Two-Factor Authentication?** confirmation; both enabling and disabling are recorded in the Audit Trail. Session duration remains **30 minutes** with either setting.
 
-**The implementation is hand-rolled, deliberately.** `services/totp.js` is the one place where a compromised dependency would be silent and total: a package that returned predictable codes would let anyone in and nothing would look wrong. It is fifty lines of well-specified arithmetic, and the RFC publishes test vectors — so correctness is *proven*, not assumed. Run the proof:
+The system uses the existing six-digit TOTP authenticator enrollment. Accounts without an authenticator have access only to enrollment until they prove a code. Authenticator secrets are encrypted with AES-256-GCM using `MFA_ENCRYPTION_KEY` (or `SESSION_SECRET`), never returned after enrollment. Keep that encryption key stable and outside the database. Codes are single-use, and failed authenticator attempts are locked per account after five failures for 15 minutes.
 
-```bash
-node municipal_backend/services/totp.test.mjs
+There are two independent deadlines:
+
+| Record | Purpose | Lifetime |
+| --- | --- | --- |
+| `loginSessionExpiresAt` in a database-backed `LoginSession` | Access to protected pages and APIs | 30 minutes from successful login, regardless of activity |
+| `twoFactorTrustedUntil` in a `TrustedDevice` | Whether this browser must supply an authenticator code at its next login | 30 minutes from successful authenticator verification |
+
+**Logging out ends only the authenticated session. It preserves browser trust until its original expiration.** A subsequent password login in the same browser skips the code while `server time < twoFactorTrustedUntil`. Relogin, page changes, refreshes, orders and other activity cannot extend that deadline.
+
+| Time | Action | Trusted 2FA until | Authenticated session until |
+| --- | --- | --- | --- |
+| 10:00 | Password + authenticator verified | 10:30 | 10:30 |
+| 10:10 | Manual logout | 10:30 | Ended |
+| 10:15 | Same browser: password only | 10:30 (unchanged) | 10:45 |
+| 10:30 | Existing session continues | Expired | 10:45 |
+| 10:35 | If logging in again: a new authenticator code is required | 11:05 after verification | 11:05 |
+
+A different browser, browser profile, private window or device has no corresponding trusted cookie and must verify its own authenticator code, even when it uses the same IP address. Clearing cookies also removes that browser's proof. Each user/browser receives a cryptographically random 256-bit token in a host-only, HTTP-only, SameSite=Lax cookie; production cookies also use Secure and the `__Host-` prefix. Only the token's SHA-256 hash is stored. Trust is checked against the account, enrollment and credential version; password changes and enrollment resets make old trust unusable. Switching the global policy OFF or ON clears existing trust records.
+
+The backend checks session expiration before protected requests, including account APIs and downloads. At the exact deadline it returns **401** with `code: "SESSION_EXPIRED"` when the expired session is presented. A browser which has already discarded its expired session cookie receives an unauthenticated 401. The frontend clears authenticated views, redirects to Login, and displays:
+
+> Your session has expired after 30 minutes. Please log in again.
+
+The frontend uses server-supplied deadlines, checks the backend periodically and on tab resume, and does not reset the timer on activity. API responses use `Cache-Control: no-store`; protected DOM is hidden before browser history snapshots and revalidated on restoration. Login identifiers are rotated when authentication gains privilege. Database tombstones stop requests that were already in flight from restoring a logged-out session. A server sweep runs every 15 seconds to clean expired trust and record expiration/automatic logout even when no browser is making requests; access is refused at the deadline independently of the sweep.
+
+Recovery codes remain available if an authenticator is lost. They are hashed and single-use. Recovery-code login creates a 30-minute authenticated session but **does not create browser trust**. Reused authenticator codes, including simultaneous verification requests, are rejected.
+
+The Audit Trail records login success/failure, authenticator success/failure, trust creation/use/expiry, new or untrusted browsers, manual logout, session expiry, automatic logout and administrator policy changes. Entries contain device record references and expiration times, never authenticator codes, secrets or raw browser/session tokens. Failed password attempts are limited by IP and account; authenticator failures also use persistent account lock counters. The short-term IP/password rate-limit buckets are per Node process.
+
+**Setup / upgrade**
+
+Run from `municipal_backend`:
+
+```powershell
+node migrateAuthSecurity.js
+npm run test:security:unit
+npm run test:security:integration
 ```
 
-How it behaves:
-- a correct password **no longer creates a session**. It creates a five-minute pending state carrying a user id and nothing else — no permissions are loaded and no protected route accepts it
-- accounts that have not enrolled are let in but **confined to the enrolment screen** until they do. Refusing the sign-in outright would have locked out every account the day it shipped, including the administrator who would have to fix it
-- a code is **single-use**: the time step it came from is recorded, and any code at or below it is refused. Without this, a code captured by a phishing proxy stays valid for the rest of its window
-- **five wrong codes locks the account for 15 minutes**, counted per enrolment rather than per address, because the account is what is under attack
-- **ten recovery codes** are issued once at enrolment and stored hashed. Without them a lost phone means an administrator wipe, which is a support burden and a social-engineering target
-- **turning it off needs the password *and* a current code** — either alone would let whoever is at an unlocked screen remove the protection
-- an **administrator reset** clears an enrolment so the user can set it up again. It cannot reveal or set a secret and cannot sign anybody in, so a compromised administrator gains no path into another account. Reason required, and audited
+The dedicated migration creates only `TrustedDevices` and `LoginSessions` and supplies the default ON policy; it does not drop or alter existing tables. Restart the backend after updating the code. Existing memory-only sessions will require a new login. The integration test creates and removes a uniquely named `impbbms_auth_test_*` MySQL database and leaves the application database untouched.
 
-**The secret at rest** is encrypted with AES-256-GCM under `MFA_ENCRYPTION_KEY` (falling back to `SESSION_SECRET`), never hashed — verification needs the original bytes. That is what makes a database dump insufficient on its own: password hashes survive a leak, and plaintext TOTP secrets would not.
+Production requires HTTPS, `NODE_ENV=production`, a strong `SESSION_SECRET`, and the matching `FRONTEND_ORIGIN`. Set `TRUST_PROXY` to the actual trusted proxy addresses/hops only when deploying behind a reverse proxy. The frontend API origin can be configured with `VITE_API_BASE_URL`.
 
-Every change to a second factor is audit-logged: enrolment, failures, recovery-code use, regeneration, disabling and the administrator reset.
+Implementation references: [Express session storage and cookie configuration](https://expressjs.com/en/resources/middleware/session/), [OWASP server-enforced session expiration](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
 
 ### Integrity monitoring and anomaly detection
 The audit log proves that nothing **recorded** has been altered. It cannot notice a change that was never recorded in the first place — and that is the real threat. Somebody with a MySQL client can raise an appropriation, grant themselves a permission or delete an award, and the application will never know. The chain stays perfectly intact and perfectly silent, because nothing asked it to write anything.

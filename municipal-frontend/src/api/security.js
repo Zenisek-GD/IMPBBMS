@@ -66,3 +66,8 @@ export const ALERT_EXPLANATIONS = {
   amountChangedAfterApproval:
     'An amount changed after the approval that authorised it, meaning what was approved is not what stands.',
 }
+
+export const fetchAuthenticationSecurity = () =>
+  apiClient.get('/security/authentication').then((res) => res.data)
+export const updateAuthenticationSecurity = (twoFactorEnabled, confirmDisable = false) =>
+  apiClient.patch('/security/authentication', { twoFactorEnabled, confirmDisable }).then((res) => res.data)

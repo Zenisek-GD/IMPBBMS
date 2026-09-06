@@ -144,6 +144,8 @@ export default function MfaEnrollment() {
     setBusy(true)
     try {
       const result = await authApi.confirmMfaEnrollment(token)
+      const currentUser = await authApi.fetchCurrentUser()
+      setUser(currentUser)
       setCodes(result.recoveryCodes)
     } catch (err) {
       setError(err.response?.data?.message ?? 'That code was not accepted.')

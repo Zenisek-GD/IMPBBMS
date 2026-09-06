@@ -1,3 +1,4 @@
+import { sessionExpired } from "../services/authPolicy.js";
 import { User } from "../models/userModel.js";
 import { Role } from "../models/roleModel.js";
 import { Permission } from "../models/permissionModel.js";
@@ -21,7 +22,7 @@ export const passwordSessionValid = (req, user) => {
 // Loads the caller with their role's permission set. Read fresh per request so
 // revoking a permission takes effect immediately, not at next login.
 export const loadCurrentUser = async (req) => {
-  if (!req.session.userId) return null;
+  if (!req.session?.userId || sessionExpired(req.session)) return null;
 
   const user = await User.findByPk(req.session.userId, {
     include: [{ model: Role, include: [Permission] }],

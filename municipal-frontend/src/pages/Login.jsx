@@ -11,7 +11,7 @@ import FormField from '../components/ui/FormField'
 import MfaChallenge from './MfaChallenge'
 
 export default function Login() {
-  const { login, setUser } = useAuth()
+  const { login, setUser, authNotice } = useAuth()
   const navigate = useNavigate()
   const [serverError, setServerError] = useState('')
 
@@ -34,20 +34,6 @@ export default function Login() {
       const flagged = sessionStorage.getItem('logout.serverUnreachable')
       if (flagged) sessionStorage.removeItem('logout.serverUnreachable')
       return Boolean(flagged)
-    } catch {
-      return false
-    }
-  })
-
-  // Set by the idle-timeout hook when the session expires from inactivity.
-  const [idleLogout] = useState(() => {
-    try {
-      const reason = sessionStorage.getItem('logout.reason')
-      if (reason === 'idle') {
-        sessionStorage.removeItem('logout.reason')
-        return true
-      }
-      return false
     } catch {
       return false
     }
@@ -110,13 +96,13 @@ export default function Login() {
         </p>
       )}
 
-      {idleLogout && (
+      {authNotice && (
         <p
           role="status"
           className="mb-4 flex items-start gap-2 rounded-md border border-border-muted bg-chip px-3.5 py-2.5 text-[12.5px] leading-relaxed text-text-secondary"
         >
           <AlertCircle size={15} className="mt-0.5 shrink-0" />
-          <span>You were signed out automatically due to inactivity. Sign in again to continue.</span>
+          <span>{authNotice}</span>
         </p>
       )}
 

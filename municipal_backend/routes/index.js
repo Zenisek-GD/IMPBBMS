@@ -49,9 +49,11 @@ import documentTemplateRoutes from "./documentTemplateRoutes.js";
 import announcementRoutes from "./announcementRoutes.js";
 import securityRoutes from "./securityRoutes.js";
 import publicRoutes from "./publicRoutes.js";
+import { sessionSecurity, requireSameOrigin } from "../middleware/sessionSecurityMiddleware.js";
 import { requireMfaEnrollment } from "../middleware/mfaMiddleware.js";
 
 const router = express.Router();
+router.use(requireSameOrigin, sessionSecurity, requireMfaEnrollment);
 
 // The scaffold's landing page used to live here. It was framework boilerplate
 // that pulled Tailwind from a CDN and said nothing about this system — the
@@ -67,10 +69,9 @@ router.get("/", (req, res) =>
 
 router.use("/api/auth", authRoutes);
 
-// Applied after auth so the enrolment and sign-out routes stay reachable, and
-// before every module below so an account that has not set up a second factor
-// cannot reach any of them. See middleware/mfaMiddleware.js.
-router.use(requireMfaEnrollment);
+// Authentication security is applied above to every route; enrollment and
+// logout remain reachable through the explicit enrollment allowlist.
+
 
 // Bidder account activation. Session-less: the caller holds an invitation token,
 // not a cookie, because the account they are activating cannot be signed into

@@ -1,5 +1,4 @@
-import { User } from "../models/userModel.js";
-import { Role } from "../models/roleModel.js";
+import { loadCurrentUser } from "./permissionMiddleware.js";
 
 // Design doc Section 2.2: "Every role has an explicit, enumerated permission
 // set — no implicit or inherited access." Role is re-read from the database on
@@ -10,7 +9,7 @@ export const requireRole = (...allowedRoles) => async (req, res, next) => {
     return res.status(401).json({ message: "Not authenticated." });
   }
 
-  const user = await User.findByPk(req.session.userId, { include: Role });
+  const user = await loadCurrentUser(req);
   if (!user || user.status !== "active") {
     return res.status(401).json({ message: "Not authenticated." });
   }

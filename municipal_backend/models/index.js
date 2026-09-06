@@ -1,3 +1,4 @@
+export { TrustedDevice, LoginSession } from "./authSecurityModel.js";
 // Single registration point for every Sequelize model. Import new models here
 // so `npm run migrate` and `npm run seed` always see the full schema.
 export { sequelize } from "./db.js";

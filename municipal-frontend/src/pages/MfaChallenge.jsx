@@ -91,7 +91,7 @@ export default function MfaChallenge({ challenge, onVerified, onCancel }) {
               className="mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-center font-mono text-lg tracking-[0.4em] text-navy focus:border-navy focus:outline-none"
             />
             <span className="mt-1 block text-[11px] text-text-faint">
-              The code changes every 30 seconds and can only be used once.
+              After verification, this browser will be trusted for 30 minutes, including after logout.
             </span>
           </label>
         )}

@@ -9,37 +9,11 @@ import { clearRateLimit } from "../middleware/rateLimitMiddleware.js";
 import { passwordSessionValid } from "../middleware/permissionMiddleware.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
 import { sendPasswordChangedEmail } from "../services/mailer.js";
+import { SESSION_DURATION_MS, PENDING_MFA_TTL_MS, credentialVersion, sessionDetails } from "../services/authPolicy.js";
+import { startLoginSession, destroyLoginSession, regenerateSession, saveSession } from "../services/loginSession.js";
+import { twoFactorEnabled, findTrustedDevice, securityAudit } from "../services/trustedDevices.js";
 
-// Rotates the session identifier. Called at every point where a session gains or
-// changes privilege, so an attacker who planted a cookie value before sign-in
-// cannot ride that same identifier into an authenticated session (session
-// fixation). Promisified because express-session's API is callback-based.
-export const regenerateSession = (req) =>
-  new Promise((resolve, reject) => {
-    req.session.regenerate((err) => (err ? reject(err) : resolve()));
-  });
-
-// How long a password-verified sign-in may sit waiting for its second factor.
-// Short on purpose: a half-finished sign-in left open on a shared machine
-// should not still be usable later in the day.
-const PENDING_MFA_TTL_MS = 5 * 60 * 1000;
-
-// ── Session timeouts ──────────────────────────────────────────────────────────
-// Admin-side roles handle budgets, contracts, and user accounts — a session
-// left open on an unattended workstation is a real risk. Thirty minutes of
-// inactivity is the common ceiling for privileged web applications.
-//
-// Vendors and observers interact less frequently and from less controlled
-// environments (personal laptops, phones), so their session lives longer.
-const ADMIN_SESSION_MS  = 1000 * 60 * 30;  // 30 minutes
-const DEFAULT_SESSION_MS = 1000 * 60 * 60 * 8; // 8 hours (unchanged)
-
-// Roles whose sessions keep the longer timeout. Every role not listed here
-// gets the shorter admin timeout.
-const EXTERNAL_ROLES = ["vendor", "observer"];
-
-export const sessionTtlForRole = (roleKey) =>
-  EXTERNAL_ROLES.includes(roleKey) ? DEFAULT_SESSION_MS : ADMIN_SESSION_MS;
+export const sessionTtlForRole = () => SESSION_DURATION_MS;
 
 // Permissions travel with the session user so the UI can hide actions the
 // caller cannot perform. The server still enforces them independently — this
@@ -57,8 +31,7 @@ export const serializeUser = (user) => ({
   // own theme rather than whatever the last person on this browser chose.
   themePreference: user.themePreference ?? "light",
   sidebarCollapsed: Boolean(user.sidebarCollapsed),
-  // Sent so the frontend can run an idle-timeout countdown that matches the
-  // server's cookie lifetime, rather than having to guess or hard-code it.
+  // Fixed duration for every role; server deadlines are returned separately.
   sessionTimeoutMs: sessionTtlForRole(user.Role.key),
 });
 
@@ -66,7 +39,7 @@ export const userIncludes = [{ model: Role, include: [Permission] }, { model: De
 
 export const login = async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) {
+  if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password || email.length > 254 || password.length > 1024) {
     return res.status(400).json({ message: "Email and password are required." });
   }
 
@@ -137,87 +110,41 @@ export const login = async (req, res) => {
   // The password was right, so this attempt was not an attack — release the
   // budget it consumed.
   clearRateLimit("login", req.ip);
+  clearRateLimit("loginAccount", normalised);
 
-  // ── The second factor ──────────────────────────────────────────────────────
-  // A correct password stops being sufficient here. If this account has an
-  // active enrolment, no session is created: instead a *pending* state is
-  // recorded, carrying a user id and an expiry and nothing else. It loads no
-  // permissions and no protected route accepts it, so an attacker holding only
-  // the password gets a challenge screen and no access whatsoever.
-  const enrollment = await MfaEnrollment.findOne({ where: { userId: user.id } });
+  const enabled = await twoFactorEnabled();
+  const enrollment = enabled ? await MfaEnrollment.findOne({ where: { userId: user.id } }) : null;
+  const trusted = enabled && enrollment?.status === "active"
+    ? await findTrustedDevice(req, user, enrollment) : null;
 
-  if (enrollment?.status === "active") {
-    // Rotate the identifier the moment the password is accepted, before the
-    // session carries any sign-in state at all.
+  if (enabled && enrollment?.status === "active" && !trusted) {
     await regenerateSession(req);
     req.session.pendingMfaUserId = user.id;
-    // Short-lived on purpose: a half-finished sign-in left open on a shared
-    // machine should not still be usable later in the day.
     req.session.pendingMfaExpiresAt = Date.now() + PENDING_MFA_TTL_MS;
-
-    await recordAudit({
-      actionType: AUDIT_ACTIONS.MFA_CHALLENGE_ISSUED,
-      entityRef: "auth",
-      entityId: user.id,
-      summary: `Second factor required for ${user.email}`,
-      actorName: user.name,
-      ipAddress: req.ip,
-    });
-
+    req.session.pendingCredentialVersion = credentialVersion(user);
+    req.session.pendingEnrollmentId = enrollment.id;
+    req.session.cookie.maxAge = PENDING_MFA_TTL_MS;
+    await saveSession(req);
+    await securityAudit(req, user, AUDIT_ACTIONS.MFA_CHALLENGE_ISSUED,
+      "Authenticator verification required");
     const remaining = await MfaRecoveryCode.count({ where: { userId: user.id, usedAt: null } });
-    return res.status(200).json({
-      mfaRequired: true,
-      // Enough for the challenge screen to address the user, and nothing more.
-      // Notably not the permission set: that belongs to an authenticated
-      // session, and this is not one yet.
-      name: user.name,
-      recoveryAvailable: remaining > 0,
+    return res.json({
+      mfaRequired: true, name: user.name, recoveryAvailable: remaining > 0,
       expiresInMs: PENDING_MFA_TTL_MS,
     });
   }
 
-  // New session identifier now that the password has been accepted — nothing
-  // carried over from the pre-sign-in request can be used to impersonate this
-  // session (session fixation).
-  await regenerateSession(req);
-
-  // Shorten the cookie lifetime for admin-side roles. The global session
-  // middleware sets an 8-hour default; overriding it here per-session means
-  // vendors keep the full window while officers are logged out sooner.
-  req.session.cookie.maxAge = sessionTtlForRole(user.Role.key);
-  req.session.userId = user.id;
-  // Stamped so a later password change/reset can invalidate every session that
-  // authenticated before it — see passwordSessionValid.
-  req.session.authAt = Date.now();
-
-  // ── Everyone enrols ────────────────────────────────────────────────────────
-  // Accounts without a second factor are let in but flagged, and the
-  // enforcement middleware then confines them to the enrolment screens until
-  // they have one. Refusing the sign-in outright would lock out every existing
-  // account the moment this shipped, including the administrator who would have
-  // to fix it.
-  req.session.mfaEnrollmentRequired = true;
-
-  await recordAudit({
-    actionType: AUDIT_ACTIONS.LOGIN_SUCCESS,
-    entityRef: "auth",
-    entityId: user.id,
-    summary: `${user.name} signed in`,
-    actorId: user.id,
-    actorName: user.name,
-    actorRole: user.Role?.key ?? null,
-    ipAddress: req.ip,
+  // Unenrolled accounts receive only a restricted enrollment session.
+  // With the system policy OFF, even enrolled accounts skip the challenge.
+  await startLoginSession(req, user, {
+    enrollment, verified: Boolean(trusted),
+    trustedUntil: trusted ? new Date(trusted.twoFactorTrustedUntil).getTime() : null,
+    enrollmentRequired: enabled && enrollment?.status !== "active",
   });
-
-  res.json({
-    ...serializeUser(user),
-    // Carried on the sign-in response as well as on /auth/me. Without it the
-    // client has nothing to act on until the next page load, so a freshly
-    // signed-in account would land on its dashboard and only be bounced to the
-    // enrolment screen after a refresh — which reads as the gate being broken.
-    mfaEnrollmentRequired: Boolean(req.session.mfaEnrollmentRequired),
-    mfaVerified: Boolean(req.session.mfaVerified),
+  await securityAudit(req, user, AUDIT_ACTIONS.LOGIN_SUCCESS, "Login successful", {
+    method: trusted ? "trustedBrowser" : "password",
   });
+  res.json({ ...serializeUser(user), ...sessionDetails(req) });
 };
 
 export const logout = async (req, res) => {
@@ -240,11 +167,8 @@ export const logout = async (req, res) => {
     }
   }
 
-  req.session.destroy((err) => {
-    if (err) return res.status(500).json({ message: "Could not log out." });
-    res.clearCookie("connect.sid");
-    res.json({ message: "Logged out." });
-  });
+  await destroyLoginSession(req, res);
+  res.json({ message: "Logged out." });
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -586,21 +510,5 @@ export const me = async (req, res) => {
     return res.status(401).json({ message: "Not authenticated." });
   }
 
-  // The session flag is set at sign-in, but a user who enrolled in another tab
-  // would still be carrying a stale `true` here. Re-checked against the record
-  // so the app never traps somebody on the enrolment screen after they have
-  // already finished.
-  if (req.session.mfaEnrollmentRequired) {
-    const enrollment = await MfaEnrollment.findOne({ where: { userId: user.id } });
-    if (enrollment?.status === "active") req.session.mfaEnrollmentRequired = false;
-  }
-
-  res.json({
-    ...serializeUser(user),
-    // Drives the client-side gate. The server enforces this independently in
-    // middleware/mfaMiddleware.js — this is so the app can route to the
-    // enrolment screen instead of showing a wall of failed requests.
-    mfaEnrollmentRequired: Boolean(req.session.mfaEnrollmentRequired),
-    mfaVerified: Boolean(req.session.mfaVerified),
-  });
+  res.json({ ...serializeUser(user), ...sessionDetails(req) });
 };

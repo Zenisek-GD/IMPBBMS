@@ -1,63 +1,178 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { advanceAuthEpoch } from '../api/client'
 import * as authApi from '../api/auth'
 import { AuthContext } from './auth-context'
 
+const EXPIRED_MESSAGE = 'Your session has expired after 30 minutes. Please log in again.'
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
+  const [user, setUserState] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [authNotice, setAuthNotice] = useState('')
+  const current = useRef(null)
+  const generation = useRef(0)
+  const logoutPending = useRef(null)
+  const navigate = useNavigate()
+
+  const setUser = useCallback((value) => {
+    const next = typeof value === 'function' ? value(current.current) : value
+    if (next?.sessionDeadline) {
+      try { sessionStorage.setItem('auth.lastDeadline', String(next.sessionDeadline)) } catch { /* storage unavailable */ }
+    }
+    current.current = next
+    setUserState(next)
+  }, [])
+
+  const clearSession = useCallback((message = '', broadcast = false) => {
+    generation.current += 1
+    advanceAuthEpoch()
+    setUser(null)
+    setAuthNotice(message)
+    if (broadcast) {
+      try { localStorage.setItem('auth.signedOut', JSON.stringify({ at: Date.now(), message })) } catch { /* storage unavailable */ }
+    }
+    navigate('/login', { replace: true })
+  }, [navigate, setUser])
+
+  const expireSession = useCallback(() => {
+    if (!current.current) return
+    clearSession(EXPIRED_MESSAGE, true)
+    // Ask the server to observe expiration. Its fixed deadline is authoritative;
+    // a client clock or countdown never controls server validity.
+    authApi.fetchCurrentUser().catch(() => {})
+  }, [clearSession])
 
   useEffect(() => {
-    authApi
-      .fetchCurrentUser()
-      .then(setUser)
-      .catch(() => setUser(null))
-      .finally(() => setIsLoading(false))
-  }, [])
+    let cancelled = false
+    const version = generation.current
+    authApi.fetchCurrentUser()
+      .then((result) => {
+        if (!cancelled && version === generation.current) setUser(result)
+      })
+      .catch((error) => {
+        if (cancelled || version !== generation.current || error.response?.status !== 401) return
+        let lastDeadline = 0
+        try { lastDeadline = Number(sessionStorage.getItem('auth.lastDeadline')) } catch { /* storage unavailable */ }
+        if (lastDeadline && Date.now() >= lastDeadline) setAuthNotice(EXPIRED_MESSAGE)
+      })
+      .finally(() => { if (!cancelled) setIsLoading(false) })
+    return () => { cancelled = true }
+  }, [setUser])
+
+  useEffect(() => {
+    const unauthorized = (event) => {
+      if (!current.current && event.detail?.code !== 'SESSION_EXPIRED') return
+      const expired = event.detail?.code === 'SESSION_EXPIRED' ||
+        (current.current && Date.now() >= current.current.sessionDeadline)
+      clearSession(expired ? EXPIRED_MESSAGE : (event.detail?.message || 'Please log in again.'))
+    }
+    const enrollmentRequired = () => {
+      if (current.current) setUser((previous) => ({ ...previous, mfaEnrollmentRequired: true }))
+      navigate('/account/two-factor', { replace: true })
+    }
+    const signedOut = (event) => {
+      if (event.key !== 'auth.signedOut' || !current.current) return
+      let message = ''
+      try { message = JSON.parse(event.newValue)?.message || '' } catch { /* malformed local notice */ }
+      clearSession(message)
+    }
+    window.addEventListener('auth:unauthorized', unauthorized)
+    window.addEventListener('auth:enrollment-required', enrollmentRequired)
+    window.addEventListener('storage', signedOut)
+    return () => {
+      window.removeEventListener('auth:unauthorized', unauthorized)
+      window.removeEventListener('auth:enrollment-required', enrollmentRequired)
+      window.removeEventListener('storage', signedOut)
+    }
+  }, [clearSession, navigate, setUser])
+
+  useEffect(() => {
+    if (!user) return
+    let checking = false
+    let cancelled = false
+    const version = generation.current
+    const checkDeadline = () => {
+      const active = current.current
+      if (active && (Date.now() >= active.sessionDeadline ||
+        performance.now() >= active.sessionMonotonicDeadline)) expireSession()
+    }
+    const revalidate = async () => {
+      checkDeadline()
+      if (!current.current || checking) return
+      checking = true
+      try {
+        const result = await authApi.fetchCurrentUser()
+        if (!cancelled && version === generation.current && current.current) setUser(result)
+      } catch { /* the interceptor handles invalid sessions; offline time still counts */ }
+      finally { checking = false }
+    }
+    const wake = () => { if (document.visibilityState !== 'hidden') revalidate() }
+    // Fast local redirect plus independent server checks, also on resume.
+    const timer = setInterval(checkDeadline, 250)
+    const heartbeat = setInterval(revalidate, 30_000)
+    window.addEventListener('focus', wake)
+    window.addEventListener('pageshow', wake)
+    document.addEventListener('visibilitychange', wake)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      clearInterval(heartbeat)
+      window.removeEventListener('focus', wake)
+      window.removeEventListener('pageshow', wake)
+      document.removeEventListener('visibilitychange', wake)
+    }
+  }, [user?.loginSessionExpiresAt, Boolean(user), expireSession, setUser]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    // Hide protected DOM before a back/forward-cache snapshot, then revalidate
+    // before displaying it again after restoration.
+    const hide = () => { if (current.current) document.documentElement.style.visibility = 'hidden' }
+    const restore = async (event) => {
+      if (event.persisted) {
+        const version = generation.current
+        try {
+          const result = await authApi.fetchCurrentUser()
+          if (version === generation.current) setUser(result)
+        } catch { setUser(null) }
+      }
+      document.documentElement.style.visibility = ''
+    }
+    window.addEventListener('pagehide', hide)
+    window.addEventListener('pageshow', restore)
+    return () => {
+      window.removeEventListener('pagehide', hide)
+      window.removeEventListener('pageshow', restore)
+      document.documentElement.style.visibility = ''
+    }
+  }, [setUser])
 
   const login = useCallback(async (email, password) => {
-    const loggedInUser = await authApi.login(email, password)
-    // A password-only response is NOT a session. The server has recorded a
-    // short-lived pending state and nothing else, so the user must not be
-    // stored — doing so would make the app behave as though the second factor
-    // had already been given.
-    if (loggedInUser?.mfaRequired) return loggedInUser
-    setUser(loggedInUser)
-    return loggedInUser
-  }, [])
-
-  // ── SIGNING OUT MUST NOT DEPEND ON THE SERVER ─────────────────────────────
-  // This used to be `await authApi.logout(); setUser(null)`. If the request
-  // failed — backend restarting, database down, network blip — the await threw,
-  // `setUser(null)` never ran, and the officer was left signed in with the
-  // confirmation dialog open and nothing on screen explaining why. It read as
-  // "log out doesn't work", because from the outside that is exactly what it is.
-  //
-  // The local session is cleared either way now. Ending the *server* session is
-  // best-effort: it is the right thing to ask for, but a browser that cannot
-  // reach the server must still be able to lock itself.
-  //
-  // Returns whether the server confirmed, so the caller can say so. Note the
-  // honest limit: if the call failed, the session cookie is httpOnly and cannot
-  // be cleared from JavaScript, so the server session may outlive this — which
-  // is why the caller warns rather than pretending it is done.
-  const logout = useCallback(async () => {
-    let serverConfirmed = false
-    try {
-      await authApi.logout()
-      serverConfirmed = true
-    } catch {
-      // Best effort — the local session is cleared below regardless.
-    }
+    await logoutPending.current?.catch(() => {})
+    generation.current += 1
+    advanceAuthEpoch()
+    setAuthNotice('')
     setUser(null)
-    return serverConfirmed
-  }, [])
+    const result = await authApi.login(email, password)
+    if (!result?.mfaRequired) setUser(result)
+    return result
+  }, [setUser])
 
-  // Exposed so a screen that changes something the shell displays — the display
-  // name, via the profile modal — can update it without a full reload. Named
-  // `setUser` rather than something like `refresh` because it takes the serialised
-  // user the API already returned; there is no second round trip to make.
+  const logout = useCallback(async () => {
+    // Clear protected views immediately; server-side revocation is still required.
+    try { sessionStorage.removeItem('auth.lastDeadline') } catch { /* storage unavailable */ }
+    clearSession('', true)
+    const request = authApi.logout()
+    logoutPending.current = request
+    try { await request; return true }
+    catch {
+      setAuthNotice('You were signed out of this browser, but the server could not be reached to end the session.')
+      return false
+    } finally { logoutPending.current = null }
+  }, [clearSession])
+
   return (
-    <AuthContext.Provider value={{ user, setUser, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, setUser, isLoading, authNotice, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

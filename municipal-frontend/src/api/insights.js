@@ -32,6 +32,15 @@ export const OUTCOME_TONES = { success: 'success', denied: 'danger', failed: 'wa
 export const ACTION_LABELS = {
   'auth.login.success': 'Signed in',
   'auth.login.failed': 'Sign-in failed',
+  'auth.session.expired': 'Session expired',
+  'auth.logout.automatic': 'Automatic logout',
+  'auth.login.newDevice': 'Login from new browser/device',
+  'auth.mfa.challenge.success': '2FA verification successful',
+  'auth.mfa.trust.created': 'Trusted 2FA created',
+  'auth.mfa.trust.used': 'Trusted 2FA used',
+  'auth.mfa.trust.expired': 'Trusted 2FA expired',
+  'auth.mfa.policy.enabled': 'Administrator enabled 2FA',
+  'auth.mfa.policy.disabled': 'Administrator disabled 2FA',
   'auth.logout': 'Signed out',
 
   'bidder.requirements.submitted': 'Bidder requirements received',
