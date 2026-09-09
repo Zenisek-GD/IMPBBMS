@@ -9,6 +9,8 @@
     "migrate": "node migrate.js",
     "seed": "node seed.js",
     "seed:demo": "node seedDemo.js",
+    "seed:completed": "node seedDemo.js --completed-project",
+    "reset:workflow": "node resetDemoData.js",
     "create:model": "node create.js model",
     "create:controller": "node create.js controller",
     "migrate:auth": "node migrateAuthSecurity.js",

@@ -6,7 +6,7 @@ import { Role } from "./models/roleModel.js";
 import { Department } from "./models/departmentModel.js";
 import { AppEntry } from "./models/appEntryModel.js";
 import { PrHeader, PrLineItem } from "./models/prModel.js";
-import { Rfq, Bid, BidOpeningRecord, Award } from "./models/biddingModel.js";
+import { Rfq, Bid, BidOpeningRecord, Evaluation, PostQualification, Award } from "./models/biddingModel.js";
 import { ProcurementMode } from "./models/procurementModeModel.js";
 import { Vendor } from "./models/vendorModel.js";
 import { Contract, Delivery } from "./models/contractModel.js";
@@ -14,6 +14,7 @@ import { Invoice, Payment } from "./models/paymentModel.js";
 import { Appropriation, Obligation } from "./models/appropriationModel.js";
 import { DevelopmentPlan, DevelopmentGoal } from "./models/developmentPlanModel.js";
 import { InvestmentProgram, AipEntry } from "./models/investmentProgramModel.js";
+import { ExecutiveBudget, BudgetProposal, BudgetProposalLine, BudgetProceeding } from "./models/budgetPreparationModel.js";
 import { Security, requiredBidSecurity, requiredPerformanceSecurity } from "./models/securityModel.js";
 import { BacResolution } from "./models/bacResolutionModel.js";
 import {
@@ -57,13 +58,14 @@ const daysFromNow = (days, hour = 9) => {
   return date;
 };
 
+const SINGLE_COMPLETED_PROJECT = process.argv.includes("--completed-project");
 const peso = (value) => `₱${Number(value).toLocaleString("en-PH")}`;
 
 // ── The six projects ─────────────────────────────────────────────────────────
 // `reach` is how far each one is driven through the lifecycle. Together they
 // cover every category the public page filters on and every phase the timeline
 // renders.
-const PROJECTS = [
+const FULL_DEMO_PROJECTS = [
   {
     reach: "completed",
     department: "HEALTH",
@@ -168,6 +170,27 @@ const PROJECTS = [
   },
 ];
 
+const COMPLETED_PROJECT = {
+  reach: "completed",
+  department: "IT",
+  appropriation: "itCO",
+  aipEntry: "desktopComputers",
+  projectTitle: "Supply and Delivery of 20 Desktop Computers for Municipal Offices",
+  description:
+    "Supply, delivery and acceptance of twenty complete desktop computer sets for municipal offices, " +
+    "including monitors, licensed operating systems and one-year warranty support.",
+  category: "Goods",
+  abc: 1200000,
+  winningBid: 1080000,
+  fundSource: "General Fund — Capital Outlay",
+  papCode: "PAP-ITO-2026-001",
+  quarters: ["Q1", "Q1"],
+  rfqCategory: "goods",
+  vendorKey: "pinnacle",
+};
+
+const PROJECTS = SINGLE_COMPLETED_PROJECT ? [COMPLETED_PROJECT] : FULL_DEMO_PROJECTS;
+
 // ── The Appropriation Ordinance ──────────────────────────────────────────────
 // The authority behind every project below. One line per office and expense
 // class, as an actual annual budget ordinance is structured. Each is
@@ -204,6 +227,16 @@ const APPROPRIATIONS = [
     papCode: "PAP-ITO-MOOE-04",
     uacsCode: "5-02-03-010",
     amount: 3_400_000,
+  },
+  {
+    key: "itCO",
+    department: "IT",
+    title: "Municipal Office Desktop Computer Outlay",
+    fund: "generalFund",
+    expenseClass: "capitalOutlay",
+    papCode: "PAP-ITO-CO-01",
+    uacsCode: "5-02-13-050",
+    amount: 1_200_000,
   },
   {
     key: "gsoCO",
@@ -265,6 +298,28 @@ const VENDORS = {
     contactPhone: "+63 917 442 8890",
     address: "Unit 5, Mabini Commercial Center, Roxas, Oriental Mindoro",
   },
+  northstar: {
+    businessName: "Northstar Computer Trading",
+    tin: "459-218-731-000",
+    organizationType: "soleProprietorship",
+    philgepsRegistrationNo: "PG-2023-006712",
+    isVatRegistered: true,
+    taxClassification: "goods",
+    contactEmail: "bids@northstarcomputer.example",
+    contactPhone: "+63 917 557 2261",
+    address: "Rizal Street, Calapan City, Oriental Mindoro",
+  },
+  vertex: {
+    businessName: "Vertex Digital Solutions Corporation",
+    tin: "682-490-115-000",
+    organizationType: "corporation",
+    philgepsRegistrationNo: "PG-2024-002389",
+    isVatRegistered: true,
+    taxClassification: "goods",
+    contactEmail: "procurement@vertexdigital.example",
+    contactPhone: "+63 917 331 8402",
+    address: "J.P. Rizal Avenue, Naujan, Oriental Mindoro",
+  },
 };
 
 // `npm run seed` names each demo account after its role ("Budget Officer"),
@@ -276,7 +331,7 @@ const VENDORS = {
 // entered by an administrator is never overwritten.
 const OFFICIAL_NAMES = {
   systemAdministrator: "Joel R. Fabricante",
-  hope: "Hon. Teresita M. Alcantara",
+  hope: "Engr. Jerwin S. Dimapilis",
   bacChairperson: "Atty. Rodel V. Manalo",
   bacMember: "Engr. Cristina P. Bautista",
   bacSecretariat: "Marilou D. Ceniza",
@@ -427,9 +482,9 @@ const runPrStage = async (users, spec, entry, department, timing, index, appropr
 
   await PrLineItem.create({
     description: spec.projectTitle,
-    unit: "lot",
-    quantity: 1,
-    unitCost: spec.abc,
+    unit: SINGLE_COMPLETED_PROJECT ? "set" : "lot",
+    quantity: SINGLE_COMPLETED_PROJECT ? 20 : 1,
+    unitCost: SINGLE_COMPLETED_PROJECT ? spec.abc / 20 : spec.abc,
     lineTotal: spec.abc,
     prHeaderId: pr.id,
   });
@@ -557,6 +612,8 @@ const runSolicitationStage = async (users, spec, pr, mode, timing, index, finalS
     prHeaderId: pr.id,
     procurementModeId: mode.id,
     publishedById: users.get("bacSecretariat").id,
+    philgepsPostedAt: timing.rfqPublished,
+    philgepsReference: `DEMO-PG-${YEAR}-${String(index + 1).padStart(3, "0")}`,
   });
 
   await log(users, "bacSecretariat", {
@@ -575,12 +632,13 @@ const runSolicitationStage = async (users, spec, pr, mode, timing, index, finalS
 };
 
 const runBidStage = async (users, spec, rfq, vendors, timing, opened) => {
-  // Three bidders, so the record evidences genuine competition. The winner is
-  // the vendor named on the project; the other two are drawn from the pool.
+  // The completed-project walkthrough uses five bidders. The broader portal
+  // demo keeps three, which is enough to illustrate competition on its six
+  // sample projects without making every bid table unnecessarily long.
   const roster = [
     vendors[spec.vendorKey ?? "pinnacle"],
     ...Object.values(vendors).filter((vendor) => vendor.key !== (spec.vendorKey ?? "pinnacle")),
-  ].slice(0, 3);
+  ].slice(0, SINGLE_COMPLETED_PROJECT ? 5 : 3);
 
   const base = spec.winningBid ?? Math.round(spec.abc * 0.96);
   const bids = [];
@@ -598,6 +656,37 @@ const runBidStage = async (users, spec, rfq, vendors, timing, opened) => {
       status: opened ? (position === 0 ? "postQualified" : "lost") : "submitted",
     });
     bids.push(bid);
+
+    if (opened) {
+      await Evaluation.create({
+        bidId: bid.id,
+        evaluatorId: users.get("bacMember").id,
+        criteriaBreakdown: {
+          eligibility: "passed",
+          technicalSpecifications: "passed",
+          financialComponent: "opened after technical evaluation",
+        },
+        score: 100,
+        blindFlag: true,
+        submittedAt: timing.evaluated,
+        remarks: "Responsive to the required technical specifications.",
+      });
+
+      if (position === 0) {
+        await PostQualification.create({
+          bidId: bid.id,
+          result: "passed",
+          checklist: {
+            philgepsRegistration: "verified",
+            taxClearance: "verified",
+            deliveryCapacity: "verified",
+          },
+          remarks: "Post-qualification requirements verified and found compliant.",
+          verifiedAt: timing.awardRecommended,
+          verifiedById: users.get("bacSecretariat").id,
+        });
+      }
+    }
 
     // Every bid carries security. Without it a bidder can walk away from a
     // winning bid at no cost, which is precisely what it exists to prevent.
@@ -690,13 +779,15 @@ const runAwardStage = async (users, spec, rfq, bid, vendor, timing, index) => {
     noaNumber,
     noaDate: dateOnly(timing.awardApproved),
     amount: spec.winningBid,
-    status: "accepted",
+    awardBasis: "LCRB",
+    status: SINGLE_COMPLETED_PROJECT ? "issued" : "accepted",
     rfqId: rfq.id,
     bidId: bid.id,
     vendorId: vendor.id,
     recommendedById: users.get("bacChairperson").id,
     approvedById: users.get("hope").id,
   });
+  await bid.update({ status: "awarded" });
 
   // The BAC acts by resolution, signed by its members — not by one click.
   const committee = [
@@ -717,7 +808,7 @@ const runAwardStage = async (users, spec, rfq, bid, vendor, timing, index) => {
     type: "recommendAward",
     title: `Resolution recommending award of ${rfq.referenceNo} to ${vendor.businessName}`,
     recitals:
-      `Three (3) bids were received and opened in public session. The bid of ${vendor.businessName} at ` +
+      `${SINGLE_COMPLETED_PROJECT ? "Five (5)" : "Three (3)"} bids were received and opened in public session. The bid of ${vendor.businessName} at ` +
       `${peso(spec.winningBid)} was determined to be the Lowest Calculated Responsive Bid and passed ` +
       `post-qualification under IRR Sec. 60.`,
     resolvedAt: timing.awardRecommended,
@@ -845,6 +936,7 @@ const runDeliveryStage = async (users, contract, timing, accepted) => {
     description: accepted ? "Full delivery received and inspected." : "Partial delivery received; inspection pending.",
     status: accepted ? "accepted" : "underInspection",
     acceptedQuantityNote: accepted ? "Delivered in full, conforming to specification." : null,
+    acceptedValue: accepted ? contract.amount : null,
     reportedById: users.get("departmentRequester").id,
     inspectedById: accepted ? users.get("bacSecretariat").id : null,
   });
@@ -1087,6 +1179,18 @@ const seedObserversFor = async ({ rfq, spec, timing, users, opened }) => {
 };
 
 const clearDemoData = async () => {
+  if (SINGLE_COMPLETED_PROJECT) {
+    const existingSample = await AppEntry.findOne({
+      where: { projectTitle: COMPLETED_PROJECT.projectTitle },
+    });
+    if (existingSample) {
+      throw new Error(
+        "This completed-project sample is already present. This seed does not create duplicate copies."
+      );
+    }
+    return;
+  }
+
   await Security.destroy({ where: {} });
   await BacResolution.destroy({ where: {} });
   await Obligation.destroy({ where: {} });
@@ -1104,6 +1208,10 @@ const clearDemoData = async () => {
   await PrHeader.destroy({ where: {} });
   await AppEntry.destroy({ where: {} });
   await Appropriation.destroy({ where: {} });
+  await BudgetProceeding.destroy({ where: {} });
+  await BudgetProposalLine.destroy({ where: {} });
+  await BudgetProposal.destroy({ where: {} });
+  await ExecutiveBudget.destroy({ where: {} });
   // The planning layer, innermost first: AIP entries hang off the programme and
   // off a goal, and goals hang off the plan.
   await AipEntry.destroy({ where: {} });
@@ -1116,6 +1224,12 @@ const clearDemoData = async () => {
 
 try {
   await sequelize.authenticate();
+
+  if (SINGLE_COMPLETED_PROJECT && sequelize.config.database !== "municipal_walkthrough_20260907") {
+    throw new Error(
+      "The completed-project seed is restricted to the municipal_walkthrough_20260907 local database."
+    );
+  }
 
   const accounts = await User.findAll({ include: [Role] });
   const users = new Map(accounts.filter((user) => user.Role).map((user) => [user.Role.key, user]));
@@ -1147,6 +1261,7 @@ try {
   }
 
   await clearDemoData();
+  const sequenceBase = SINGLE_COMPLETED_PROJECT ? await PrHeader.count() : 0;
 
   // Give the officials names, so the public timeline attributes each decision
   // to a person rather than repeating the role twice.
@@ -1184,18 +1299,23 @@ try {
   // AIP entry and there were none to cite.
   //
   // Every peso in the demonstration data now traces up to a development goal.
-  const plan = await DevelopmentPlan.create({
-    title: `Comprehensive Development Plan ${YEAR - 2}–${YEAR + 3}`,
-    startYear: YEAR - 2,
-    endYear: YEAR + 3,
-    vision:
-      "A resilient, healthy and productive municipality where every barangay is reachable by " +
-      "all-weather road and served by a functioning health station.",
-    resolutionNo: `SB Res. No. ${YEAR - 2}-014`,
-    adoptedAt: dateOnly(at(1, 5)),
-    status: "adopted",
-    preparedById: users.get("planningOfficer")?.id ?? null,
-  });
+  const existingProgram = SINGLE_COMPLETED_PROJECT
+    ? await InvestmentProgram.findOne({ where: { fiscalYear: YEAR } })
+    : null;
+  const plan = existingProgram
+    ? await DevelopmentPlan.findByPk(existingProgram.developmentPlanId)
+    : await DevelopmentPlan.create({
+        title: `Comprehensive Development Plan ${YEAR - 2}–${YEAR + 3}`,
+        startYear: YEAR - 2,
+        endYear: YEAR + 3,
+        vision:
+          "A resilient, healthy and productive municipality where every barangay is reachable by " +
+          "all-weather road and served by a functioning health station.",
+        resolutionNo: `SB Res. No. ${YEAR - 2}-014`,
+        adoptedAt: dateOnly(at(1, 5)),
+        status: "adopted",
+        preparedById: users.get("planningOfficer")?.id ?? null,
+      });
 
   const GOALS = [
     ["health", "social", "Universal access to primary health care in every barangay"],
@@ -1205,8 +1325,11 @@ try {
   ];
 
   const goals = {};
-  for (const [key, sector, title] of GOALS) {
-    goals[key] = await DevelopmentGoal.create({
+  for (const [key, sector, title] of (SINGLE_COMPLETED_PROJECT ? GOALS.filter(([key]) => key === "digital") : GOALS)) {
+    const existingGoal = SINGLE_COMPLETED_PROJECT
+      ? await DevelopmentGoal.findOne({ where: { developmentPlanId: plan.id, sector } })
+      : null;
+    goals[key] = existingGoal ?? await DevelopmentGoal.create({
       developmentPlanId: plan.id,
       sector,
       title,
@@ -1223,7 +1346,7 @@ try {
 
   // The Annual Investment Program: the year's costed list of projects, drawn
   // from the plan's goals and adopted by the Sanggunian.
-  const program = await InvestmentProgram.create({
+  const program = existingProgram ?? await InvestmentProgram.create({
     fiscalYear: YEAR,
     title: `Annual Investment Program ${YEAR}`,
     status: "adopted",
@@ -1238,14 +1361,20 @@ try {
   // Entries deliberately costed ABOVE what the demonstration projects consume,
   // so there is headroom left for anyone walking the flow themselves.
   const aipEntries = {};
-  for (const entry of [
+  for (const entry of (SINGLE_COMPLETED_PROJECT ? [
+    { key: "desktopComputers", goal: "digital", dept: "IT", title: "Supply and Delivery of 20 Desktop Computers for Municipal Offices", cost: 1_200_000, expenseClass: "capitalOutlay" },
+  ] : [
     { key: "health", goal: "health", dept: "HEALTH", title: "Health facilities and medical equipment", cost: 9_500_000, expenseClass: "capitalOutlay" },
     { key: "roads", goal: "roads", dept: "ENGR", title: "Local roads and public infrastructure", cost: 32_000_000, expenseClass: "capitalOutlay" },
     { key: "disaster", goal: "disaster", dept: "GSO", title: "Solid waste and evacuation facilities", cost: 14_000_000, expenseClass: "capitalOutlay" },
     { key: "digital", goal: "digital", dept: "IT", title: "Municipal digitalisation programme", cost: 3_400_000, expenseClass: "mooe" },
+    { key: "desktopComputers", goal: "digital", dept: "IT", title: "Supply and Delivery of 20 Desktop Computers for Municipal Offices", cost: 1_200_000, expenseClass: "capitalOutlay" },
     { key: "schoolHealth", goal: "health", dept: "HEALTH", title: "School health and nutrition programme", cost: 2_200_000, expenseClass: "mooe" },
-  ]) {
-    aipEntries[entry.key] = await AipEntry.create({
+  ])) {
+    const existingAipEntry = SINGLE_COMPLETED_PROJECT
+      ? await AipEntry.findOne({ where: { investmentProgramId: program.id, title: entry.title } })
+      : null;
+    aipEntries[entry.key] = existingAipEntry ?? await AipEntry.create({
       investmentProgramId: program.id,
       developmentGoalId: goals[entry.goal].id,
       implementingUnitId: departments.get(entry.dept)?.id ?? null,
@@ -1264,12 +1393,109 @@ try {
     `✅ development plan adopted, ${Object.keys(aipEntries).length} AIP entries under ${program.title}`
   );
 
+  // The walkthrough includes the source budget and department proposal, so the
+  // enacted appropriation can be traced to this AIP entry rather than looking
+  // like a line entered directly in the register.
+  let executiveBudget = null;
+  let desktopBudgetLine = null;
+  if (SINGLE_COMPLETED_PROJECT) {
+    executiveBudget = await ExecutiveBudget.create({
+      fiscalYear: YEAR,
+      type: "annual",
+      title: `Annual Budget ${YEAR}`,
+      status: "enacted",
+      estimatedIncome: 1_500_000,
+      expenditureCeiling: 1_200_000,
+      regularIncomePriorYear: 1_400_000,
+      nationalTaxAllotment: 1_000_000,
+      ceilingGrowthPct: 5,
+      mbcReviewedAt: at(1, 16),
+      consolidatedAt: at(1, 17),
+      forumHeldAt: at(1, 18),
+      hearingConcludedAt: at(1, 19),
+      finalisedAt: at(1, 20),
+      mayorApprovedAt: at(1, 21),
+      ordinanceNo: `Ord. No. ${YEAR}-01`,
+      ordinanceDate: dateOnly(at(1, 22)),
+      sanggunianActedAt: at(1, 22),
+      provincialReviewOutcome: "approved",
+      provincialReviewedAt: at(1, 23),
+      enactedAt: at(1, 23),
+      investmentProgramId: program.id,
+      preparedById: users.get("budgetOfficer").id,
+      approvedById: users.get("hope").id,
+    });
+
+    const proposal = await BudgetProposal.create({
+      fiscalYear: YEAR,
+      status: "finalised",
+      proposedTotal: 1_200_000,
+      recommendedTotal: 1_200_000,
+      finalTotal: 1_200_000,
+      previousYearAppropriation: 1_140_000,
+      justification: "Replacement of obsolete municipal office desktop computers.",
+      submittedAt: at(1, 12),
+      reviewNotes: "Recommended in full after verification against the adopted AIP.",
+      executiveBudgetId: executiveBudget.id,
+      departmentId: departments.get("IT").id,
+      preparedById: users.get("departmentRequester").id,
+    });
+
+    desktopBudgetLine = await BudgetProposalLine.create({
+      budgetProposalId: proposal.id,
+      aipEntryId: aipEntries.desktopComputers.id,
+      title: "Municipal Office Desktop Computer Outlay",
+      expenseClass: "capitalOutlay",
+      fund: "generalFund",
+      papCode: "PAP-ITO-CO-01",
+      uacsCode: "5-02-13-050",
+      proposedAmount: 1_200_000,
+      recommendedAmount: 1_200_000,
+      finalAmount: 1_200_000,
+      remarks: "Twenty desktop computer sets for municipal offices.",
+    });
+
+    await BudgetProceeding.bulkCreate([
+      {
+        executiveBudgetId: executiveBudget.id,
+        type: "forum",
+        scheduledAt: at(1, 18),
+        heldAt: at(1, 18),
+        venue: "Municipal Session Hall",
+        agenda: "Confirm income estimate and expenditure ceiling.",
+        minutes: "The Local Finance Committee endorsed the IT capital outlay ceiling.",
+        recordedById: users.get("budgetOfficer").id,
+      },
+      {
+        executiveBudgetId: executiveBudget.id,
+        type: "hearing",
+        scheduledAt: at(1, 19),
+        heldAt: at(1, 19),
+        venue: "Municipal Session Hall",
+        agenda: "IT office justification for desktop computer replacement.",
+        minutes: "The proposal was supported in full after AIP and asset verification.",
+        departmentId: departments.get("IT").id,
+        recordedById: users.get("budgetOfficer").id,
+      },
+      {
+        executiveBudgetId: executiveBudget.id,
+        type: "deliberation",
+        scheduledAt: at(1, 20),
+        heldAt: at(1, 20),
+        venue: "Municipal Session Hall",
+        agenda: "Finalise the annual executive budget.",
+        minutes: "The final IT capital outlay was retained at ₱1,200,000.00.",
+        recordedById: users.get("budgetOfficer").id,
+      },
+    ]);
+  }
+
   // The Appropriation Ordinance comes next — nothing downstream can exist
   // without a budget line to charge against.
   const ordinanceNo = `Ord. No. ${YEAR}-01`;
   const appropriations = {};
   let appropriatedTotal = 0;
-  for (const line of APPROPRIATIONS) {
+  for (const line of (SINGLE_COMPLETED_PROJECT ? APPROPRIATIONS.filter((item) => item.key === "itCO") : APPROPRIATIONS)) {
     const office = departments.get(line.department);
     const record = await Appropriation.create({
       fiscalYear: YEAR,
@@ -1285,12 +1511,14 @@ try {
       status: "enacted",
       departmentId: office?.id ?? null,
       recordedById: users.get("budgetOfficer").id,
+      executiveBudgetId: executiveBudget?.id ?? null,
+      budgetProposalLineId: line.key === "itCO" ? desktopBudgetLine?.id ?? null : null,
     });
     appropriations[line.key] = record;
     appropriatedTotal += line.amount;
   }
   console.log(
-    `✅ ${APPROPRIATIONS.length} appropriation lines enacted under ${ordinanceNo} — ${peso(appropriatedTotal)}`
+    `✅ ${Object.keys(appropriations).length} appropriation lines enacted under ${ordinanceNo} — ${peso(appropriatedTotal)}`
   );
 
   for (const [index, spec] of PROJECTS.entries()) {
@@ -1306,7 +1534,8 @@ try {
       continue;
     }
 
-    const timing = timingFor(index);
+    const recordIndex = index + sequenceBase;
+    const timing = timingFor(recordIndex);
     const entry = await runAppStage(users, spec, department, timing, appropriation, aipEntries[spec.aipEntry]);
 
     if (spec.reach === "upcoming") {
@@ -1317,7 +1546,7 @@ try {
     // The mode is determined on the requisition (step 19) and the solicitation
     // inherits it, so it has to be resolved before the PR stage rather than at
     // RFQ time as it used to be.
-    const pr = await runPrStage(users, spec, entry, department, timing, index, appropriation, mode);
+    const pr = await runPrStage(users, spec, entry, department, timing, recordIndex, appropriation, mode);
 
     if (spec.reach === "bidding") {
       // Still accepting bids, so its dates straddle today rather than sitting
@@ -1329,19 +1558,19 @@ try {
         rfqClosing: daysFromNow(12, 14),
         bidSubmitted: daysFromNow(-3, 15),
       };
-      const rfq = await runSolicitationStage(users, spec, pr, mode, openTiming, index, "published");
+      const rfq = await runSolicitationStage(users, spec, pr, mode, openTiming, recordIndex, "published");
       await runBidStage(users, spec, rfq, vendors, openTiming, false);
       console.log(`✅ ${spec.projectTitle} — ongoing (open for bidding, closes in 12 days)`);
       continue;
     }
 
-    const rfq = await runSolicitationStage(users, spec, pr, mode, timing, index, "awarded");
+    const rfq = await runSolicitationStage(users, spec, pr, mode, timing, recordIndex, "awarded");
     const bids = await runBidStage(users, spec, rfq, vendors, timing, true);
     const vendor = vendors[spec.vendorKey];
-    const award = await runAwardStage(users, spec, rfq, bids[0], vendor, timing, index);
+    const award = await runAwardStage(users, spec, rfq, bids[0], vendor, timing, recordIndex);
 
     if (spec.reach === "contract") {
-      const contract = await runContractStage(users, spec, award, vendor, timing, index, "active");
+      const contract = await runContractStage(users, spec, award, vendor, timing, recordIndex, "active");
       await runDeliveryStage(users, contract, timing, false);
       console.log(`✅ ${spec.projectTitle} — ongoing (contract in force)`);
       continue;
@@ -1350,12 +1579,14 @@ try {
     // Created active, closed by the payment stage — the same order the live
     // system produces, since a contract now closes on final payment rather
     // than being born complete.
-    const contract = await runContractStage(users, spec, award, vendor, timing, index, "active");
+    const contract = await runContractStage(users, spec, award, vendor, timing, recordIndex, "active");
     const delivery = await runDeliveryStage(users, contract, timing, true);
-    await runPaymentStage(users, spec, contract, delivery, vendor, timing, index);
+    await runPaymentStage(users, spec, contract, delivery, vendor, timing, recordIndex);
     console.log(`✅ ${spec.projectTitle} — completed`);
   }
 
+  const { rebaseline } = await import("./services/integrityMonitor.js");
+  await rebaseline();
   console.log("\nDemonstration data ready. Open http://localhost:5173/ to view the public portal.");
 } catch (err) {
   console.error("❌ Demo seed failed:", err);

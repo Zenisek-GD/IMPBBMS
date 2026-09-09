@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Plus, Target, Star, ListTree, Route, Check } from 'lucide-react'
 import * as planningApi from '../../api/planning'
+import { availableAipYears } from './aipYears'
 import {
   PLAN_STATUS_LABELS,
   PLAN_STATUS_TONES,
@@ -297,6 +298,69 @@ function ResolutionForm({ title, label, onClose, onConfirm }) {
           </button>
         </div>
       </div>
+    </Modal>
+  )
+}
+
+function AipProgramForm({ years, plans, onClose, onSaved }) {
+  const [requestedYear, setRequestedYear] = useState(
+    years.find((year) => year >= new Date().getFullYear()) ?? years[0] ?? ''
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const fiscalYear = years.includes(requestedYear) ? requestedYear : (years[0] ?? '')
+  const plan = plans.find(
+    (row) => row.status === 'adopted' && row.startYear <= fiscalYear && row.endYear >= fiscalYear
+  )
+
+  return (
+    <Modal title="Create Annual Investment Program" onClose={onClose}>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={async (event) => {
+          event.preventDefault()
+          if (saving || !fiscalYear) return
+          setSaving(true)
+          setError('')
+          try {
+            await planningApi.createProgram({ fiscalYear })
+            onSaved()
+            onClose()
+          } catch (err) {
+            setError(err.response?.data?.message ?? 'Could not create the investment program.')
+          } finally {
+            setSaving(false)
+          }
+        }}
+      >
+        <label className="text-xs text-text-secondary">
+          Fiscal year
+          <select
+            value={fiscalYear}
+            onChange={(event) => setRequestedYear(Number(event.target.value))}
+            disabled={saving || years.length === 0}
+            className={inputClass}
+          >
+            {years.map((year) => <option key={year} value={year}>{year}</option>)}
+          </select>
+        </label>
+        <p className="text-[13px] text-text-secondary">
+          {plan
+            ? 'Development plan: ' + plan.title
+            : 'No available fiscal year. Adopt a development plan covering a year without an AIP.'}
+        </p>
+        <p className="text-xs text-text-faint">
+          Only years covered by an adopted development plan and without an existing AIP are available.
+          After creating the AIP, use ADD PROJECT to record its costed projects.
+        </p>
+        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" disabled={saving} onClick={onClose}>CANCEL</Button>
+          <Button type="submit" disabled={saving || !fiscalYear || !plan}>
+            {saving ? 'CREATING…' : 'CREATE AIP'}
+          </Button>
+        </div>
+      </form>
     </Modal>
   )
 }
@@ -672,6 +736,7 @@ export default function DevelopmentPlanning() {
   const [error, setError] = useState('')
 
   const [creatingPlan, setCreatingPlan] = useState(false)
+  const [creatingProgram, setCreatingProgram] = useState(false)
   const [addingGoalTo, setAddingGoalTo] = useState(null)
   const [prioritising, setPrioritising] = useState(null)
   const [adoptingPlan, setAdoptingPlan] = useState(null)
@@ -734,9 +799,7 @@ export default function DevelopmentPlanning() {
   const canAdopt = permissions.has('planning.adoptAip')
 
   const adoptedPlan = plans.find((p) => p.status === 'adopted')
-  const currentYear = new Date().getFullYear()
-  const hasCurrentYearProgram = programs.some((program) => program.fiscalYear === currentYear)
-  const programYearToOpen = hasCurrentYearProgram ? currentYear + 1 : currentYear
+  const programYears = availableAipYears(plans, programs)
 
   return (
     <DashboardPage>
@@ -889,18 +952,24 @@ export default function DevelopmentPlanning() {
             icon={ListTree}
             bodyClassName="p-4"
             action={
-              canManageAip &&
-              adoptedPlan && (
-                <button
-                  type="button"
-                  onClick={() => run(() => planningApi.createProgram({ fiscalYear: programYearToOpen })).catch(() => {})}
-                  className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+              canManageAip && (
+                <Button
+                  icon={Plus}
+                  disabled={programYears.length === 0}
+                  onClick={() => setCreatingProgram(true)}
                 >
-                  {hasCurrentYearProgram ? 'OPEN NEXT YEAR' : `OPEN ${currentYear}`}
-                </button>
+                  NEW AIP
+                </Button>
               )
             }
           >
+            {canManageAip && programYears.length === 0 && (
+              <p className="mb-3 text-[13px] text-text-secondary">
+                {adoptedPlan
+                  ? 'Every year covered by the adopted development plans already has an AIP. Existing adopted AIPs are closed to new projects.'
+                  : 'A Planning Officer must add a development goal, then the Sanggunian Secretary must record adoption of the development plan before an AIP can be created.'}
+              </p>
+            )}
             {programs.length === 0 ? (
               <p className="text-[13px] text-text-faint">
                 No investment program yet. It is the year&apos;s slice of the development plan, and the budget cannot
@@ -1011,6 +1080,14 @@ export default function DevelopmentPlanning() {
           onConfirm={(payload) =>
             run(() => planningApi.transitionProgram(adoptingProgram.id, 'adopt', payload))
           }
+        />
+      )}
+      {creatingProgram && (
+        <AipProgramForm
+          years={programYears}
+          plans={plans}
+          onClose={() => setCreatingProgram(false)}
+          onSaved={refresh}
         />
       )}
       {addingEntryTo && (
