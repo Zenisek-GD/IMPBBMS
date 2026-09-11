@@ -4,7 +4,10 @@ import * as biddingApi from '../../api/bidding'
 import { RFQ_STATUS_LABELS, RFQ_STATUS_TONES } from '../../api/bidding'
 import { fetchPrs } from '../../api/purchaseRequisitions'
 import DashboardPage from '../../components/ui/DashboardPage'
-import WorkHoursDateTimeInput from '../../components/ui/WorkHoursDateTimeInput'
+import { usePermissions } from '../../context/usePermissions'
+import ScheduleFields from './ScheduleFields'
+import { schedulePayload } from './schedulePayload'
+import AttemptHistoryModal from './AttemptHistoryModal'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
@@ -19,7 +22,7 @@ const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFra
 
 function CreateRfqModal({ onClose, onCreated }) {
   const [prs, setPrs] = useState([])
-  const [form, setForm] = useState({ prHeaderId: '', title: '', category: 'goods', closingDate: '' })
+  const [form, setForm] = useState({ prHeaderId: '', title: '', category: 'goods', closingDate: '', openingDate: '', qualityWeight: '', financialWeight: '', consultingPassingScore: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -84,17 +87,8 @@ function CreateRfqModal({ onClose, onCreated }) {
               <option value="consulting">Consulting Services</option>
             </select>
           </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-              Closing date
-            </label>
-            <WorkHoursDateTimeInput
-              value={form.closingDate}
-              onChange={(event) => setForm({ ...form, closingDate: event.target.value })}
-              className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-            />
-          </div>
         </div>
+        <ScheduleFields form={form} setForm={setForm} />
 
         {error && (
           <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -108,16 +102,16 @@ function CreateRfqModal({ onClose, onCreated }) {
           </Button>
           <button
             type="button"
-            disabled={saving || !form.prHeaderId || !form.closingDate}
+            disabled={saving || !form.prHeaderId || !form.closingDate || !form.openingDate}
             onClick={async () => {
               setError('')
               setSaving(true)
               try {
-                await biddingApi.createRfq({ ...form, prHeaderId: Number(form.prHeaderId) })
+                await biddingApi.createRfq({ prHeaderId: Number(form.prHeaderId), title: form.title, category: form.category, ...schedulePayload(form) })
                 onCreated()
                 onClose()
               } catch (err) {
-                setError(err.response?.data?.message ?? 'Could not create the RFQ.')
+                setError(err.response?.data?.message ?? err.message ?? 'Could not create the RFQ.')
               } finally {
                 setSaving(false)
               }
@@ -284,12 +278,16 @@ function AbstractOfBidsModal({ rfq, onClose }) {
 }
 
 export default function RfqManagement() {
+  const permissions = usePermissions()
+  const canPublish = permissions.has('bidding.publish')
   const [rfqs, setRfqs] = useState([])
   const [creating, setCreating] = useState(false)
   const [opening, setOpening] = useState(null)
   const [abstractFor, setAbstractFor] = useState(null)
+  const [historyFor, setHistoryFor] = useState(null)
   const [witnesses, setWitnesses] = useState('')
   const [actionError, setActionError] = useState('')
+  const [message, setMessage] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
 
   const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
@@ -301,19 +299,23 @@ export default function RfqManagement() {
       .then((data) => {
         if (!cancelled) setRfqs(data)
       })
-      .catch(() => {})
+      .catch((err) => { if (!cancelled) setActionError(err.response?.data?.message ?? 'Could not load procurement records.') })
     return () => {
       cancelled = true
     }
   }, [refreshToken])
 
-  const run = async (fn) => {
+  const run = async (fn, success) => {
     setActionError('')
+    setMessage('')
     try {
-      await fn()
+      const result = await fn()
+      setMessage(result?.message ?? success ?? 'Procurement updated. Review its current status and next action.')
       refresh()
+      return true
     } catch (err) {
       setActionError(err.response?.data?.message ?? 'That action could not be completed.')
+      return false
     }
   }
 
@@ -351,11 +353,12 @@ export default function RfqManagement() {
         title="RFQ / ITB Management"
         subtitle="Advertise approved requisitions, close submission, and open bids."
         actions={
-          <Button icon={Plus} onClick={() => setCreating(true)}>
+          canPublish && <Button icon={Plus} onClick={() => setCreating(true)}>
             NEW RFQ / ITB
           </Button>
         }
       />
+      {message && <p role="status" className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">{message}</p>}
 
       {actionError && (
         <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -385,6 +388,7 @@ export default function RfqManagement() {
                   <SortableTh {...table.sortProps('modeName')}>Mode</SortableTh>
                   <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
                   <SortableTh {...table.sortProps('closingDate')}>Closing</SortableTh>
+                  <SortableTh {...table.sortProps('openingDate')}>Bid opening</SortableTh>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
                   <Th>Actions</Th>
                 </tr>
@@ -394,6 +398,7 @@ export default function RfqManagement() {
                   <tr key={rfq.id} className="border-t border-border-muted">
                     <td className="px-4 py-3 font-mono text-xs text-navy">
                       {rfq.referenceNo}
+                      <span className="mt-1 block text-[11px] text-text-faint">Attempt #{rfq.attemptNumber ?? 1}</span>
                       {!rfq.postingRequired && (
                         <span className="ml-2">
                           <Badge tone="neutral">No posting req.</Badge>
@@ -411,30 +416,32 @@ export default function RfqManagement() {
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">
                       {new Date(rfq.closingDate).toLocaleString()}
                     </td>
+                    <td className="px-4 py-3 text-xs text-text-secondary">{rfq.openingDate ? new Date(rfq.openingDate).toLocaleString() : 'Schedule required before publication'}</td>
                     <td className="px-4 py-3">
-                      <Badge tone={RFQ_STATUS_TONES[rfq.status]}>{RFQ_STATUS_LABELS[rfq.status]}</Badge>
+                      <Badge tone={RFQ_STATUS_TONES[rfq.status]}>{rfq.statusLabel ?? (rfq.status === 'failed' ? `Failed — Attempt #${rfq.attemptNumber ?? 1}` : RFQ_STATUS_LABELS[rfq.status])}</Badge>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-3">
-                        {rfq.status === 'draft' && (
+                        <button type="button" onClick={() => setHistoryFor(rfq)} className="text-[11px] font-medium text-navy hover:underline">HISTORY / NEXT ACTION</button>
+                        {canPublish && rfq.status === 'draft' && (
                           <button
                             type="button"
-                            onClick={() => run(() => biddingApi.publishRfq(rfq.id))}
+                            onClick={() => run(() => biddingApi.publishRfq(rfq.id), 'RFQ / ITB published. Bid submission is open until the recorded deadline.')}
                             className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
                             PUBLISH
                           </button>
                         )}
-                        {rfq.status === 'published' && (
+                        {canPublish && rfq.status === 'published' && (
                           <button
                             type="button"
-                            onClick={() => run(() => biddingApi.closeRfq(rfq.id))}
+                            onClick={() => run(() => biddingApi.closeRfq(rfq.id), 'Bid submission closed. Open bids at the recorded opening date and time.')}
                             className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
                             CLOSE
                           </button>
                         )}
-                        {rfq.status === 'closed' && (
+                        {canPublish && rfq.status === 'closed' && (
                           <button
                             type="button"
                             onClick={() => setOpening(rfq)}
@@ -467,7 +474,8 @@ export default function RfqManagement() {
         <Pagination {...paginationProps} label="solicitations" />
       </Card>
 
-      {creating && <CreateRfqModal onClose={() => setCreating(false)} onCreated={refresh} />}
+      {creating && <CreateRfqModal onClose={() => setCreating(false)} onCreated={() => { refresh(); setMessage('RFQ / ITB draft created. Review the schedule and procurement details before publication.') }} />}
+      {historyFor && <AttemptHistoryModal rfq={historyFor} onClose={() => setHistoryFor(null)} onChanged={(result) => { refresh(); setMessage(result?.message ?? 'Procurement history updated. Review the next action for the current attempt.') }} />}
 
       {abstractFor && (
         <AbstractOfBidsModal rfq={abstractFor} onClose={() => setAbstractFor(null)} />
@@ -499,7 +507,8 @@ export default function RfqManagement() {
             <button
               type="button"
               onClick={async () => {
-                await run(() => biddingApi.openBids(opening.id, { witnesses }))
+                const succeeded = await run(() => biddingApi.openBids(opening.id, { witnesses }), 'Bids opened. The TWG may now record its conflict-of-interest declarations and technical assessments.')
+                if (!succeeded) return
                 setOpening(null)
                 setWitnesses('')
               }}

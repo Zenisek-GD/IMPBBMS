@@ -2,10 +2,12 @@ import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.
 import { Vendor } from "../models/vendorModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
 import { Bid, Rfq } from "../models/biddingModel.js";
+import { TwgAssessment } from "../models/twgModel.js";
 import { Invoice } from "../models/paymentModel.js";
 import { User } from "../models/userModel.js";
 import { checksumOf, safeFilename, validateFileContent } from "../services/documentStore.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
 
 // Design doc Section 12: "File uploads and document access restricted by
 // permission (e.g., vendor documents visible only to authorized reviewers)."
@@ -22,6 +24,18 @@ export const accessFor = async (req, entityRef, entityId) => {
     : null;
 
   switch (entityRef) {
+    case "rfq": {
+      const rfq = await Rfq.findByPk(entityId);
+      return { read: Boolean(rfq) && (has("bidding.view") || has("audit.viewAll")), write: Boolean(rfq) && !["awarded", "cancelled"].includes(rfq.status) && (has("bidding.publish") || has("bidding.chairEvaluation")) };
+    }
+    case "twgAssessment": {
+      const assessment = await TwgAssessment.findByPk(entityId, { include: [{ model: Bid, as: "bid", include: [{ model: Rfq, as: "rfq" }] }] });
+      const owner = assessment?.memberId === req.currentUser.id;
+      return {
+        read: Boolean(assessment) && ((owner && has("bidding.technicalInput")) || (assessment.status === "submitted" && (has("bidding.view") || has("bidding.evaluate") || has("bidding.chairEvaluation") || has("audit.viewAll")))),
+        write: owner && has("bidding.technicalInput") && assessment.status === "draft" && assessment.bid?.rfq?.status === "opened",
+      };
+    }
     case "vendor": {
       const isOwner = ownVendor?.id === Number(entityId);
       return {
@@ -155,6 +169,17 @@ export const uploadDocument = async (req, res) => {
   const filename = safeFilename(req.file.originalname);
   const checksum = checksumOf(req.file.buffer);
 
+  if (["rfq", "twgAssessment"].includes(entityRef)) {
+    const document = await withAuditTransaction(async (transaction, audit) => {
+      await lockTechnicalAttachment(req, entityRef, Number(entityId), transaction);
+      // New evidence is appended, never substituted for an official old file.
+      const created = await Document.create({ filename, mimeType: req.file.mimetype, sizeBytes: req.file.size, content: req.file.buffer, checksum, entityRef, entityId: Number(entityId), docType: docType ?? null, label: label ?? null, uploadedById: req.currentUser.id, uploadedAt: new Date() }, { transaction });
+      await audit(actorAudit(req, { actionType: "document.uploaded", entityRef, entityId: Number(entityId), summary: "Supporting procurement evidence uploaded.", afterState: { documentId: created.id, filename, checksum, docType: docType ?? null } }));
+      return created;
+    });
+    return res.status(201).json(serialize(document));
+  }
+
   // Re-uploading the same slot replaces rather than accumulating duplicates,
   // which is what "attach your PhilGEPS certificate" means in practice.
   if (docType) {
@@ -240,10 +265,19 @@ export const deleteDocument = async (req, res) => {
     attributes: DOCUMENT_METADATA_ATTRIBUTES,
   });
   if (!document) return res.status(404).json({ message: "Document not found." });
+  if (document.entityRef === "rfq") throw workflowError("Procurement evidence is preserved in the attempt history. Attach an additional supporting record instead of deleting it.");
 
   const access = await accessFor(req, document.entityRef, document.entityId);
   if (!access.write) {
     return res.status(403).json({ message: "You may not remove that document." });
+  }
+  if (document.entityRef === "twgAssessment") {
+    await withAuditTransaction(async (transaction, audit) => {
+      await lockTechnicalAttachment(req, document.entityRef, document.entityId, transaction);
+      await document.destroy({ transaction });
+      await audit(actorAudit(req, { actionType: "document.deleted", entityRef: document.entityRef, entityId: document.entityId, summary: "Supporting file removed from a TWG draft.", beforeState: { documentId: document.id, checksum: document.checksum } }));
+    });
+    return res.json({ message: "Supporting file removed from the draft." });
   }
 
   await auditFromRequest(req, {
@@ -256,4 +290,19 @@ export const deleteDocument = async (req, res) => {
 
   await document.destroy();
   res.json({ message: "Document removed." });
+};
+
+const lockTechnicalAttachment = async (req, entityRef, entityId, transaction) => {
+  let assessment, rfqId = entityId;
+  if (entityRef === "twgAssessment") {
+    assessment = await TwgAssessment.findByPk(entityId, { include: [{ model: Bid, as: "bid" }], transaction });
+    if (!assessment) throw workflowError("TWG assessment not found.", 404);
+    rfqId = assessment.bid.rfqId;
+  }
+  const rfq = await Rfq.findByPk(rfqId, { transaction, lock: transaction.LOCK.UPDATE });
+  if (!rfq) throw workflowError("Procurement not found.", 404);
+  if (assessment) {
+    await assessment.reload({ transaction });
+    if (assessment.status !== "draft" || rfq.status !== "opened" || assessment.memberId !== req.currentUser.id || !req.permissions.has("bidding.technicalInput")) throw workflowError("Supporting files cannot be changed after TWG submission.", 403);
+  } else if (["awarded", "cancelled"].includes(rfq.status) || !["bidding.publish", "bidding.chairEvaluation"].some((permission) => req.permissions.has(permission))) throw workflowError("Supporting records cannot be changed at this procurement stage.", 403);
 };

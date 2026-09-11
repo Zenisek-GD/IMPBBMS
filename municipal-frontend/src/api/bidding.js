@@ -1,10 +1,14 @@
 import { apiClient } from './client'
+export const recordAttemptEvidence = (id, payload) => apiClient.post(`/bidding/rfqs/${id}/attempt-evidence`, payload).then((res) => res.data)
 
 export const fetchRfqs = (params = {}) =>
   apiClient.get('/bidding/rfqs', { params }).then((res) => res.data)
 
 export const createRfq = (payload) =>
   apiClient.post('/bidding/rfqs', payload).then((res) => res.data)
+
+export const updateRfqSchedule = (rfqId, payload) =>
+  apiClient.patch(`/bidding/rfqs/${rfqId}/schedule`, payload).then((res) => res.data)
 
 export const publishRfq = (id) => apiClient.post(`/bidding/rfqs/${id}/publish`).then((res) => res.data)
 export const closeRfq = (id) => apiClient.post(`/bidding/rfqs/${id}/close`).then((res) => res.data)
@@ -29,17 +33,17 @@ export const submitBid = (id, payload) =>
 export const fetchBids = (rfqId) =>
   apiClient.get(`/bidding/rfqs/${rfqId}/bids`).then((res) => res.data)
 
-export const submitEvaluation = (bidId, criteriaBreakdown, remarks) =>
-  apiClient.post(`/bidding/bids/${bidId}/evaluations`, { criteriaBreakdown, remarks }).then((res) => res.data)
+export const submitEvaluation = (bidId, criteriaBreakdown, remarks, verdict) =>
+  apiClient.post(`/bidding/bids/${bidId}/evaluations`, { criteriaBreakdown, remarks, verdict }).then((res) => res.data)
 
-export const closeEvaluation = (rfqId) =>
-  apiClient.post(`/bidding/rfqs/${rfqId}/close-evaluation`).then((res) => res.data)
+export const closeEvaluation = (rfqId, payload) =>
+  apiClient.post(`/bidding/rfqs/${rfqId}/close-evaluation`, payload).then((res) => res.data)
 
 export const submitPostQualification = (bidId, payload) =>
   apiClient.post(`/bidding/bids/${bidId}/post-qualification`, payload).then((res) => res.data)
 
-export const recommendAward = (bidId) =>
-  apiClient.post(`/bidding/bids/${bidId}/recommend-award`).then((res) => res.data)
+export const recommendAward = (bidId, payload) =>
+  apiClient.post(`/bidding/bids/${bidId}/recommend-award`, payload).then((res) => res.data)
 
 export const approveAward = (id) => apiClient.post(`/bidding/awards/${id}/approve`).then((res) => res.data)
 export const fetchAwards = () => apiClient.get('/bidding/awards').then((res) => res.data)
@@ -54,8 +58,8 @@ export const fetchMyVendorProfile = () => apiClient.get('/vendors/me').then((res
 export const recordCounterSubmission = (payload) =>
   apiClient.post('/vendors', payload).then((res) => res.data)
 export const fetchVendors = (params = {}) => apiClient.get('/vendors', { params }).then((res) => res.data)
-export const reviewVendor = (id, decision, remarks) =>
-  apiClient.post(`/vendors/${id}/review`, { decision, remarks }).then((res) => res.data)
+export const reviewVendor = (id, decision, remarks, attendance = {}) =>
+  apiClient.post(`/vendors/${id}/review`, { decision, remarks, ...attendance }).then((res) => res.data)
 
 // Records the finding on one submitted requirement. Returns the whole vendor,
 // so the review console can re-render its progress from the server's own count
@@ -117,8 +121,18 @@ export const disapproveAward = (awardId, grounds) =>
 
 // Sec. 64 — a failed bidding is a recorded act. Two on one project is what opens
 // Negotiated Procurement under Sec. 35.1.
-export const declareFailureOfBidding = (rfqId, reason) =>
-  apiClient.post(`/bidding/rfqs/${rfqId}/declare-failure`, { reason }).then((res) => res.data)
+export const declareFailureOfBidding = (rfqId, payload) =>
+  apiClient.post(`/bidding/rfqs/${rfqId}/declare-failure`, typeof payload === 'string' ? { reason: payload } : payload).then((res) => res.data)
+
+export const fetchTwg = (rfqId) => apiClient.get(`/bidding/rfqs/${rfqId}/twg`).then((res) => res.data)
+export const declareNoConflict = (rfqId) => apiClient.post(`/bidding/rfqs/${rfqId}/twg/declaration`, { declared: true }).then((res) => res.data)
+export const saveTwgAssessment = (bidId, payload) => apiClient.post(`/bidding/bids/${bidId}/twg`, payload).then((res) => res.data)
+export const fetchBacCommittee = () => apiClient.get('/bidding/bac-committee').then((res) => res.data)
+export const fetchAttempts = (rfqId) => apiClient.get(`/bidding/rfqs/${rfqId}/attempts`).then((res) => res.data)
+export const createRebid = (rfqId, payload) => apiClient.post(`/bidding/rfqs/${rfqId}/rebid`, payload).then((res) => res.data)
+export const submitNegotiatedReview = (rfqId, payload) => apiClient.post(`/bidding/rfqs/${rfqId}/negotiated-review`, payload).then((res) => res.data)
+export const decideNegotiatedReview = (rfqId, payload) => apiClient.post(`/bidding/rfqs/${rfqId}/negotiated-review/decision`, payload).then((res) => res.data)
+export const startNegotiatedProcurement = (rfqId, payload) => apiClient.post(`/bidding/rfqs/${rfqId}/negotiated-start`, payload).then((res) => res.data)
 
 // Goods and Infrastructure are rated pass/fail on the technical requirements and
 // awarded to the lowest calculated responsive bid. Only Consulting Services is

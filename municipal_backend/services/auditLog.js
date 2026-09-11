@@ -138,6 +138,11 @@ export const redactSecrets = (value, depth = 0) => {
 // chain and make verification ambiguous.
 let writeQueue = Promise.resolve();
 
+// Hash the JSON representation actually stored by MySQL. Optional undefined
+// object members disappear during JSON storage; dates become ISO strings.
+// Normalizing before hashing keeps new entries verifiable after a round trip.
+const storedState = (value) => value ? JSON.parse(JSON.stringify(redactSecrets(value))) : null;
+
 const appendAudit = async (payload, transaction) => {
   const last = await AuditLog.findOne({
     order: [["sequence", "DESC"]],
@@ -159,8 +164,8 @@ const appendAudit = async (payload, transaction) => {
     // Scrubbed on the way in — see redactSecrets above. The hash is
     // computed over the redacted form, which is also what is stored, so
     // verification still holds.
-    beforeState: payload.beforeState ? redactSecrets(payload.beforeState) : null,
-    afterState: payload.afterState ? redactSecrets(payload.afterState) : null,
+    beforeState: storedState(payload.beforeState),
+    afterState: storedState(payload.afterState),
     // Defaults to now. The override exists for backfilling historical
     // activity — importing records from a predecessor system, or seeding
     // demonstration data — where the entry's real time is not the time it

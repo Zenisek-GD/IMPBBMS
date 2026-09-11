@@ -1,4 +1,11 @@
 import { Op } from "sequelize";
+import { TwgAssessment } from "../models/twgModel.js";
+import { ProcurementAttempt } from "../models/procurementAttemptModel.js";
+import { failureStatusLabel } from "../services/attemptPolicy.js";
+import { serializeAssessment } from "./twgController.js";
+import { scheduleError, weightError, assessmentCompliant } from "../services/evaluationPolicy.js";
+import { workflowError, actorAudit } from "../services/workflowSupport.js";
+import { assertBacAction, assertNewAttemptAllowed, ensureProcurementAttempt, snapshotAttemptOutcome, committeeSnapshot } from "../services/procurementGovernance.js";
 import { sequelize } from "../models/db.js";
 import { Rfq, Bid, BidOpeningRecord, Evaluation, PostQualification, Award } from "../models/biddingModel.js";
 import { ProcurementMode } from "../models/procurementModeModel.js";
@@ -7,20 +14,19 @@ import { PrHeader } from "../models/prModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
-import { Role } from "../models/roleModel.js";
 import { BacResolution, nextResolutionNo } from "../models/bacResolutionModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import { notifyByPermission, notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
 import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 import {
   suggestProcurementMode,
   requiresPrebidConference,
   minimumPostingDays,
-  SVP_POSTING_EXEMPTION_CEILING,
+  postingExemptionFor,
+  procurementAmountError,
 } from "../services/procurementThresholds.js";
 import { checkVendorEligibility } from "../services/vendorEligibility.js";
-import { evaluateBacQuorum, PRESIDING_ROLE_KEYS } from "../services/bacCommittee.js";
 import { unresolvedProtestsFor } from "./protestController.js";
 import { ObserverInvitation, ObserverOrganization } from "../models/observerModel.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
@@ -37,6 +43,7 @@ const isBlindStage = (rfq) => !["evaluated", "awarded"].includes(rfq.status);
 
 const rfqIncludes = {
   include: [
+    { model: ProcurementAttempt, as: "attempt", attributes: ["id", "attemptNumber", "status"] },
     { model: ProcurementMode, as: "mode" },
     { model: PrHeader, as: "purchaseRequisition" },
     { model: User, as: "publishedBy", attributes: ["id", "name"] },
@@ -45,12 +52,21 @@ const rfqIncludes = {
 
 const serializeRfq = (rfq) => ({
   id: rfq.id,
+  attemptNumber: rfq.attempt?.attemptNumber ?? null,
+  statusLabel: rfq.status === "failed" && rfq.attempt ? failureStatusLabel(rfq.attempt.attemptNumber) : null,
   referenceNo: rfq.referenceNo,
   title: rfq.title,
   abc: Number(rfq.abc),
   category: rfq.category,
   publishDate: rfq.publishDate,
   closingDate: rfq.closingDate,
+  openingDate: rfq.openingDate,
+  qualityWeight: rfq.category === "consulting" ? Number(rfq.qualityWeight) : null,
+  financialWeight: rfq.category === "consulting" ? Number(rfq.financialWeight) : null,
+  consultingPassingScore: rfq.category === "consulting" ? Number(rfq.consultingPassingScore) : null,
+  twgRequired: rfq.twgRequired,
+  prHeaderId: rfq.prHeaderId,
+  appEntryId: rfq.appEntryId,
   prebidRequired: rfq.prebidRequired,
   prebidAt: rfq.prebidAt,
   postingRequired: rfq.postingRequired,
@@ -86,13 +102,51 @@ const serializeBid = (bid, { blind, includeFinancial }) => ({
         )
       : null,
   evaluationCount: bid.evaluations?.length ?? 0,
+  evaluations: (bid.evaluations ?? []).map((row) => ({ id: row.id, evaluatorId: row.evaluatorId, score: Number(row.score), criteriaBreakdown: row.criteriaBreakdown, remarks: row.remarks, submittedAt: row.submittedAt, noConflictDeclared: row.noConflictDeclared, declaredAt: row.declaredAt })),
+  qualityScore: !blind && bid.qualityScore != null ? Number(bid.qualityScore) : null,
+  financialScore: !blind && !bid.financialSealed && bid.financialScore != null ? Number(bid.financialScore) : null,
+  combinedScore: !blind && !bid.financialSealed && bid.combinedScore != null ? Number(bid.combinedScore) : null,
+  twgAssessments: (bid.twgAssessments ?? []).filter((row) => row.status === "submitted").map(serializeAssessment),
 });
 
 // ── RFQ / ITB ───────────────────────────────────────────────────────────────
 
-const nextReference = (modeKey) => {
+const nextReference = (modeKey, transaction) => {
   const prefix = modeKey === "competitiveBidding" ? "ITB" : "RFQ";
-  return nextSequenceNo(Rfq, "referenceNo", prefix, new Date().getFullYear());
+  return nextSequenceNo(Rfq, "referenceNo", prefix, new Date().getFullYear(), { transaction });
+};
+
+const evaluationConfig = (body) => {
+  const category = body.category ?? "goods";
+  if (!["goods", "infrastructure", "consulting"].includes(category)) throw workflowError("Choose Goods, Infrastructure, or Consulting Services.", 400);
+  const error = scheduleError(body.closingDate, body.openingDate);
+  if (error) throw workflowError(error, 400);
+  const qualityWeight = body.qualityWeight ?? 75;
+  const financialWeight = body.financialWeight ?? 25;
+  if (category === "consulting") {
+    const error = weightError(qualityWeight, financialWeight);
+    if (error) throw workflowError(error, 400);
+  } else if (body.qualityWeight != null || body.financialWeight != null) {
+    throw workflowError("Quality-price weights apply only to Consulting Services.", 400);
+  }
+  const consultingPassingScore = Number(body.consultingPassingScore ?? 60);
+  if (!Number.isFinite(consultingPassingScore) || consultingPassingScore <= 0 || consultingPassingScore > 100) throw workflowError("The consulting technical passing score must be greater than zero and at most 100.", 400);
+  return { openingDate: body.openingDate, qualityWeight: category === "consulting" ? Number(qualityWeight) : 75, financialWeight: category === "consulting" ? Number(financialWeight) : 25, consultingPassingScore, twgRequired: true };
+};
+
+export const updateRfqSchedule = async (req, res) => {
+  const rfq = await withAuditTransaction(async (transaction, audit) => {
+    const row = await Rfq.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!row) throw workflowError("Procurement not found.", 404);
+    if (row.status !== "draft") throw workflowError("Schedules and evaluation weights can be edited during procurement preparation, before publication.");
+    const config = evaluationConfig({ ...row.get({ plain: true }), ...req.body, category: row.category, ...(row.category !== "consulting" ? { qualityWeight: null, financialWeight: null } : {}) });
+    const before = { closingDate: row.closingDate, openingDate: row.openingDate, prebidAt: row.prebidAt, qualityWeight: row.qualityWeight, financialWeight: row.financialWeight, consultingPassingScore: row.consultingPassingScore };
+    const values = { ...config, closingDate: req.body.closingDate ?? row.closingDate, prebidAt: req.body.prebidAt ?? row.prebidAt };
+    await row.update(values, { transaction });
+    await audit(actorAudit(req, { actionType: "rfq.scheduleChanged", entityRef: "rfq", entityId: row.id, summary: "Procurement schedule and evaluation configuration updated before publication.", beforeState: before, afterState: values }));
+    return row;
+  });
+  res.json({ ...serializeRfq(rfq), message: "Procurement preparation updated. Review the submission deadline, bid opening schedule, and evaluation method before publication." });
 };
 
 export const listRfqs = async (req, res) => {
@@ -115,6 +169,7 @@ export const listRfqs = async (req, res) => {
 
 export const createRfq = async (req, res) => {
   const { prHeaderId, appEntryId, title, category, closingDate, prebidAt, procurementModeKey } = req.body;
+  const config = evaluationConfig(req.body);
 
   // ── Two ways a solicitation can arise ──────────────────────────────────────
   // The ordinary route is an approved requisition. The other is an Early
@@ -140,7 +195,7 @@ export const createRfq = async (req, res) => {
 
   const abc = Number(pr.totalAmount);
   const lgu = await getLguProfile();
-  const suggestion = suggestProcurementMode(abc, lgu);
+  const suggestion = suggestProcurementMode(abc, lgu, category ?? "goods");
 
   // ── The mode is inherited, not chosen here ─────────────────────────────────
   // The BAC determines the mode on the requisition (step 19) before any
@@ -169,23 +224,31 @@ export const createRfq = async (req, res) => {
   }
 
   const modeKey = mode.key;
+  const amountIssue = procurementAmountError(abc, modeKey, lgu, category ?? "goods");
+  if (amountIssue) throw workflowError(amountIssue, 400);
+  await assertNewAttemptAllowed({ prHeaderId: pr.id, modeKey });
 
-  const rfq = await withSequenceRetry(async () =>
-    Rfq.create({
-      referenceNo: await nextReference(modeKey),
+  const rfq = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
+    await assertNewAttemptAllowed({ prHeaderId: pr.id, modeKey: modeKey, transaction });
+    const created = await Rfq.create({
+      referenceNo: await nextReference(modeKey, transaction),
       title: title?.trim() || pr.purpose || `Procurement for ${pr.prNumber}`,
       abc,
       category: category ?? "goods",
       closingDate,
+      ...config,
       prebidAt: prebidAt ?? null,
       // IRR Sec. 51.1 and 34.3(b) — both derived, not asked of the user.
-      prebidRequired: requiresPrebidConference(abc),
-      postingRequired: modeKey !== "smallValueProcurement" || abc > SVP_POSTING_EXEMPTION_CEILING,
+      prebidRequired: requiresPrebidConference(abc, lgu, category ?? "goods"),
+      postingRequired: modeKey !== "smallValueProcurement" || abc > postingExemptionFor(lgu, category ?? "goods"),
       prHeaderId,
       procurementModeId: mode.id,
       status: "draft",
-    })
-  );
+    }, { transaction });
+    const attempt = await ensureProcurementAttempt(created, { transaction, actorId: req.currentUser.id });
+    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate, ...config } }));
+    return created;
+  }));
 
   res.status(201).json({
     ...serializeRfq(await Rfq.findByPk(rfq.id, rfqIncludes)),
@@ -203,6 +266,7 @@ export const createRfq = async (req, res) => {
 // until the ordinance is passed, and the first quarter of the year is lost.
 const createEpaSolicitation = async (req, res) => {
   const { appEntryId, title, category, closingDate, prebidAt } = req.body;
+  const config = evaluationConfig(req.body);
 
   const appEntry = await AppEntry.findByPk(appEntryId, {
     include: [{ model: Department, as: "implementingUnit" }],
@@ -237,6 +301,7 @@ const createEpaSolicitation = async (req, res) => {
   if (!closingDate) return res.status(400).json({ message: "A closing date is required." });
 
   const abc = Number(appEntry.abc);
+  const lgu = await getLguProfile();
   const mode = await ProcurementMode.findOne({ where: { key: appEntry.procurementMode } });
   if (!mode) {
     return res.status(409).json({
@@ -244,22 +309,30 @@ const createEpaSolicitation = async (req, res) => {
     });
   }
 
-  const rfq = await withSequenceRetry(async () =>
-    Rfq.create({
-      referenceNo: await nextReference(mode.key),
+  const amountIssue = procurementAmountError(abc, mode.key, lgu, category ?? "goods");
+  if (amountIssue) throw workflowError(amountIssue, 400);
+  await assertNewAttemptAllowed({ appEntryId: appEntry.id, modeKey: mode.key });
+  const rfq = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
+    await assertNewAttemptAllowed({ appEntryId: appEntry.id, modeKey: mode.key, transaction });
+    const created = await Rfq.create({
+      referenceNo: await nextReference(mode.key, transaction),
       title: title?.trim() || appEntry.projectTitle,
       abc,
       category: category ?? "goods",
       closingDate,
+      ...config,
       prebidAt: prebidAt ?? null,
-      prebidRequired: requiresPrebidConference(abc),
-      postingRequired: mode.key !== "smallValueProcurement" || abc > SVP_POSTING_EXEMPTION_CEILING,
+      prebidRequired: requiresPrebidConference(abc, lgu, category ?? "goods"),
+      postingRequired: mode.key !== "smallValueProcurement" || abc > postingExemptionFor(lgu, category ?? "goods"),
       appEntryId: appEntry.id,
       isEarlyProcurement: true,
       procurementModeId: mode.id,
       status: "draft",
-    })
-  );
+    }, { transaction });
+    const attempt = await ensureProcurementAttempt(created, { transaction, actorId: req.currentUser.id });
+    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate, ...config } }));
+    return created;
+  }));
 
   res.status(201).json({
     ...serializeRfq(await Rfq.findByPk(rfq.id, rfqIncludes)),
@@ -276,6 +349,12 @@ export const publishRfq = async (req, res) => {
   if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
   if (rfq.status !== "draft") {
     return res.status(409).json({ message: `Cannot publish from status "${rfq.status}".` });
+  }
+  const scheduleIssue = scheduleError(rfq.closingDate, rfq.openingDate);
+  if (scheduleIssue) throw workflowError(scheduleIssue, 400);
+  if (rfq.category === "consulting") {
+    const issue = weightError(rfq.qualityWeight, rfq.financialWeight);
+    if (issue) throw workflowError(issue, 400);
   }
   if (new Date(rfq.closingDate) <= new Date()) {
     return res.status(400).json({ message: "The closing date must be in the future." });
@@ -368,6 +447,13 @@ export const closeRfq = async (req, res) => {
         `Bidding closes ${new Date(rfq.closingDate).toLocaleString()}. A solicitation cannot be closed ` +
         `before its advertised deadline — cancel it with a recorded reason instead.`,
       closingDate: rfq.closingDate,
+  openingDate: rfq.openingDate,
+  qualityWeight: rfq.category === "consulting" ? Number(rfq.qualityWeight) : null,
+  financialWeight: rfq.category === "consulting" ? Number(rfq.financialWeight) : null,
+  consultingPassingScore: rfq.category === "consulting" ? Number(rfq.consultingPassingScore) : null,
+  twgRequired: rfq.twgRequired,
+  prHeaderId: rfq.prHeaderId,
+  appEntryId: rfq.appEntryId,
     });
   }
 
@@ -381,11 +467,21 @@ export const cancelRfq = async (req, res) => {
 
   const rfq = await Rfq.findByPk(req.params.id, rfqIncludes);
   if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
-  if (["awarded", "cancelled"].includes(rfq.status)) {
+  if (["awarded", "cancelled", "failed"].includes(rfq.status)) {
     return res.status(409).json({ message: `Cannot cancel from status "${rfq.status}".` });
   }
 
-  await rfq.update({ status: "cancelled", cancellationReason: reason.trim() });
+  await withAuditTransaction(async (transaction, audit) => {
+    await rfq.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (["awarded", "cancelled", "failed"].includes(rfq.status)) throw workflowError("A completed or failed procurement attempt cannot be cancelled. Its outcome must remain in the history.");
+    if (await Award.findOne({ where: { rfqId: rfq.id, status: { [Op.in]: ["pendingHopeApproval", "issued", "accepted"] } }, transaction })) throw workflowError("Resolve the award recommendation before cancelling this procurement.");
+    const beforeState = { status: rfq.status };
+    const snapshot = await snapshotAttemptOutcome(rfq, { transaction });
+    const attempt = await ensureProcurementAttempt(rfq, { transaction, actorId: req.currentUser.id });
+    await rfq.update({ status: "cancelled", cancellationReason: reason.trim() }, { transaction });
+    await attempt.update({ status: "cancelled", completedAt: new Date(), nextAction: "Review procurement preparation", outcomeSnapshot: { ...snapshot, cancellationReason: reason.trim() } }, { transaction });
+    await audit(actorAudit(req, { actionType: "rfq.cancelled", entityRef: "rfq", entityId: rfq.id, summary: "Procurement cancelled with a recorded reason. Attempt records are preserved.", beforeState, afterState: { status: "cancelled", reason: reason.trim(), attemptNumber: attempt.attemptNumber } }));
+  });
   res.json(serializeRfq(await Rfq.findByPk(rfq.id, rfqIncludes)));
 };
 
@@ -409,7 +505,7 @@ export const requestBidSubmissionCode = async (req, res) => {
   if (rfq.status !== "published") {
     return res.status(409).json({ message: "This opportunity is not open for bids." });
   }
-  if (new Date() > new Date(rfq.closingDate)) {
+  if (new Date() >= new Date(rfq.closingDate)) {
     return res.status(409).json({ message: "The deadline for submission has passed (IRR Sec. 54.6)." });
   }
 
@@ -489,7 +585,7 @@ export const submitBid = async (req, res) => {
     return res.status(409).json({ message: "This opportunity is not open for bids." });
   }
   // IRR Sec. 54.6: bids submitted after the deadline are not accepted.
-  if (new Date() > new Date(rfq.closingDate)) {
+  if (new Date() >= new Date(rfq.closingDate)) {
     return res.status(409).json({ message: "The deadline for submission has passed (IRR Sec. 54.6)." });
   }
 
@@ -650,14 +746,16 @@ export const openBids = async (req, res) => {
     return res.status(409).json({ message: "Close the RFQ/ITB before opening bids." });
   }
 
+  if (new Date() <= new Date(rfq.closingDate)) throw workflowError("Bid opening must occur after the bid submission deadline.");
+  if (rfq.openingDate && new Date() < new Date(rfq.openingDate)) throw workflowError("The scheduled bid opening time has not yet been reached.");
   const bids = await Bid.findAll({ where: { rfqId: rfq.id, status: "submitted" }, order: [["submittedAt", "ASC"]] });
   if (bids.length === 0) {
-    // Section 6 / IRR Sec. 64: no bids is a failure of bidding, not an opening.
-    await rfq.update({ status: "failed" });
-    return res.status(409).json({ message: "No bids were received — this is a failure of bidding." });
+    return res.status(409).json({ message: "No bids were received. Record the official reason and a BAC failed-bidding resolution before initiating a rebid." });
   }
 
-  const record = await sequelize.transaction(async (transaction) => {
+  const record = await withAuditTransaction(async (transaction, audit) => {
+    await rfq.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (rfq.status !== "closed") throw workflowError("The procurement status changed. Reload before opening bids.");
     // Assign the anonymous labels used throughout blind evaluation (7.9).
     for (const [index, bid] of bids.entries()) {
       await bid.update(
@@ -679,6 +777,7 @@ export const openBids = async (req, res) => {
     );
 
     await rfq.update({ status: "opened" }, { transaction });
+    await audit(actorAudit(req, { actionType: "bidding.opened", entityRef: "rfq", entityId: rfq.id, summary: "Bids opened. The TWG may now begin technical assessment after declaring no conflict of interest.", beforeState: { status: "closed" }, afterState: { status: "opened", openingRecordId: created.id, bidsReceived: bids.length, openedAt: created.openedAt } }));
     return created;
   });
 
@@ -758,6 +857,13 @@ export const abstractOfBids = async (req, res) => {
     category: rfq.category,
     mode: rfq.mode?.name ?? null,
     closingDate: rfq.closingDate,
+  openingDate: rfq.openingDate,
+  qualityWeight: rfq.category === "consulting" ? Number(rfq.qualityWeight) : null,
+  financialWeight: rfq.category === "consulting" ? Number(rfq.financialWeight) : null,
+  consultingPassingScore: rfq.category === "consulting" ? Number(rfq.consultingPassingScore) : null,
+  twgRequired: rfq.twgRequired,
+  prHeaderId: rfq.prHeaderId,
+  appEntryId: rfq.appEntryId,
     openedAt: opening?.openedAt ?? null,
     openedByName: opening?.openedBy?.name ?? null,
     bidsReceived: bids.length,
@@ -801,12 +907,19 @@ export const listBidsForRfq = async (req, res) => {
     include: [
       { model: Vendor, as: "vendor" },
       { model: Evaluation, as: "evaluations" },
+      { model: TwgAssessment, as: "twgAssessments", include: [{ model: User, as: "member", attributes: ["id", "name"] }] },
     ],
     order: [["blindLabel", "ASC"]],
   });
 
   res.json({
     blind,
+    category: rfq.category,
+    evaluationMethod: rfq.category === "consulting" ? "qualityPrice" : "compliance",
+    qualityWeight: rfq.category === "consulting" ? Number(rfq.qualityWeight) : null,
+    financialWeight: rfq.category === "consulting" ? Number(rfq.financialWeight) : null,
+    consultingPassingScore: Number(rfq.consultingPassingScore),
+    twgRequired: rfq.twgRequired,
     // Say plainly why identities are hidden, so the UI doesn't have to guess.
     blindNotice: blind
       ? "Bidder identities are masked until the BAC Chairperson closes evaluation."
@@ -838,171 +951,7 @@ export const usesRatedEvaluation = (category) => category === "consulting";
 // comparison.
 export const CONSULTING_PASSING_SCORE = 60;
 
-export const submitEvaluation = async (req, res) => {
-  const { criteriaBreakdown, remarks, verdict } = req.body;
-  const bid = await Bid.findByPk(req.params.bidId, { include: [{ model: Rfq, as: "rfq" }] });
-  if (!bid) return res.status(404).json({ message: "Bid not found." });
-
-  if (bid.rfq.status !== "opened") {
-    return res.status(409).json({ message: "Evaluation is not open for this procurement." });
-  }
-
-  // ── Conflict of interest ───────────────────────────────────────────────────
-  // An evaluator with an interest in a bidder must not score it. There was no
-  // check at all: any holder of `bidding.evaluate` could score any bid. The
-  // declaration is required rather than assumed, so that the absence of a
-  // conflict is a positive statement on the record.
-  if (req.body.noConflictDeclared !== true) {
-    return res.status(400).json({
-      message:
-        "Declare that you have no actual or potential interest in this bidder before scoring. An " +
-        "evaluator with an interest must inhibit.",
-      requiresDeclaration: true,
-    });
-  }
-
-  // Section 7.9: scores are immutable once submitted.
-  if (await Evaluation.findOne({ where: { bidId: bid.id, evaluatorId: req.currentUser.id } })) {
-    return res.status(409).json({ message: "You have already scored this bid. Scores cannot be changed." });
-  }
-
-  const rated = usesRatedEvaluation(bid.rfq.category);
-  let score;
-  let breakdown;
-
-  if (rated) {
-    // Consulting Services — a rating, computed here rather than accepted.
-    if (!criteriaBreakdown || typeof criteriaBreakdown !== "object") {
-      return res.status(400).json({ message: "A rubric breakdown is required for consulting services." });
-    }
-    const values = Object.values(criteriaBreakdown);
-    if (values.length === 0) return res.status(400).json({ message: "Score at least one criterion." });
-    if (values.some((v) => !Number.isFinite(Number(v)) || Number(v) < 0 || Number(v) > 100)) {
-      return res.status(400).json({ message: "Each criterion must be scored between 0 and 100." });
-    }
-    score = Number((values.reduce((sum, v) => sum + Number(v), 0) / values.length).toFixed(2));
-    breakdown = criteriaBreakdown;
-  } else {
-    // Goods and Infrastructure — pass or fail on the technical requirements.
-    // The score column is retained so one ranking function serves both, but it
-    // carries a verdict rather than a rating: 100 passed, 0 failed.
-    if (!["passed", "failed"].includes(verdict)) {
-      return res.status(400).json({
-        message:
-          `${bid.rfq.category === "infrastructure" ? "Infrastructure" : "Goods"} bids are rated pass or ` +
-          `fail on the technical requirements, not scored. Submit a verdict of "passed" or "failed"; ` +
-          `the award then goes to the lowest calculated responsive bid (RA 12009 Sec. 65).`,
-        accepted: ["passed", "failed"],
-      });
-    }
-    if (verdict === "failed" && !remarks?.trim()) {
-      return res.status(400).json({
-        message: "State which requirement the bid failed. A failure without a reason cannot be reviewed.",
-      });
-    }
-    score = verdict === "passed" ? 100 : 0;
-    breakdown = { verdict, requirementsExamined: criteriaBreakdown ?? null };
-  }
-
-  const evaluation = await Evaluation.create({
-    bidId: bid.id,
-    evaluatorId: req.currentUser.id,
-    criteriaBreakdown: breakdown,
-    score,
-    blindFlag: isBlindStage(bid.rfq),
-    submittedAt: new Date(),
-    remarks: remarks ?? null,
-  });
-
-  // Section 7.9: an immutable, timestamped trail of every evaluator's score.
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.EVALUATION_SUBMITTED,
-    entityRef: "bid",
-    entityId: bid.id,
-    summary: `Score ${score} submitted for ${bid.blindLabel} (blind: ${isBlindStage(bid.rfq)})`,
-    afterState: { score, criteriaBreakdown, blindFlag: isBlindStage(bid.rfq) },
-  });
-
-  res.status(201).json({ id: evaluation.id, score: Number(evaluation.score), blindFlag: evaluation.blindFlag });
-};
-
-// Closing evaluation is what lifts the mask. Restricted to the Chairperson
-// (bidding.chairEvaluation) so a single evaluator cannot reveal identities.
-export const closeEvaluation = async (req, res) => {
-  const rfq = await Rfq.findByPk(req.params.id, rfqIncludes);
-  if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
-  if (rfq.status !== "opened") {
-    return res.status(409).json({ message: `Cannot close evaluation from status "${rfq.status}".` });
-  }
-
-  const bids = await Bid.findAll({
-    where: { rfqId: rfq.id },
-    include: [{ model: Evaluation, as: "evaluations" }],
-  });
-
-  const unscored = bids.filter((bid) => (bid.evaluations ?? []).length === 0);
-  if (unscored.length > 0) {
-    return res.status(409).json({
-      message: `${unscored.length} bid(s) have no scores yet. Every bid must be evaluated before closing.`,
-    });
-  }
-
-  const rated = usesRatedEvaluation(rfq.category);
-
-  await sequelize.transaction(async (transaction) => {
-    // Unseal the financial envelope only for bids that passed the technical
-    // component — the financial envelope of a failed bid is returned unopened.
-    for (const bid of bids) {
-      const average =
-        bid.evaluations.reduce((sum, e) => sum + Number(e.score), 0) / bid.evaluations.length;
-
-      // For Consulting Services the rating decides, against the minimum score
-      // the Bidding Documents set. For Goods and Infrastructure each evaluator
-      // returns a pass/fail verdict, and a single failure fails the bid — the
-      // technical requirements are a floor, not an average to be pulled up by
-      // a generous member.
-      const passed = rated ? average >= CONSULTING_PASSING_SCORE : bid.evaluations.every((e) => Number(e.score) === 100);
-
-      await bid.update(
-        {
-          status: passed ? "technicalPassed" : "technicalFailed",
-          financialSealed: !passed,
-        },
-        { transaction }
-      );
-    }
-    await rfq.update({ status: "evaluated" }, { transaction });
-  });
-
-  // Section 7.4: bid results go to each bidder individually.
-  for (const bid of await Bid.findAll({ where: { rfqId: rfq.id }, include: [{ model: Vendor, as: "vendor" }] })) {
-    const passed = bid.status === "technicalPassed";
-    await notifyUsers([bid.vendor?.userId], {
-      type: NOTIFICATION_EVENTS.BID_RESULT,
-      title: `Technical evaluation result — ${rfq.referenceNo}`,
-      body: passed
-        ? "Your bid passed the technical component. Your financial envelope has been opened."
-        : "Your bid did not pass the technical component.",
-      link: "/supplier/opportunities",
-      refEntity: "rfq",
-      refId: rfq.id,
-      severity: passed ? "success" : "warning",
-    });
-  }
-
-  // Lifting the blind is exactly the moment an auditor will want to inspect.
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.EVALUATION_CLOSED,
-    entityRef: "rfq",
-    entityId: rfq.id,
-    summary: `Evaluation closed for ${rfq.referenceNo} — bidder identities revealed`,
-    afterState: { status: "evaluated", bidsEvaluated: bids.length },
-  });
-
-  res.json({ message: "Evaluation closed. Bidder identities are now visible.", rfqId: rfq.id });
-};
-
-// ── Post-qualification ──────────────────────────────────────────────────────
+export { submitEvaluation, closeEvaluation } from "./evaluationController.js";
 
 export const submitPostQualification = async (req, res) => {
   const { result, remarks, checklist } = req.body;
@@ -1022,7 +971,13 @@ export const submitPostQualification = async (req, res) => {
     return res.status(400).json({ message: "Remarks are required when a bidder fails post-qualification." });
   }
 
-  await sequelize.transaction(async (transaction) => {
+  await withAuditTransaction(async (transaction, audit) => {
+    const currentRfq = await Rfq.findByPk(bid.rfqId, { transaction, lock: transaction.LOCK.UPDATE });
+    await bid.reload({ transaction });
+    if (currentRfq.status !== "evaluated" || bid.status !== "technicalPassed") throw workflowError("The bid status changed. Reload before recording post-qualification.");
+    const candidates = await Bid.findAll({ where: { rfqId: bid.rfqId }, include: [{ model: Evaluation, as: "evaluations" }], transaction });
+    const entitled = rankBids(candidates, currentRfq.category).ranked[0];
+    if (entitled?.id !== bid.id) throw workflowError("Post-qualify the highest-ranked responsive bidder first. Proceed to the next bidder only after a failed post-qualification.");
     await PostQualification.create(
       {
         bidId: bid.id,
@@ -1035,9 +990,10 @@ export const submitPostQualification = async (req, res) => {
       { transaction }
     );
     await bid.update({ status: result === "passed" ? "postQualified" : "postDisqualified" }, { transaction });
+    await audit(actorAudit(req, { actionType: "evaluation.postQualification", entityRef: "bid", entityId: bid.id, summary: result === "passed" ? "Post-qualification passed. The BAC may recommend award." : "Post-qualification failed. Review the next ranked responsive bidder.", beforeState: { status: "technicalPassed" }, afterState: { rfqId: bid.rfqId, result, remarks, checklist } }));
   });
 
-  res.status(201).json({ bidId: bid.id, result });
+  res.status(201).json({ bidId: bid.id, result, message: result === "passed" ? "Post-qualification passed. The BAC may now recommend award." : "Post-qualification failed. Proceed to the next ranked responsive bidder." });
 };
 
 // ── Award ───────────────────────────────────────────────────────────────────
@@ -1068,7 +1024,7 @@ const rankBids = (bids, category) => {
     return {
       basis: "HRRB",
       basisLabel: "Highest Rated Responsive Bid",
-      ranked: [...contenders].sort((a, b) => averageScore(b) - averageScore(a)),
+      ranked: [...contenders].sort((a, b) => (Number(b.combinedScore ?? averageScore(b)) - Number(a.combinedScore ?? averageScore(a))) || Number(a.totalBidPrice) - Number(b.totalBidPrice) || a.id - b.id),
     };
   }
 
@@ -1086,6 +1042,15 @@ const averageScore = (bid) => {
   return evaluations.reduce((sum, e) => sum + Number(e.score), 0) / evaluations.length;
 };
 
+const assertAwardTechnicalReview = async (bid, rfq, { transaction } = {}) => {
+  const fresh = await Bid.findByPk(bid.id, { transaction });
+  if (fresh.status !== "postQualified" || fresh.financialSealed) throw workflowError("Only a technically compliant, post-qualified bidder may be awarded.");
+  if (!rfq.twgRequired) return;
+  const assessments = await TwgAssessment.findAll({ where: { bidId: bid.id }, transaction });
+  if (!assessments.length || assessments.some((row) => !assessmentCompliant(row))) throw workflowError("The required TWG technical assessment must be submitted and compliant before an award decision.");
+  if (rfq.category === "consulting" && fresh.combinedScore == null) throw workflowError("Complete quality and financial scoring before an award decision.");
+};
+
 export const recommendAward = async (req, res) => {
   const bid = await Bid.findByPk(req.params.bidId, {
     include: [
@@ -1098,7 +1063,7 @@ export const recommendAward = async (req, res) => {
   if (bid.status !== "postQualified") {
     return res.status(409).json({ message: "Only a post-qualified bid can be recommended for award." });
   }
-  if (await Award.findOne({ where: { rfqId: bid.rfqId, status: { [Op.ne]: "cancelled" } } })) {
+  if (await Award.findOne({ where: { rfqId: bid.rfqId, status: { [Op.notIn]: ["cancelled", "disapproved"] } } })) {
     return res.status(409).json({ message: "This procurement already has an award." });
   }
 
@@ -1164,8 +1129,8 @@ export const recommendAward = async (req, res) => {
         (basis === "LCRB"
           ? `bid ₱${Number(entitled.totalBidPrice).toLocaleString()} against this bidder's ` +
             `₱${Number(bid.totalBidPrice).toLocaleString()}. `
-          : `scored ${averageScore(entitled).toFixed(2)} against this bidder's ` +
-            `${averageScore(bid).toFixed(2)}. `) +
+          : `scored ${Number(entitled.combinedScore ?? averageScore(entitled)).toFixed(2)} against this bidder's ` +
+            `${Number(bid.combinedScore ?? averageScore(bid)).toFixed(2)}. `) +
         `Post-qualify and resolve that bid first; the award moves down the ranking only when the ` +
         `bidder ahead fails post-qualification (RA 12009 Sec. 65).`,
       basis,
@@ -1200,87 +1165,31 @@ export const recommendAward = async (req, res) => {
   // ── The committee must be quorate before it can resolve anything ───────────
   // Checked before the award record is written, so a committee that cannot
   // lawfully sit does not leave a dangling Notice of Award behind it.
-  const committee = await User.findAll({
-    include: [
-      { model: Role, where: { key: { [Op.in]: [...PRESIDING_ROLE_KEYS, "bacMember"] } } },
-    ],
-  });
-
-  // Who was actually in the room. Supplied by the Chairperson recording the
-  // meeting; falling back to the full designated membership keeps existing
-  // callers working, but the quorum rule is applied either way.
-  const attendingIds = Array.isArray(req.body?.attendingMemberIds)
-    ? req.body.attendingMemberIds.map(Number).filter(Boolean)
-    : committee.map((member) => member.id);
-
-  const present = committee.filter((member) => attendingIds.includes(member.id));
-
-  const quorum = evaluateBacQuorum({ designated: committee, present, presidingId: req.currentUser.id });
-  if (!quorum.ok) {
-    return res.status(409).json({ message: quorum.message, quorum });
-  }
-
-  const year = new Date().getFullYear();
-
-  const award = await withSequenceRetry(async () =>
-    Award.create({
-      noaNumber: await nextSequenceNo(Award, "noaNumber", "NOA", year),
-      noaDate: new Date().toISOString().slice(0, 10),
-      amount: bid.totalBidPrice,
-      rfqId: bid.rfqId,
-      bidId: bid.id,
-      vendorId: bid.vendorId,
-      recommendedById: req.currentUser.id,
-      status: "pendingHopeApproval",
-      awardBasis: basis,
-    })
-  );
-
-  // ── The committee's actual instrument ──────────────────────────────────────
-  // The BAC acts by resolution, not by one member's click. Members present are
-  // snapshotted rather than referenced, so a later change of committee cannot
-  // rewrite what was resolved on the day.
-  const resolution = await withSequenceRetry(async () =>
-    BacResolution.create({
-    resolutionNo: await nextResolutionNo(year),
-    type: "recommendAward",
-    title: `Resolution recommending award of ${bid.rfq?.referenceNo} to ${bid.vendor?.businessName}`,
-    // The recital states what was actually determined, with the figures behind
-    // it. It previously asserted the bid "was found the Lowest Calculated
-    // Responsive Bid" without anything having checked that — the ranking above
-    // is now what earns this sentence.
-    recitals:
-      `${offersReceived} offer(s) received under ${mode?.name ?? "the selected mode"}. ` +
-      `Of these, ${ranked.length} passed the technical component. ` +
-      `The bid of ${bid.vendor?.businessName} at ₱${Number(bid.totalBidPrice).toLocaleString()} ranked ` +
-      `first as the ${basisLabel} (${basis}) and passed post-qualification. ` +
-      `Resolved by ${present.length} of ${committee.length} designated members.`,
-    resolvedAt: new Date(),
-    members: present.map((member) => ({
-      userId: member.id,
-      name: member.name,
-      role: member.Role?.key ?? null,
-      concurred: true,
-    })),
-    quorumMet: true,
-    chairpersonId: req.currentUser.id,
-    entityRef: "award",
-    entityId: award.id,
-    })
-  );
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.AWARD_RECOMMENDED,
-    entityRef: "award",
-    entityId: award.id,
-    summary: `${resolution.resolutionNo} — award recommended to ${bid.vendor?.businessName}`,
-    afterState: {
-      status: "pendingHopeApproval",
-      resolutionNo: resolution.resolutionNo,
-      offersReceived,
-      amount: Number(award.amount),
-    },
-  });
+  const { award, resolution } = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
+    const locked = await Rfq.findByPk(bid.rfqId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (locked.status !== "evaluated") throw workflowError("Complete BAC evaluation before recommending an award.");
+    if (await Award.findOne({ where: { rfqId: bid.rfqId, status: { [Op.notIn]: ["cancelled", "disapproved"] } }, transaction })) throw workflowError("This procurement already has an award recommendation.");
+    await assertAwardTechnicalReview(bid, locked, { transaction });
+    const context = await assertBacAction(req, { transaction });
+    const year = new Date().getFullYear();
+    const award = await Award.create({
+      noaNumber: await nextSequenceNo(Award, "noaNumber", "NOA", year, { transaction }),
+      noaDate: new Date().toISOString().slice(0, 10), amount: bid.totalBidPrice,
+      rfqId: bid.rfqId, bidId: bid.id, vendorId: bid.vendorId,
+      recommendedById: req.currentUser.id, status: "pendingHopeApproval", awardBasis: basis,
+    }, { transaction });
+    const resolution = await BacResolution.create({
+      resolutionNo: req.body.resolutionNo || await nextResolutionNo(year, transaction),
+      type: "recommendAward", title: `Resolution recommending award of ${bid.rfq.referenceNo}`,
+      recitals: req.body.remarks?.trim() || `${offersReceived} offers received; ${ranked.length} responsive bids. The recommended bidder ranked first as the ${basisLabel} (${basis}) and passed post-qualification.`,
+      resolvedAt: new Date(), members: committeeSnapshot(context), quorumMet: true,
+      chairpersonId: context.presidingId, entityRef: "award", entityId: award.id,
+    }, { transaction });
+    const attempt = await ensureProcurementAttempt(locked, { transaction, actorId: req.currentUser.id });
+    await attempt.update({ bacResolutionId: resolution.id, nextAction: "Notice of Award approval/signature", outcomeSnapshot: await snapshotAttemptOutcome(locked, { transaction }) }, { transaction });
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.AWARD_RECOMMENDED, entityRef: "award", entityId: award.id, summary: `${resolution.resolutionNo}: BAC award recommendation submitted for HoPE approval.`, afterState: { rfqId: locked.id, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, resolutionNo: resolution.resolutionNo, status: "pendingHopeApproval", members: resolution.members, amount: Number(award.amount) } }));
+    return { award, resolution };
+  }));
 
   await notifyByPermission("bidding.award", {
     type: NOTIFICATION_EVENTS.AWARD_RECOMMENDED,
@@ -1319,6 +1228,7 @@ export const approveAward = async (req, res) => {
   if (award.status !== "pendingHopeApproval") {
     return res.status(409).json({ message: `Cannot approve from status "${award.status}".` });
   }
+  if (award.recommendedById === req.currentUser.id) throw workflowError("You cannot approve your own award recommendation. Another authorized approving officer must review it.", 403);
 
   // ── The line an Early Procurement Activity may not cross ───────────────────
   // EPA lets everything happen before the ordinance except this. RA 12009 and
@@ -1357,14 +1267,18 @@ export const approveAward = async (req, res) => {
     });
   }
 
-  await sequelize.transaction(async (transaction) => {
+  await withAuditTransaction(async (transaction, audit) => {
+    const lockedRfq = await Rfq.findByPk(award.rfqId, { transaction, lock: transaction.LOCK.UPDATE });
+    await award.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (award.status !== "pendingHopeApproval" || lockedRfq.status !== "evaluated") throw workflowError("The procurement or award status changed. Reload before approving.");
+    await assertAwardTechnicalReview({ id: award.bidId }, lockedRfq, { transaction });
     await award.update({ status: "issued", approvedById: req.currentUser.id }, { transaction });
     await Bid.update({ status: "awarded" }, { where: { id: award.bidId }, transaction });
-    await Bid.update(
-      { status: "lost" },
-      { where: { rfqId: award.rfqId, id: { [Op.ne]: award.bidId } }, transaction }
-    );
-    await Rfq.update({ status: "awarded" }, { where: { id: award.rfqId }, transaction });
+    await Bid.update({ status: "lost" }, { where: { rfqId: award.rfqId, id: { [Op.ne]: award.bidId }, status: { [Op.notIn]: ["withdrawn", "technicalFailed", "postDisqualified"] } }, transaction });
+    await lockedRfq.update({ status: "awarded" }, { transaction });
+    const attempt = await ensureProcurementAttempt(lockedRfq, { transaction, actorId: req.currentUser.id });
+    await attempt.update({ status: "successful", completedAt: new Date(), nextAction: "Contract preparation", outcomeSnapshot: await snapshotAttemptOutcome(lockedRfq, { transaction }) }, { transaction });
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.AWARD_APPROVED, entityRef: "award", entityId: award.id, summary: `${award.noaNumber} approved. Proceed to contract preparation.`, beforeState: { status: "pendingHopeApproval" }, afterState: { status: "issued", rfqId: award.rfqId, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, approvedById: req.currentUser.id } }));
   });
 
   // Section 7.4: award issuance notifies the winner, and the others are told
@@ -1388,15 +1302,6 @@ export const approveAward = async (req, res) => {
     });
   }
 
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.AWARD_APPROVED,
-    entityRef: "award",
-    entityId: award.id,
-    summary: `${award.noaNumber} approved — ₱${Number(award.amount).toLocaleString()}`,
-    beforeState: { status: "pendingHopeApproval" },
-    afterState: { status: "issued", approvedById: req.currentUser.id },
-  });
-
   res.json({ id: award.id, noaNumber: award.noaNumber, status: "issued" });
 };
 
@@ -1406,86 +1311,15 @@ export const approveAward = async (req, res) => {
 // failure the Procuring Entity may resort to Negotiated Procurement under
 // Sec. 35.1 — which is why the count of failures has to be a fact on the record
 // rather than something reconstructed from cancelled solicitations.
-export const declareFailureOfBidding = async (req, res) => {
-  const { reason } = req.body ?? {};
-  const rfq = await Rfq.findByPk(req.params.id, rfqIncludes);
-  if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
+export { declareFailureOfBidding } from "./procurementGovernanceController.js";
 
-  if (["awarded", "cancelled", "failed"].includes(rfq.status)) {
-    return res.status(409).json({ message: `Cannot declare a failure from status "${rfq.status}".` });
-  }
-  if (!reason?.trim()) {
-    return res.status(400).json({
-      message:
-        "State the ground for the failure of bidding — no bids received, no bid qualified, or the " +
-        "bidder with the lowest calculated bid failed post-qualification (RA 12009 Sec. 64).",
-    });
-  }
-
-  // How many times this project has already failed. Counted across every
-  // solicitation raised for the same requisition or plan line, because that is
-  // the project — a new reference number is not a new procurement.
-  const scope = rfq.prHeaderId ? { prHeaderId: rfq.prHeaderId } : { appEntryId: rfq.appEntryId };
-  const priorFailures = await Rfq.count({ where: { ...scope, status: "failed" } });
-  const failureNumber = priorFailures + 1;
-
-  await sequelize.transaction(async (transaction) => {
-    await rfq.update({ status: "failed", cancellationReason: reason.trim() }, { transaction });
-    // Bids that were in play are neither awarded nor lost on the merits — the
-    // contest itself did not conclude.
-    await Bid.update(
-      { status: "lost" },
-      { where: { rfqId: rfq.id, status: { [Op.notIn]: ["withdrawn", "lost"] } }, transaction }
-    );
-  });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.BIDDING_FAILED,
-    entityRef: "rfq",
-    entityId: rfq.id,
-    summary: `${rfq.referenceNo}: failure of bidding no. ${failureNumber} — ${reason.trim()}`,
-    beforeState: { status: rfq.status },
-    afterState: { status: "failed", failureNumber, reason: reason.trim() },
-  });
-
-  const mayNegotiate = failureNumber >= 2;
-
-  await notifyByPermission("bidding.publish", {
-    type: NOTIFICATION_EVENTS.RFQ_PUBLISHED,
-    title: `Failure of bidding — ${rfq.referenceNo}`,
-    body: mayNegotiate
-      ? "Second failure. The project may now be procured through Negotiated Procurement (Sec. 35.1)."
-      : "First failure. The project must be re-advertised; a second failure opens Negotiated Procurement.",
-    link: "/secretariat/rfq",
-    refEntity: "rfq",
-    refId: rfq.id,
-    severity: "warning",
-  });
-
-  res.json({
-    id: rfq.id,
-    status: "failed",
-    failureNumber,
-    mayNegotiate,
-    notice: mayNegotiate
-      ? "Two failed biddings. Negotiated Procurement is available under Sec. 35.1. The BAC must first " +
-        "conduct a mandatory review of the terms, conditions, specifications and cost estimates; the " +
-        "ABC may not be increased by more than 20% of the last failed bidding."
-      : "Re-advertise the project. Negotiated Procurement becomes available only after a second failure.",
-  });
-};
-
-// RA 12009 Sec. 66 — the HoPE may disapprove the BAC's recommendation, "but
-// only on the basis of valid, reasonable and justifiable grounds to be
-// expressed in writing and furnished to the BAC". The system previously offered
-// approval as the only outcome, which meant a Mayor who disagreed had no
-// recorded way to say so and the recommendation simply sat unactioned.
 export const disapproveAward = async (req, res) => {
   const { grounds } = req.body ?? {};
   const award = await Award.findByPk(req.params.id, {
     include: [{ model: Rfq, as: "rfq" }, { model: Vendor, as: "vendor" }],
   });
   if (!award) return res.status(404).json({ message: "Award not found." });
+  if (award.recommendedById === req.currentUser.id) throw workflowError("Another authorized approving officer must review your award recommendation.", 403);
   if (award.status !== "pendingHopeApproval") {
     return res.status(409).json({ message: `Cannot disapprove from status "${award.status}".` });
   }
@@ -1500,16 +1334,17 @@ export const disapproveAward = async (req, res) => {
     });
   }
 
-  await sequelize.transaction(async (transaction) => {
+  await withAuditTransaction(async (transaction, audit) => {
+    await Rfq.findByPk(award.rfqId, { transaction, lock: transaction.LOCK.UPDATE });
+    await award.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (award.status !== "pendingHopeApproval") throw workflowError("This award recommendation has already been decided. Refresh the award queue.");
     await award.update(
       { status: "disapproved", disapprovalGrounds: grounds.trim(), disapprovedAt: new Date() },
       { transaction }
     );
     // The solicitation goes back to the committee, not to the winner.
     await Rfq.update({ status: "evaluated" }, { where: { id: award.rfqId }, transaction });
-  });
-
-  await auditFromRequest(req, {
+    await audit(actorAudit(req, {
     actionType: AUDIT_ACTIONS.AWARD_APPROVED,
     outcome: "denied",
     entityRef: "award",
@@ -1517,6 +1352,7 @@ export const disapproveAward = async (req, res) => {
     summary: `${award.noaNumber} disapproved by the Head of the Procuring Entity`,
     beforeState: { status: "pendingHopeApproval" },
     afterState: { status: "disapproved", grounds: grounds.trim() },
+    }));
   });
 
   // Sec. 66 requires the grounds to be furnished to the BAC.
@@ -1535,6 +1371,7 @@ export const disapproveAward = async (req, res) => {
 
 export const listAwards = async (req, res) => {
   const awards = await Award.findAll({
+    where: req.permissions.has("bidding.view") ? {} : { status: { [Op.in]: ["issued", "accepted"] } },
     include: [
       { model: Rfq, as: "rfq" },
       { model: Vendor, as: "vendor" },
@@ -1554,6 +1391,7 @@ export const listAwards = async (req, res) => {
       projectTitle: award.rfq?.title ?? null,
       vendorName: award.vendor?.businessName ?? null,
       recommendedByName: award.recommendedBy?.name ?? null,
+      recommendedById: award.recommendedById,
     }))
   );
 };

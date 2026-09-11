@@ -20,7 +20,7 @@ const AdminUsers = lazy(() => import('./pages/dashboards/AdminUsers'))
 const AdminDepartments = lazy(() => import('./pages/dashboards/AdminDepartments'))
 const AdminSettings = lazy(() => import('./pages/dashboards/AdminSettings'))
 const AdminSecuritySettings = lazy(() => import('./pages/dashboards/AdminSecuritySettings'))
-const AdminThresholds = lazy(() => import('./pages/dashboards/AdminThresholds'))
+const AdminThresholds = lazy(() => import('./pages/dashboards/ProcurementLimitsPage'))
 const BidOpportunities = lazy(() => import('./pages/supplier/BidOpportunities'))
 const DevelopmentPlanning = lazy(() => import('./pages/planning/DevelopmentPlanning'))
 const BudgetPreparation = lazy(() => import('./pages/budget/BudgetPreparation'))
@@ -41,6 +41,7 @@ const PendingItems = lazy(() => import('./pages/finance/PendingItems'))
 const AuditLog = lazy(() => import('./pages/audit/AuditLog'))
 const SecurityConsole = lazy(() => import('./pages/audit/SecurityConsole'))
 const DssDashboard = lazy(() => import('./pages/insights/DssDashboard'))
+const Reports = lazy(() => import('./pages/reports/Reports'))
 const TransparencyPortal = lazy(() => import('./pages/insights/TransparencyPortal'))
 const AnnouncementsAdmin = lazy(() => import('./pages/announcements/AnnouncementsAdmin'))
 const InvitationToBid = lazy(() => import('./pages/announcements/InvitationToBid'))
@@ -103,6 +104,8 @@ function App() {
               from the sidebar footer rather than a header dropdown, so it needs
               no RoleRoute guard. */}
           <Route path="/profile" element={<MyProfile />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/reports/:reportType" element={<Reports />} />
 
           {/* Public correspondence. The five offices a message can be routed to
               — see MESSAGE_ROUTING on the server. The API scopes the list to
@@ -255,6 +258,7 @@ function App() {
             {/* Was <AdminSettings /> as well, which made the "Thresholds"
                 sidebar entry a second link to the settings page. */}
             <Route path="/admin/thresholds" element={<AdminThresholds />} />
+            <Route path="/admin/settings/thresholds" element={<AdminThresholds />} />
 
             {/* The Admin/IT end of bidder onboarding. Same screen the
                 Secretariat uses, because it is the same queue — but the two

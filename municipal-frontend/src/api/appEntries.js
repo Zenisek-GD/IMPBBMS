@@ -9,11 +9,11 @@ export const createAppEntry = (payload) =>
 export const updateAppEntry = (id, payload) =>
   apiClient.patch(`/app-entries/${id}`, payload).then((res) => res.data)
 
-export const transitionAppEntry = (id, action, remarks) =>
-  apiClient.post(`/app-entries/${id}/transition`, { action, remarks }).then((res) => res.data)
+export const transitionAppEntry = (id, action, remarks, attendance = {}) =>
+  apiClient.post(`/app-entries/${id}/transition`, { action, remarks, ...attendance }).then((res) => res.data)
 
-export const fetchModeSuggestion = (abc) =>
-  apiClient.get('/app-entries/mode-suggestion', { params: { abc } }).then((res) => res.data)
+export const fetchModeSuggestion = (abc, category) =>
+  apiClient.get('/app-entries/mode-suggestion', { params: { abc, category } }).then((res) => res.data)
 
 // Labels for the states in design doc Section 4.1.
 export const APP_STATUS_LABELS = {

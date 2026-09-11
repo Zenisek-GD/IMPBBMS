@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import ResolutionNumberInput from '../../components/ui/ResolutionNumberInput'
 import { Plus, Target, Star, ListTree, Route, Check } from 'lucide-react'
 import * as planningApi from '../../api/planning'
 import { availableAipYears } from './aipYears'
@@ -264,11 +265,9 @@ function ResolutionForm({ title, label, onClose, onConfirm }) {
       <div className="flex flex-col gap-3">
         <label className="text-xs text-text-secondary">
           {label}
-          <input
+          <ResolutionNumberInput
             value={resolutionNo}
             onChange={(e) => setResolutionNo(e.target.value)}
-            placeholder="e.g. Resolution No. 2026-014"
-            className={`mt-1 ${inputClass}`}
           />
         </label>
         <label className="text-xs text-text-secondary">

@@ -1,3 +1,4 @@
+import BacAttendance from './BacAttendance'
 import { useEffect, useState, useCallback } from 'react'
 import {
   Users,
@@ -266,6 +267,7 @@ function RequirementRow({ document, busy, onDecide }) {
 // is read against the first: a Chairperson deciding eligibility needs to see
 // exactly which papers the Secretariat checked and what it found.
 function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide }) {
+  const [attendance, setAttendance] = useState({ attendingMemberIds: [], presidingMemberId: '' })
   const [remarks, setRemarks] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -315,7 +317,7 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
     setError('')
     setBusy(true)
     try {
-      await biddingApi.reviewVendor(vendor.id, decision, remarks)
+      await biddingApi.reviewVendor(vendor.id, decision, remarks, attendance)
       onDecided()
       onClose()
     } catch (err) {
@@ -482,6 +484,7 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
         </p>
       )}
 
+      {canDecide && <BacAttendance value={attendance} onChange={setAttendance} />}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>
           {canDecide ? 'CANCEL' : 'CLOSE'}

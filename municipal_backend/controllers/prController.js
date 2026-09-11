@@ -1,3 +1,7 @@
+import { assertBacAction, committeeSnapshot } from "../services/procurementGovernance.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
+import { withAuditTransaction } from "../services/auditLog.js";
+import { procurementAmountError } from "../services/procurementThresholds.js";
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
 import {
@@ -163,11 +167,11 @@ export const remainingBalanceFor = async (appEntryId, { excludePrId } = {}) => {
 // the determination is the BAC's — the system's job is to make sure the
 // committee cannot say it did not know the rule.
 export const getModeSuggestion = async (req, res) => {
-  const pr = await PrHeader.findByPk(req.params.id);
+  const pr = await PrHeader.findByPk(req.params.id, { include: [{ model: AppEntry, as: "appEntry", attributes: ["category"] }] });
   if (!pr) return res.status(404).json({ message: "Requisition not found." });
 
   const lgu = await getLguProfile();
-  const suggestion = suggestProcurementMode(Number(pr.totalAmount), lgu);
+  const suggestion = suggestProcurementMode(Number(pr.totalAmount), lgu, pr.appEntry?.category ?? "all");
 
   const modes = await ProcurementMode.findAll({ order: [["sortOrder", "ASC"]] });
 
@@ -573,9 +577,12 @@ export const transitionPr = async (req, res) => {
   let suggestion = null;
   if (action === "determineMode") {
     const lgu = await getLguProfile();
-    suggestion = suggestProcurementMode(Number(pr.totalAmount), lgu);
+    suggestion = suggestProcurementMode(Number(pr.totalAmount), lgu, pr.appEntry?.category ?? "all");
 
     const chosenKey = req.body.procurementModeKey ?? suggestion.suggested;
+    if (/negotiated/i.test(chosenKey)) throw workflowError("Negotiated Procurement requires complete failed-attempt history, eligibility review, and separate BAC approval. Start it from procurement attempt history.");
+    const amountIssue = procurementAmountError(Number(pr.totalAmount), chosenKey, lgu, pr.appEntry?.category ?? "all");
+    if (amountIssue) throw workflowError(amountIssue, 400);
     modeRecord = await ProcurementMode.findOne({ where: { key: chosenKey } });
     if (!modeRecord) {
       return res.status(400).json({ message: `Unknown procurement mode: ${chosenKey}.` });
@@ -625,7 +632,10 @@ export const transitionPr = async (req, res) => {
     }
   }
 
-  await sequelize.transaction(async (transaction) => {
+  await withAuditTransaction(async (transaction, audit) => {
+    await pr.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (pr.status !== previousStatus) throw workflowError("This requisition changed. Reload before recording the action.");
+    const bac = action === "determineMode" ? await assertBacAction(req, { transaction }) : null;
     const changes = { status: result.to };
 
     if (action === "return") changes.returnRemarks = remarks.trim();
@@ -705,6 +715,7 @@ export const transitionPr = async (req, res) => {
         { where: { prHeaderId: pr.id, status: "obligated" }, transaction }
       );
     }
+    if (bac) await audit(actorAudit(req, { actionType: "bac.modeDetermined", entityRef: "pr", entityId: pr.id, summary: "BAC determined procurement method with recorded attendance and quorum.", beforeState: { status: previousStatus }, afterState: { status: result.to, mode: modeRecord.key, justification: changes.modeJustification, quorum: bac.quorum, members: committeeSnapshot(bac) } }));
   });
 
   const amount = Number(pr.totalAmount).toLocaleString();

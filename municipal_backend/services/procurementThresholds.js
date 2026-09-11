@@ -36,7 +36,14 @@ export const SVP_POSTING_EXEMPTION_CEILING = 200_000;
 // for competitive selection modes.
 export const MANDATORY_PREBID_CONFERENCE_FLOOR = 3_000_000;
 
-export const svpCeilingFor = ({ lguType, incomeClass }) => {
+export const configuredLimitFor = (method, lgu = {}, category = "all") => {
+  const rows = (lgu.applicableLimits ?? []).filter((row) => row.procurementMethod === method && [category, "all"].includes(row.category));
+  return rows.find((row) => row.category === category) ?? rows.find((row) => row.category === "all") ?? null;
+};
+
+export const svpCeilingFor = ({ lguType, incomeClass, applicableLimits }, category = "all") => {
+  const override = configuredLimitFor("smallValueProcurement", { applicableLimits }, category);
+  if (override) return override.maximumAmount == null ? Infinity : Number(override.maximumAmount);
   if (lguType === "barangay") return BARANGAY_SVP_CEILING;
 
   const row = SVP_CEILING_BY_LGU[lguType];
@@ -51,25 +58,27 @@ export const svpCeilingFor = ({ lguType, incomeClass }) => {
 // Competitive Bidding is the default mode and has no ceiling — it is always
 // available. Alternative modes are what carry limits, so the suggestion below
 // only ever narrows *downward* from Competitive Bidding.
-export const suggestProcurementMode = (abc, lgu) => {
-  const svpCeiling = svpCeilingFor(lgu);
+export const suggestProcurementMode = (abc, lgu, category = "all") => {
+  const svpCeiling = svpCeilingFor(lgu, category);
+  const directRule = configuredLimitFor("directAcquisition", lgu, category);
+  const directCeiling = directRule ? (directRule.maximumAmount == null ? Infinity : Number(directRule.maximumAmount)) : DIRECT_ACQUISITION_CEILING;
 
-  if (abc <= DIRECT_ACQUISITION_CEILING) {
+  if (abc >= Number(directRule?.minimumAmount ?? 0) && abc <= directCeiling) {
     return {
       suggested: "directAcquisition",
       alternatives: ["smallValueProcurement", "competitiveBidding"],
-      rationale: `ABC is within the ₱${DIRECT_ACQUISITION_CEILING.toLocaleString()} Direct Acquisition ceiling (IRR Sec. 32.1).`,
+      rationale: `ABC is within the configured Direct Acquisition ceiling of ₱${directCeiling.toLocaleString()}.`,
       requiresPosting: false,
-      citation: "IRR Sec. 32.1",
+      citation: directRule?.policyReference ?? "IRR Sec. 32.1",
     };
   }
 
-  if (abc <= svpCeiling) {
+  if (abc >= Number(configuredLimitFor("smallValueProcurement", lgu, category)?.minimumAmount ?? 0) && abc <= svpCeiling) {
     return {
       suggested: "smallValueProcurement",
       alternatives: ["competitiveBidding"],
       rationale: `ABC is within this LGU's ₱${svpCeiling.toLocaleString()} Small Value Procurement ceiling (IRR Sec. 34.2).`,
-      requiresPosting: abc > SVP_POSTING_EXEMPTION_CEILING,
+      requiresPosting: abc > postingExemptionFor(lgu, category),
       citation: "IRR Sec. 34.2",
     };
   }
@@ -83,7 +92,22 @@ export const suggestProcurementMode = (abc, lgu) => {
   };
 };
 
-export const requiresPrebidConference = (abc) => abc >= MANDATORY_PREBID_CONFERENCE_FLOOR;
+export const requiresPrebidConference = (abc, lgu = {}, category = "all") => abc >= Number(configuredLimitFor("mandatoryPrebidConference", lgu, category)?.minimumAmount ?? MANDATORY_PREBID_CONFERENCE_FLOOR);
+export const postingExemptionFor = (lgu = {}, category = "all") => {
+  const rule = configuredLimitFor("postingExemption", lgu, category);
+  return rule ? (rule.maximumAmount == null ? Infinity : Number(rule.maximumAmount)) : SVP_POSTING_EXEMPTION_CEILING;
+};
+export const procurementAmountError = (amount, method, lgu, category = "all") => {
+  const rule = configuredLimitFor(method, lgu, category);
+  const minimum = Number(rule?.minimumAmount ?? 0);
+  const maximum = rule ? (rule.maximumAmount == null ? Infinity : Number(rule.maximumAmount))
+    : method === "smallValueProcurement" ? svpCeilingFor(lgu, category)
+      : method === "directAcquisition" ? DIRECT_ACQUISITION_CEILING : Infinity;
+  if (!Number.isFinite(Number(amount)) || Number(amount) < minimum || Number(amount) > maximum) {
+    return `The procurement amount is outside the applicable limits for ${method}: minimum ${minimum.toLocaleString()}, maximum ${Number.isFinite(maximum) ? maximum.toLocaleString() : "no ceiling"}.`;
+  }
+  return null;
+};
 
 // ── How long an opportunity must stay open ───────────────────────────────────
 // Sec. 50.3.1 — Competitive Bidding, Competitive Dialogue and Unsolicited Offer

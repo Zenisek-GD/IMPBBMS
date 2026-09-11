@@ -1,6 +1,7 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "./db.js";
 import { User } from "./userModel.js";
+import { attachResolutionNumberHooks } from "../services/resolutionNumber.js";
 import { Department } from "./departmentModel.js";
 import { DevelopmentPlan, DevelopmentGoal } from "./developmentPlanModel.js";
 import { FUNDS, EXPENSE_CLASSES } from "./appropriationModel.js";
@@ -51,6 +52,7 @@ InvestmentProgram.belongsTo(DevelopmentPlan, { as: "plan", foreignKey: "developm
 DevelopmentPlan.hasMany(InvestmentProgram, { as: "programs", foreignKey: "developmentPlanId" });
 
 InvestmentProgram.belongsTo(User, { as: "preparedBy", foreignKey: "preparedById" });
+attachResolutionNumberHooks(InvestmentProgram);
 InvestmentProgram.belongsTo(User, { as: "endorsedBy", foreignKey: "endorsedById" });
 
 export const AIP_ENTRY_STATES = ["planned", "dropped"];

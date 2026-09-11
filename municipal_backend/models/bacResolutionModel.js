@@ -2,6 +2,7 @@ import { DataTypes } from "sequelize";
 import { sequelize } from "./db.js";
 import { User } from "./userModel.js";
 import { nextSequenceNo } from "../services/sequenceNo.js";
+import { attachResolutionNumberHooks } from "../services/resolutionNumber.js";
 
 // ── BAC RESOLUTION ───────────────────────────────────────────────────────────
 // The Bids and Awards Committee is a collegial body. It does not act through
@@ -31,7 +32,7 @@ export const RESOLUTION_TYPE_LABELS = {
 export const BacResolution = sequelize.define(
   "BacResolution",
   {
-    resolutionNo: { type: DataTypes.STRING, allowNull: false, unique: true },
+    resolutionNo: { type: DataTypes.STRING, allowNull: false, unique: true, validate: { notEmpty: true } },
     type: { type: DataTypes.ENUM(...RESOLUTION_TYPES), allowNull: false },
 
     title: { type: DataTypes.STRING, allowNull: false },
@@ -57,6 +58,7 @@ export const BacResolution = sequelize.define(
 );
 
 BacResolution.belongsTo(User, { as: "chairperson", foreignKey: "chairpersonId" });
+attachResolutionNumberHooks(BacResolution);
 
 export const nextResolutionNo = (year, transaction) =>
   nextSequenceNo(BacResolution, "resolutionNo", "BAC-RES", year, { transaction });

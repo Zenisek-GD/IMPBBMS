@@ -1,3 +1,6 @@
+import { assertBacAction, committeeSnapshot } from "../services/procurementGovernance.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
+import { withAuditTransaction } from "../services/auditLog.js";
 import crypto from "crypto";
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
@@ -539,17 +542,19 @@ export const reviewVendor = async (req, res) => {
   const statusByDecision = { verify: "verified", return: "returned", blacklist: "blacklisted" };
   const previousStatus = vendor.registrationStatus;
 
+  await withAuditTransaction(async (transaction, audit) => {
+    await vendor.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (vendor.registrationStatus !== previousStatus) throw workflowError("This registration changed. Reload before recording the BAC decision.");
+    if (vendor.recordedByUserId === req.currentUser.id) throw workflowError("Another authorized BAC member must decide a registration you prepared.", 403);
+    const bac = await assertBacAction(req, { transaction });
   await vendor.update({
     registrationStatus: statusByDecision[decision],
     reviewRemarks: remarks?.trim() ?? null,
     reviewedAt: new Date(),
     reviewedByUserId: req.currentUser.id,
-  });
+  }, { transaction });
 
-  // Workflow requirement 11: the accreditation decision itself is a critical
-  // procurement action, and it is the decision that authorises the account
-  // creation that may follow. Recorded against the officer who made it.
-  await auditFromRequest(req, {
+  await audit(actorAudit(req, {
     actionType: AUDIT_ACTIONS.BIDDER_REQUIREMENTS_REVIEWED,
     entityRef: "vendor",
     entityId: vendor.id,
@@ -557,6 +562,8 @@ export const reviewVendor = async (req, res) => {
     summary: `Bidder registration for ${vendor.businessName} was ${statusByDecision[decision]}`,
     beforeState: { registrationStatus: previousStatus },
     afterState: {
+      members: committeeSnapshot(bac),
+      quorum: bac.quorum,
       registrationStatus: statusByDecision[decision],
       // The address the approval is granted against — the fact on which every
       // later activation check depends, so it is on the record here.
@@ -566,6 +573,7 @@ export const reviewVendor = async (req, res) => {
       // document count of zero would be visible as such in the log.
       documentsExamined: (vendor.documents ?? []).length,
     },
+  }));
   });
 
   // Section 7.4: the vendor is told the outcome in-system rather than having

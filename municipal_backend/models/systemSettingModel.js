@@ -1,5 +1,8 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "./db.js";
+import { Op } from "sequelize";
+import { ProcurementLimit } from "./procurementLimitModel.js";
+import { DEFAULT_PROCUREMENT_POLICY, validateProcurementPolicy } from "../services/bacCommittee.js";
 
 // Simple key/value store for LGU-wide configuration. Values that regulators
 // periodically adjust (LGU income classification, which drives the Sec. 34.2
@@ -14,6 +17,7 @@ export const SystemSetting = sequelize.define("SystemSetting", {
 });
 
 export const SETTING_KEYS = {
+  PROCUREMENT_POLICY: "procurement.policy",
   LGU_NAME: "lgu.name",
   // The office address, for the party clause and letterhead of generated
   // documents. A contract naming the municipality has to say where it sits, and
@@ -62,15 +66,29 @@ export const getLguProfile = async () => {
   const map = Object.fromEntries(rows.map((row) => [row.key, row.value]));
 
   const threshold = Number(map[SETTING_KEYS.CAPITALIZATION_THRESHOLD]);
+  const applicableLimits = await ProcurementLimit.findAll({ where: {
+    status: "active", effectiveDate: { [Op.lte]: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" }) },
+  }, order: [["effectiveDate", "DESC"], ["id", "DESC"]] });
 
   return {
     name: map[SETTING_KEYS.LGU_NAME] ?? "Municipality",
     address: map[SETTING_KEYS.LGU_ADDRESS] ?? "",
     lguType: map[SETTING_KEYS.LGU_TYPE] ?? "municipality",
     incomeClass: map[SETTING_KEYS.LGU_INCOME_CLASS] ?? "1st",
+    applicableLimits: applicableLimits.map((row) => row.get({ plain: true })),
     capitalizationThreshold:
       Number.isFinite(threshold) && threshold > 0 ? threshold : DEFAULT_CAPITALIZATION_THRESHOLD,
   };
+};
+
+export const getProcurementPolicy = async ({ transaction } = {}) => {
+  const row = await SystemSetting.findOne({ where: { key: SETTING_KEYS.PROCUREMENT_POLICY }, transaction });
+  if (!row) return { ...DEFAULT_PROCUREMENT_POLICY, memberIds: [] };
+  let input;
+  try { input = JSON.parse(row.value); } catch { throw new Error("Stored procurement policy is invalid."); }
+  const result = validateProcurementPolicy(input);
+  if (!result.ok) throw new Error("Stored procurement policy is invalid.");
+  return result.policy;
 };
 
 // ── Branding helpers ───────────────────────────────────────────────────────

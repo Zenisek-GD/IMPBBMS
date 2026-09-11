@@ -24,6 +24,9 @@ const publicAuth = /^\/auth\/(login|mfa\/challenge|forgot-password(?:\/verify)?|
 apiClient.interceptors.response.use(
   (response) => {
     const data = response.data
+    if (response.config.authEpoch === authEpoch && ['post', 'put', 'patch', 'delete'].includes(response.config.method?.toLowerCase())) {
+      window.dispatchEvent(new Event('procurement:changed'))
+    }
     if (Number.isFinite(data?.loginSessionExpiresAt) && Number.isFinite(data?.serverTime)) {
       // Subtract the whole round trip to avoid overstating the time remaining.
       const elapsed = performance.now() - response.config.authRequestStarted

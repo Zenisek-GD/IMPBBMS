@@ -79,7 +79,6 @@ export const ROLE_NAV = {
           { label: 'Departments', href: '/admin/departments', icon: Building2, shortcut: 'Alt+4' },
           { label: 'System Settings', href: '/admin/settings', icon: Settings, shortcut: 'Alt+5' },
           { label: 'Security Settings', href: '/admin/security-settings', icon: ShieldCheck },
-          { label: 'Thresholds', href: '/admin/thresholds', icon: ShieldCheck, shortcut: 'Alt+6' },
           // The administrator's route to the public portal, for maintenance and
           // system notices.
           { label: 'Announcements', href: '/announcements/manage', icon: Megaphone, shortcut: 'Alt+7' },

@@ -1,5 +1,4 @@
 import { Op } from "sequelize";
-import { sequelize } from "../models/db.js";
 import { AppEntry, QUARTERS, PLAN_STAGE_LABELS, PLAN_CYCLE_LABELS } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
@@ -17,7 +16,9 @@ import {
   RELEASED_APP_STATUSES,
 } from "../services/appWorkflow.js";
 import { notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
+import { assertBacAction, committeeSnapshot } from "../services/procurementGovernance.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
 
 // IRR Sec. 7.7 — the lump sum for foreseeable emergencies "shall not be more
 // than four percent (4%) of the Procuring Entity's total appropriations for
@@ -265,7 +266,7 @@ const validateModeAgainstCeilings = async (entry) => {
   if (!mode) return null;
 
   const lgu = await getLguProfile();
-  const suggestion = suggestProcurementMode(Number(entry.abc), lgu);
+  const suggestion = suggestProcurementMode(Number(entry.abc), lgu, entry.category);
 
   if (mode === suggestion.suggested) return null;
 
@@ -406,7 +407,8 @@ export const getModeSuggestion = async (req, res) => {
   }
 
   const lgu = await getLguProfile();
-  res.json({ lgu, ...suggestProcurementMode(abc, lgu) });
+  const category = ["goods", "infrastructure", "consulting"].includes(req.query.category) ? req.query.category : "all";
+  res.json({ lgu, ...suggestProcurementMode(abc, lgu, category) });
 };
 
 export const createAppEntry = async (req, res) => {
@@ -550,7 +552,11 @@ export const transitionAppEntry = async (req, res) => {
   }
 
   // Section 13: state-changing operations run inside a transaction.
-  await sequelize.transaction(async (transaction) => {
+  await withAuditTransaction(async (transaction, audit) => {
+    await entry.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (entry.status !== previousStatus) throw workflowError("This plan has already moved to another stage. Refresh before continuing.");
+    if (["consolidate", "certify", "approve"].includes(action) && entry.createdById === req.currentUser.id) throw workflowError("Another authorized officer must review your procurement plan.", 403);
+    const committee = action === "consolidate" ? await assertBacAction(req, { transaction }) : null;
     const changes = { status: result.to };
 
     if (action === "return") changes.returnRemarks = remarks.trim();
@@ -604,15 +610,14 @@ export const transitionAppEntry = async (req, res) => {
     }
 
     await entry.update(changes, { transaction });
-  });
-
-  await auditFromRequest(req, {
+    await audit(actorAudit(req, {
     actionType: AUDIT_ACTIONS.APP_TRANSITION,
     entityRef: "appEntry",
     entityId: entry.id,
     summary: `${entry.projectTitle}: ${action}`,
     beforeState: { status: previousStatus },
-    afterState: { status: result.to, remarks: remarks?.trim() ?? null },
+    afterState: { status: entry.status, remarks: remarks?.trim() ?? null, ...(committee ? { members: committeeSnapshot(committee), quorum: committee.quorum, presidingMemberId: committee.presidingId } : {}) },
+    }));
   });
 
   if (result.to === "approved") {

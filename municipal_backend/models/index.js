@@ -1,4 +1,7 @@
 export { TrustedDevice, LoginSession } from "./authSecurityModel.js";
+export { TwgDeclaration, TwgAssessment } from "./twgModel.js";
+export { ProcurementAttempt, NegotiatedReview } from "./procurementAttemptModel.js";
+export { ProcurementLimit } from "./procurementLimitModel.js";
 // Single registration point for every Sequelize model. Import new models here
 // so `npm run migrate` and `npm run seed` always see the full schema.
 export { sequelize } from "./db.js";

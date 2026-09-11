@@ -18,16 +18,15 @@ import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
+import ProcurementSettingsPanel from './ProcurementSettingsPanel'
 
 // ── SYSTEM SETTINGS ──────────────────────────────────────────────────────────
 // This page and /admin/thresholds used to be the same component behind two
 // sidebar links, so "Thresholds" went nowhere different — a decorative entry in
 // the administrator's rail.
 //
-// They are two different things and now two different screens. This one holds
-// the handful of facts an administrator *sets*: who this LGU is. The ceilings
-// those facts produce are a statutory consequence, not a setting, and they live
-// on their own read-only page.
+// Procurement Settings holds the committee policy and links to centrally
+// managed Applicable Limits. The old thresholds URL remains a compatible alias.
 //
 // ── BRANDING & SHORTCUTS ────────────────────────────────────────────────────
 // Two additional admin-only sections:
@@ -507,6 +506,7 @@ export default function AdminSettings() {
           </div>
         </div>
       </Card>
+      <ProcurementSettingsPanel />
     </DashboardPage>
   )
 }

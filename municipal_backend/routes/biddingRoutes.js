@@ -1,4 +1,6 @@
 import express from "express";
+import { updateRfqSchedule } from "../controllers/biddingController.js";
+import { listTwg, declareTwgConflict, saveTwg } from "../controllers/twgController.js";
 import {
   listRfqs,
   createRfq,
@@ -31,6 +33,10 @@ router.get(
   listRfqs
 );
 router.post("/rfqs", requirePermission("bidding.publish"), createRfq);
+router.patch("/rfqs/:id/schedule", requirePermission("bidding.publish"), updateRfqSchedule);
+router.get("/rfqs/:id/twg", requireAnyPermission("bidding.view", "bidding.evaluate", "bidding.technicalInput", "bidding.chairEvaluation", "audit.viewAll"), listTwg);
+router.post("/rfqs/:id/twg/declaration", requirePermission("bidding.technicalInput"), declareTwgConflict);
+router.post("/bids/:bidId/twg", requirePermission("bidding.technicalInput"), saveTwg);
 router.post("/rfqs/:id/publish", requirePermission("bidding.publish"), publishRfq);
 router.post("/rfqs/:id/close", requirePermission("bidding.publish"), closeRfq);
 router.post("/rfqs/:id/cancel", requirePermission("bidding.publish"), cancelRfq);
@@ -69,7 +75,7 @@ router.get(
 // ── Evaluation ──────────────────────────────────────────────────────────────
 router.post(
   "/bids/:bidId/evaluations",
-  requireAnyPermission("bidding.evaluate", "bidding.technicalInput"),
+  requirePermission("bidding.evaluate"),
   submitEvaluation
 );
 // Only the Chairperson may lift the blind, so one evaluator cannot unmask.

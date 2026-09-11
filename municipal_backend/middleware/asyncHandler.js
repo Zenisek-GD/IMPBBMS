@@ -58,6 +58,7 @@ export const wrapRouterStack = (layerOwner) => {
 // log. Leaking a Sequelize message to a caller hands them the column names.
 export const errorHandler = (err, req, res, next) => {
   if (res.headersSent) return next(err);
+  if (err?.name === "ProcurementWorkflowError") return res.status(err.status ?? 409).json({ message: err.message, ...err.details });
 
   // Keep the HTTP response deliberately generic, but record the database's
   // own error text privately. Without it, a missing remote table or an Aiven

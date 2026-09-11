@@ -15,6 +15,7 @@ import {
   modeLabel,
 } from '../../api/appEntries'
 import { usePermissions } from '../../context/usePermissions'
+import { useAuth } from '../../context/useAuth'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
@@ -26,6 +27,7 @@ import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
 import { useTableControls } from '../../components/ui/useTableControls'
+import { CommitteeActionModal } from '../bidding/EvaluationForms'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
 
@@ -116,6 +118,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   }, [])
 
   const watchedAbc = useWatch({ control, name: 'abc' })
+  const watchedCategory = useWatch({ control, name: 'category' })
   const watchedAppropriation = useWatch({ control, name: 'appropriationId' })
   const selectedLine = appropriations.find((row) => String(row.id) === String(watchedAppropriation))
   useEffect(() => {
@@ -125,7 +128,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
     let cancelled = false
     const timer = setTimeout(() => {
       appApi
-        .fetchModeSuggestion(abc)
+        .fetchModeSuggestion(abc, watchedCategory)
         .then((result) => {
           if (!cancelled) setSuggestion(result)
         })
@@ -138,7 +141,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [watchedAbc])
+  }, [watchedAbc, watchedCategory])
 
   const submit = async (values) => {
     setServerError('')
@@ -392,12 +395,15 @@ function ReturnModal({ entry, onClose, onConfirm }) {
 }
 
 export default function AppEntries() {
+  const { user } = useAuth()
   const permissions = usePermissions()
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [returning, setReturning] = useState(null)
+  const [committeeEntry, setCommitteeEntry] = useState(null)
+  const [message, setMessage] = useState('')
   const [actionError, setActionError] = useState('')
 
   const [refreshToken, setRefreshToken] = useState(0)
@@ -427,10 +433,12 @@ export default function AppEntries() {
     }
   }, [refreshToken])
 
-  const runTransition = async (entry, action, remarks) => {
+  const runTransition = async (entry, action, remarks, attendance) => {
     setActionError('')
     try {
-      await appApi.transitionAppEntry(entry.id, action, remarks)
+      await appApi.transitionAppEntry(entry.id, action, remarks, attendance)
+      const messages = { submit: 'Procurement plan submitted. The BAC Secretariat may now review and consolidate it.', consolidate: 'BAC recommendation recorded with committee attendance. The plan is ready for funding certification.', certify: 'Funding certified. The procurement plan is ready for approval.', approve: 'Procurement plan approved and locked. Procurement preparation may now proceed.', return: 'Procurement plan returned to the requesting office. Review the remarks and submit the corrected plan.' }
+      setMessage(messages[action] ?? 'Procurement plan updated. Review its current status before continuing.')
       refresh()
     } catch (err) {
       setActionError(err.response?.data?.message ?? 'Could not update that entry.')
@@ -516,7 +524,7 @@ export default function AppEntries() {
               <tbody>
                 {pageRows.map((entry) => {
                   const next = TRANSITION_FOR_STATUS[entry.status]
-                  const canAdvance = next && permissions.has(next.permission)
+                  const canAdvance = next && permissions.has(next.permission) && (!['consolidate', 'certify', 'approve'].includes(next.action) || entry.createdById !== user?.id)
                   const returnPermission = RETURN_PERMISSION_FOR_STATUS[entry.status]
                   const canReturn = returnPermission && permissions.has(returnPermission)
 
@@ -551,7 +559,7 @@ export default function AppEntries() {
                           {canAdvance && (
                             <button
                               type="button"
-                              onClick={() => runTransition(entry, next.action).catch(() => {})}
+                              onClick={() => next.action === 'consolidate' ? setCommitteeEntry(entry) : runTransition(entry, next.action).catch(() => {})}
                               className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
                               {next.label}
@@ -636,6 +644,8 @@ export default function AppEntries() {
         />
       )}
 
+      {message && <p role="status" className="rounded border border-success/20 bg-success/5 p-3 text-sm text-success">{message}</p>}
+      {committeeEntry && <CommitteeActionModal title="Record BAC plan recommendation" description={`Confirm the participating BAC members for ${committeeEntry.projectTitle}. The plan will proceed to funding certification.`} onClose={() => setCommitteeEntry(null)} onSubmit={(attendance) => runTransition(committeeEntry, 'consolidate', undefined, attendance)} />}
       {returning && (
         <ReturnModal
           entry={returning}

@@ -31,7 +31,7 @@ const initialsOf = (name = '') =>
     .join('')
 
 const itemClass = (collapsed, isActive) =>
-  `flex items-center gap-3 rounded-md text-[13px] font-medium transition-colors ${
+  `relative flex items-center gap-3 rounded-md text-[13px] font-medium transition-colors ${
     collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
   } ${isActive ? 'bg-navy-tint text-navy' : 'text-text-secondary hover:bg-navy-tint/60 hover:text-navy'}`
 
@@ -87,12 +87,13 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
                   key={`${item.href}:${item.label}`}
                   to={item.href}
                   onClick={onNavigate}
-                  aria-label={item.label}
-                  title={collapsed ? item.label : undefined}
+                  aria-label={item.pendingCount ? `${item.label}, ${item.pendingCount} pending items` : item.label}
+                  title={collapsed ? `${item.label}${item.pendingCount ? ` (${item.pendingCount} pending)` : ''}` : undefined}
                   className={({ isActive }) => itemClass(collapsed, isActive)}
                 >
                   <item.icon size={15} strokeWidth={2} className="shrink-0" />
                   {!collapsed && <span className="truncate">{item.label}</span>}
+                  {item.pendingCount > 0 && <span aria-hidden="true" className={`${collapsed ? 'absolute right-0 top-0 min-w-4 px-1 text-[9px]' : 'ml-auto min-w-5 px-1.5 text-[10px]'} rounded-full bg-danger/10 py-0.5 text-center font-semibold text-danger`}>{item.pendingCount > 99 ? '99+' : item.pendingCount}</span>}
                 </NavLink>
               ))}
             </div>

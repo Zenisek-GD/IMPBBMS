@@ -195,6 +195,10 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
     setFieldErrors({})
     setSaving(true)
     try {
+      if (form.submissionDeadline && form.bidOpeningAt && new Date(form.bidOpeningAt) <= new Date(form.submissionDeadline)) {
+        setFieldErrors({ bidOpeningAt: 'Bid opening must be scheduled after the bid submission deadline.' })
+        throw new Error('Bid opening must be scheduled after the bid submission deadline.')
+      }
       const payload = {
         ...form,
         rfqId: form.rfqId || null,
@@ -205,6 +209,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
         // editor would fail validation with a confusing message.
         body: form.body || (form.bodyHtml ? undefined : 'To be announced.'),
       }
+      for (const key of ['submissionDeadline', 'bidOpeningAt', 'prebidAt', 'registrationDeadline', 'publishAt', 'expiresAt']) { if (payload[key]) payload[key] = new Date(payload[key]).toISOString() }
       const saved = id
         ? await api.updateAnnouncement(id, payload)
         : await api.createAnnouncement(payload)
@@ -214,7 +219,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
     } catch (err) {
       const data = err.response?.data
       setFieldErrors(data?.errors ?? {})
-      setError(data?.message ?? 'Could not save this notice.')
+      setError(data?.message ?? err.message ?? 'Could not save this notice.')
     } finally {
       setSaving(false)
     }

@@ -1,6 +1,7 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "./db.js";
 import { User } from "./userModel.js";
+import { attachResolutionNumberHooks } from "../services/resolutionNumber.js";
 
 // ── THE TOP OF THE CHAIN ─────────────────────────────────────────────────────
 // Everything this system procures is supposed to be traceable back to a
@@ -51,6 +52,7 @@ export const DevelopmentPlan = sequelize.define(
 );
 
 DevelopmentPlan.belongsTo(User, { as: "preparedBy", foreignKey: "preparedById" });
+attachResolutionNumberHooks(DevelopmentPlan);
 
 // The five development sectors the DILG's CDP preparation guide organises a
 // local plan around. The everyday shorthand an office uses — "health",

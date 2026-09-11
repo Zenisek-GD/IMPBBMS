@@ -131,6 +131,7 @@ test("role-only admin routes reject revoked password sessions", async (t) => {
   assert.equal(status, 401);
 });
 test("MFA reset and enrollment replacement block previously verified sessions", async (t) => {
+  t.mock.method(User, "findByPk", async () => ({ id: 1, status: "active", Role: { twoFactorRequired: true, sessionVersion: 0 } }));
   let enrollment = null;
   t.mock.method(MfaEnrollment, "findOne", async () => enrollment);
   let destroyed = false;

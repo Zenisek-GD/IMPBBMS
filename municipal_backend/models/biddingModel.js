@@ -22,6 +22,11 @@ export const Rfq = sequelize.define("Rfq", {
 
   publishDate: { type: DataTypes.DATEONLY, allowNull: true },
   closingDate: { type: DataTypes.DATE, allowNull: false },
+  openingDate: { type: DataTypes.DATE, allowNull: true },
+  qualityWeight: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 75 },
+  financialWeight: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 25 },
+  consultingPassingScore: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 60 },
+  twgRequired: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 
   // IRR Sec. 51.1 — mandatory at an ABC of ₱3,000,000 or more.
   prebidRequired: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
@@ -69,6 +74,9 @@ export const Bid = sequelize.define("Bid", {
   technicalSubmitted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   financialSealed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   totalBidPrice: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
+  qualityScore: { type: DataTypes.DECIMAL(8, 4), allowNull: true },
+  financialScore: { type: DataTypes.DECIMAL(8, 4), allowNull: true },
+  combinedScore: { type: DataTypes.DECIMAL(8, 4), allowNull: true },
 
   submittedAt: { type: DataTypes.DATE, allowNull: true },
 
@@ -123,6 +131,8 @@ export const Evaluation = sequelize.define("Evaluation", {
   // time — recorded so the audit trail can prove blindness after the fact.
   blindFlag: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   submittedAt: { type: DataTypes.DATE, allowNull: false },
+  noConflictDeclared: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  declaredAt: { type: DataTypes.DATE, allowNull: true },
   remarks: { type: DataTypes.TEXT, allowNull: true },
 });
 

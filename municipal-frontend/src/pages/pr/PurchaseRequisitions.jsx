@@ -1,3 +1,4 @@
+import BacAttendance from '../bidding/BacAttendance'
 import { useEffect, useState, useCallback } from 'react'
 import { Plus, FileText, Trash2, AlertTriangle, Wallet, Gavel, Info, Eye, Check } from 'lucide-react'
 import * as prApi from '../../api/purchaseRequisitions'
@@ -360,6 +361,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
 // but the form makes the departure explicit and demands the reason, which is
 // the same rule the server enforces.
 function ModeDeterminationModal({ pr, onClose, onConfirm }) {
+  const [attendance, setAttendance] = useState({ attendingMemberIds: [], presidingMemberId: '' })
   const [suggestion, setSuggestion] = useState(null)
   const [modeKey, setModeKey] = useState('')
   const [justification, setJustification] = useState('')
@@ -461,6 +463,7 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
           </>
         )}
 
+        <BacAttendance value={attendance} onChange={setAttendance} />
         {error && (
           <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
             {error}
@@ -479,6 +482,7 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
               setSubmitting(true)
               try {
                 await onConfirm({
+                  ...attendance,
                   procurementModeKey: modeKey,
                   justification: justification.trim() || undefined,
                   hopeApprovalReference: hopeApprovalReference.trim() || undefined,

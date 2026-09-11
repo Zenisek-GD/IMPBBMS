@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
-import { LogOut, ShieldCheck } from 'lucide-react'
+import { LogOut, ShieldCheck, FileText } from 'lucide-react'
 import Sidebar from '../components/layout/Sidebar'
 import TopNavBar from '../components/layout/TopNavBar'
 import Modal from '../components/ui/Modal'
@@ -10,6 +10,7 @@ import { useAuth } from '../context/useAuth'
 import { fetchSettings, fetchNavShortcuts } from '../api/settings'
 import { updatePreferences } from '../api/auth'
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts'
+import { fetchPendingCounts } from '../api/reports'
 
 // Wraps every authenticated page whose role has a real nav config. Roles
 // without one are routed to /coming-soon instead (see roleLanding.js), so
@@ -27,18 +28,49 @@ export default function AppShell() {
   const [shortcutOverrides, setShortcutOverrides] = useState(null)
   const [confirmingLogout, setConfirmingLogout] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  const [pending, setPending] = useState({ userId: null, counts: {} })
+  const canViewReports = user?.permissions?.some((permission) => ['app.view', 'app.viewPublished', 'bidding.view', 'bidding.evaluate', 'bidding.technicalInput', 'contract.view', 'contract.viewPublished', 'delivery.submitInvoice', 'audit.viewAll', 'audit.viewLogs'].includes(permission))
 
   // Merge admin-set shortcut overrides onto the static nav config for this role.
   // If no overrides have been fetched yet, the static defaults are used.
   const effectiveSections = useMemo(() => {
     const roleKey = user?.role ?? 'departmentRequester'
     const overrides = shortcutOverrides?.[roleKey]
-    const sections = applyShortcutOverrides(nav.sections, overrides)
+    let sections = applyShortcutOverrides(nav.sections, overrides)
+    if (canViewReports) sections = [...sections, { heading: 'Reports', items: [{ label: 'Reports', href: '/reports', icon: FileText }] }]
+    const counts = pending.userId === user?.id ? pending.counts : {}
+    sections = sections.map((section) => ({ ...section, items: section.items.map((item) => ({ ...item, pendingCount: counts[item.href] || 0 })) }))
     if (!canManageTwoFactor || sections.some((section) => section.items.some((item) => item.href === '/admin/security-settings'))) return sections
     return [...sections, { heading: 'Security', items: [
       { label: 'Security Settings', href: '/admin/security-settings', icon: ShieldCheck },
     ] }]
-  }, [nav.sections, shortcutOverrides, user?.role, canManageTwoFactor])
+  }, [nav.sections, shortcutOverrides, user?.role, user?.id, canManageTwoFactor, canViewReports, pending])
+
+  // Successful writes refresh queues across all workflow screens. Polling and
+  // focus refresh also pick up work completed by other municipal officers.
+  useEffect(() => {
+    let disposed = false
+    let request
+    let debounce
+    const refresh = async () => {
+      request?.abort()
+      request = new AbortController()
+      const active = request
+      try {
+        const result = await fetchPendingCounts(active.signal)
+        if (!disposed && !active.signal.aborted) setPending({ userId: user?.id, counts: result.counts })
+      } catch {
+        if (!disposed && !active.signal.aborted) setPending({ userId: user?.id, counts: {} })
+      }
+    }
+    const schedule = () => { clearTimeout(debounce); debounce = setTimeout(refresh, 200) }
+    const focus = () => { if (document.visibilityState === 'visible') schedule() }
+    refresh()
+    const timer = setInterval(focus, 30000)
+    window.addEventListener('procurement:changed', schedule)
+    window.addEventListener('focus', focus)
+    return () => { disposed = true; request?.abort(); clearTimeout(debounce); clearInterval(timer); window.removeEventListener('procurement:changed', schedule); window.removeEventListener('focus', focus) }
+  }, [user?.id, user?.role, location.pathname])
 
   // Bind Alt+<key> shortcuts for every sidebar destination in this role.
   useKeyboardShortcuts(effectiveSections)

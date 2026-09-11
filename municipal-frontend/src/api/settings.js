@@ -1,6 +1,11 @@
 import { apiClient } from './client'
 
 export const fetchSettings = () => apiClient.get('/settings').then((res) => res.data)
+export const fetchProcurementSettings = () => apiClient.get('/settings/procurement').then((res) => res.data)
+export const updateProcurementSettings = (policy) => apiClient.patch('/settings/procurement', { policy }).then((res) => res.data)
+export const fetchProcurementLimits = () => apiClient.get('/settings/thresholds').then((res) => res.data)
+export const createProcurementLimit = (values) => apiClient.post('/settings/thresholds', values).then((res) => res.data)
+export const updateProcurementLimit = (id, values) => apiClient.patch(`/settings/thresholds/${id}`, values).then((res) => res.data)
 
 export const updateSettings = (payload) =>
   apiClient.patch('/settings', payload).then((res) => res.data)

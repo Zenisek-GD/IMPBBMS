@@ -219,8 +219,8 @@ const readBody = (payload, { partial = false } = {}) => {
   // held after the deadline helps nobody. Caught here so the officer gets a
   // sentence rather than publishing a schedule that cannot happen.
   const deadlineAt = patch.submissionDeadline ?? null;
-  if (deadlineAt && patch.bidOpeningAt && patch.bidOpeningAt < deadlineAt) {
-    errors.bidOpeningAt = "Bid opening cannot be scheduled before the submission deadline.";
+  if (deadlineAt && patch.bidOpeningAt && patch.bidOpeningAt <= deadlineAt) {
+    errors.bidOpeningAt = "Bid opening must be scheduled after the bid submission deadline.";
   }
   if (deadlineAt && patch.prebidAt && patch.prebidAt > deadlineAt) {
     errors.prebidAt = "The pre-bid conference must fall before the submission deadline.";
@@ -294,7 +294,7 @@ export const updateAnnouncement = async (req, res) => {
     });
   }
 
-  const { errors, patch } = readBody(req.body ?? {}, { partial: true });
+  const { errors, patch } = readBody({ prebidAt: announcement.prebidAt, submissionDeadline: announcement.submissionDeadline, bidOpeningAt: announcement.bidOpeningAt, ...(req.body ?? {}) }, { partial: true });
   if (Object.keys(errors).length) {
     return res.status(400).json({ message: "Please correct the highlighted fields.", errors });
   }
@@ -304,6 +304,8 @@ export const updateAnnouncement = async (req, res) => {
     ? {
         title: announcement.title,
         body: announcement.body,
+        submissionDeadline: announcement.submissionDeadline,
+        bidOpeningAt: announcement.bidOpeningAt,
         registrationDeadline: announcement.registrationDeadline,
         expiresAt: announcement.expiresAt,
       }
@@ -314,7 +316,7 @@ export const updateAnnouncement = async (req, res) => {
   // Only edits to a live notice are recorded. A draft being reworked is not an
   // accountable event — nobody has read it — but changing what the municipality
   // has already been told is, particularly when it moves a deadline.
-  if (wasPublished) {
+  if (wasPublished || ["submissionDeadline", "bidOpeningAt", "prebidAt"].some((key) => Object.hasOwn(req.body ?? {}, key))) {
     await auditFromRequest(req, {
       actionType: AUDIT_ACTIONS.ANNOUNCEMENT_UPDATED,
       entityRef: "announcement",
@@ -324,6 +326,8 @@ export const updateAnnouncement = async (req, res) => {
       afterState: {
         title: announcement.title,
         body: announcement.body,
+        submissionDeadline: announcement.submissionDeadline,
+        bidOpeningAt: announcement.bidOpeningAt,
         registrationDeadline: announcement.registrationDeadline,
         expiresAt: announcement.expiresAt,
       },
@@ -515,7 +519,7 @@ export const draftFromSolicitation = async (req, res) => {
     // Bid opening follows the deadline on the same day unless the office says
     // otherwise — the usual practice, and a sensible default the officer can
     // change rather than a blank they must fill.
-    bidOpeningAt: rfq.closingDate,
+    bidOpeningAt: rfq.openingDate,
     projectTitle: rfq.appEntry?.projectTitle ?? null,
   });
 };
