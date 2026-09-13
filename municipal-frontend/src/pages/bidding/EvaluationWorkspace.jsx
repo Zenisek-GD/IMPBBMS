@@ -14,13 +14,15 @@ import Button from '../../components/ui/Button'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
+import NextStep from '../../components/ui/NextStep'
+import { rfqNext } from '../../config/nextSteps'
 import { useTableControls } from '../../components/ui/useTableControls'
 import { BidEvaluationModal, TwgAssessmentModal, CommitteeActionModal, PostQualificationModal } from './EvaluationForms'
 import ProcurementTimeline from './ProcurementTimeline'
 
 const peso = (value) => value == null ? 'Sealed' : `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 const score = (value) => value == null ? '—' : Number(value).toFixed(2)
-const recommendationLabels = { furtherEvaluation: 'Recommend for further evaluation', postQualification: 'Recommend for post-qualification', compliant: 'Recommend as compliant', nonCompliant: 'Recommend as non-compliant', disqualification: 'Recommend disqualification' }
+const recommendationLabels = { furtherEvaluation: 'Recommend for further evaluation', postQualification: 'Recommend for final supplier verification (post-qualification)', compliant: 'Recommend as compliant', nonCompliant: 'Recommend as non-compliant', disqualification: 'Recommend disqualification' }
 
 export default function EvaluationWorkspace() {
   const permissions = usePermissions()
@@ -75,8 +77,22 @@ export default function EvaluationWorkspace() {
   const rfqAlreadyAwarded = selected?.status === 'awarded' || bidData?.bids?.some((bid) => bid.status === 'awarded')
   const rfqTable = useTableControls(rfqs, { searchKeys: ['referenceNo', 'title'], filters: [{ key: 'status', label: 'All stages', options: Object.entries(RFQ_STATUS_LABELS).map(([value, label]) => ({ value, label })) }] })
   const bidTable = useTableControls(bidData?.bids, { searchKeys: ['vendorName', 'blindLabel', 'status'], filters: [{ key: 'status', label: 'All bid statuses' }], accessors: { totalBidPrice: (bid) => bid.totalBidPrice == null ? null : Number(bid.totalBidPrice), averageScore: (bid) => bid.averageScore == null ? null : Number(bid.averageScore), combinedScore: (bid) => bid.combinedScore == null ? null : Number(bid.combinedScore) } })
+
+  // Item 12: TWG assessment and BAC evaluation are long workflow forms — full
+  // pages, not modals over the workspace. Post-qualification (a short
+  // checklist) and committee attendance confirmations stay modals.
+  if (modal?.type === 'twg') {
+    return <DashboardPage>
+      <TwgAssessmentModal bid={modal.bid} assessment={modal.assessment} onClose={() => setModal(null)} onSaved={(status) => { setMessage(status === 'submitted' ? 'TWG technical evaluation successfully submitted. The evaluation is now available for BAC review.' : 'TWG evaluation saved as draft. Complete the assessment before submitting to the BAC.'); refresh() }} />
+    </DashboardPage>
+  }
+  if (modal?.type === 'evaluate') {
+    return <DashboardPage>
+      <BidEvaluationModal bid={modal.bid} consulting={consulting} weights={{ qualityWeight: bidData?.qualityWeight ?? selected?.qualityWeight, financialWeight: bidData?.financialWeight ?? selected?.financialWeight }} onClose={() => setModal(null)} onSubmit={(criteria, remarks, verdict) => run(() => biddingApi.submitEvaluation(modal.bid.id, criteria, remarks, verdict), 'BAC evaluation recorded. The Chairperson may close evaluation after all required reviews are complete.')} />
+    </DashboardPage>
+  }
   return <DashboardPage>
-    <PageHeader title={canTwg && !canEvaluate ? 'TWG Evaluation' : 'Evaluation Workspace'} subtitle="Technical assessment, BAC review, financial ranking, post-qualification and award recommendation." />
+    <PageHeader title={canTwg && !canEvaluate ? 'Technical Working Group (TWG) Evaluation' : 'Evaluation Workspace'} subtitle="Technical assessment, Bids and Awards Committee (BAC) review, financial ranking, final supplier verification (post-qualification) and award recommendation." />
     {actionError && <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{actionError}</p>}
     {message && <p role="status" className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">{message}</p>}
     <Card bodyClassName="p-4">
@@ -97,9 +113,12 @@ export default function EvaluationWorkspace() {
         </div>}
       </Card>}
       <Card title={`${selected.referenceNo} — ${selected.title}`} icon={bidData.blind ? EyeOff : Eye} action={<Badge tone={RFQ_STATUS_TONES[selected.status]}>{RFQ_STATUS_LABELS[selected.status]}</Badge>} bodyClassName="">
+        <div className="border-b border-border-muted px-4 py-3">
+          <NextStep next={rfqNext(selected)} tone={RFQ_STATUS_TONES[selected.status]} />
+        </div>
         <div className="space-y-2 border-b border-border-muted bg-sidebar px-4 py-3 text-xs text-text-secondary">
           <p>{bidData.blindNotice ?? 'Technical evaluation is closed. Financial envelopes are available for technically compliant bidders.'}</p>
-          <p>{consulting ? `Consulting Services: quality ${bidData.qualityWeight ?? selected.qualityWeight}% + financial ${bidData.financialWeight ?? selected.financialWeight}%. Financial score = lowest eligible price ÷ bidder price × 100; combined score applies the approved weights.` : 'Goods / Infrastructure: preliminary examination → technical compliance → financial evaluation → lowest responsive bid ranking → post-qualification. A failed mandatory requirement prevents award recommendation.'}</p>
+          <p>{consulting ? `Consulting Services: quality ${bidData.qualityWeight ?? selected.qualityWeight}% + financial ${bidData.financialWeight ?? selected.financialWeight}%. Financial score = lowest eligible price ÷ bidder price × 100; combined score applies the approved weights.` : 'Goods / Infrastructure: preliminary examination → technical compliance → financial evaluation → lowest responsive bid ranking → final supplier verification (post-qualification). A failed mandatory requirement prevents award recommendation.'}</p>
         </div>
         <div className="p-4"><TableToolbar {...bidTable.toolbarProps} searchPlaceholder="Search bidder or status…" /></div>
         <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-sidebar"><tr>
@@ -113,14 +132,14 @@ export default function EvaluationWorkspace() {
           return <tr key={bid.id} className="border-t border-border-muted">
             <td className="px-4 py-3 text-sm text-navy">{bid.vendorName ?? bid.blindLabel}</td>
             {consulting ? <><td className="px-4 py-3 text-sm">{score(bid.qualityScore ?? bid.averageScore)}</td><td className="px-4 py-3 text-sm">{score(bid.financialScore)}</td><td className="px-4 py-3 text-sm font-semibold">{score(bid.combinedScore)}</td></> : <td className="px-4 py-3 text-xs">{['technicalPassed', 'postQualified', 'awarded'].includes(bid.status) ? 'Compliant' : ['technicalFailed', 'disqualified'].includes(bid.status) ? 'Non-Compliant' : 'Awaiting technical decision'}</td>}
-            <td className="px-4 py-3 text-xs">{bid.evaluationCount ?? 0} BAC<br />{assessmentsFor(bid.id).filter((row) => row.status === 'submitted').length} TWG</td>
+            <td className="px-4 py-3 text-xs" title="Bids and Awards Committee (BAC) evaluations / Technical Working Group (TWG) assessments">{bid.evaluationCount ?? 0} BAC<br />{assessmentsFor(bid.id).filter((row) => row.status === 'submitted').length} TWG</td>
             <td className="whitespace-nowrap px-4 py-3 text-sm">{peso(bid.totalBidPrice)}</td>
             <td className="px-4 py-3"><Badge tone={bid.status === 'awarded' ? 'success' : /failed|disqual/i.test(bid.status) ? 'danger' : 'info'}>{bid.status}</Badge></td>
-            <td className="px-4 py-3"><div className="flex flex-wrap gap-2">
-              {selected.status === 'opened' && canTwg && own?.status !== 'submitted' && <Button size="sm" variant="secondary" disabled={!twg?.declaration?.noConflictDeclared} onClick={() => setModal({ type: 'twg', bid, assessment: own })}>{own ? 'Continue TWG draft' : 'TWG assessment'}</Button>}
-              {selected.status === 'opened' && canEvaluate && !own && !evaluatedByMe && <Button size="sm" variant="secondary" disabled={twg?.required !== false && !submitted} onClick={() => setModal({ type: 'evaluate', bid })}>{consulting ? 'Score quality' : 'Evaluate compliance'}</Button>}
-              {(canChair || canEvaluate) && selected.status === 'evaluated' && bid.status === 'technicalPassed' && <Button size="sm" variant="secondary" onClick={() => setModal({ type: 'postQualification', bid })}>Post-qualify</Button>}
-              {canChair && !rfqAlreadyAwarded && bid.status === 'postQualified' && <Button size="sm" onClick={() => setModal({ type: 'recommend', bid })}>Recommend award</Button>}
+            <td className="px-4 py-3 whitespace-nowrap"><div className="flex w-max items-center gap-2">
+              {selected.status === 'opened' && canTwg && own?.status !== 'submitted' && <Button size="table" variant="secondary" disabled={!twg?.declaration?.noConflictDeclared} title={twg?.declaration?.noConflictDeclared ? undefined : 'Record your conflict-of-interest declaration above first'} onClick={() => setModal({ type: 'twg', bid, assessment: own })}>{own ? 'Continue TWG draft' : 'TWG assessment'}</Button>}
+              {selected.status === 'opened' && canEvaluate && !own && !evaluatedByMe && <Button size="table" variant="secondary" disabled={twg?.required !== false && !submitted} title={twg?.required !== false && !submitted ? 'Available after the TWG submits its technical assessment' : undefined} onClick={() => setModal({ type: 'evaluate', bid })}>{consulting ? 'Score quality' : 'Evaluate compliance'}</Button>}
+              {(canChair || canEvaluate) && selected.status === 'evaluated' && bid.status === 'technicalPassed' && <Button size="table" variant="secondary" title="Final supplier verification (post-qualification): check the lowest responsive bidder's documents and capability" onClick={() => setModal({ type: 'postQualification', bid })}>Verify supplier</Button>}
+              {canChair && !rfqAlreadyAwarded && bid.status === 'postQualified' && <Button size="table" onClick={() => setModal({ type: 'recommend', bid })}>Recommend award</Button>}
             </div></td>
           </tr>
         })}</tbody></table></div>
@@ -150,9 +169,7 @@ export default function EvaluationWorkspace() {
         </details>)}
       </Card>
     </>}
-    {modal?.type === 'twg' && <TwgAssessmentModal bid={modal.bid} assessment={modal.assessment} onClose={() => setModal(null)} onSaved={(status) => { setMessage(status === 'submitted' ? 'TWG technical evaluation successfully submitted. The evaluation is now available for BAC review.' : 'TWG evaluation saved as draft. Complete the assessment before submitting to the BAC.'); refresh() }} />}
-    {modal?.type === 'evaluate' && <BidEvaluationModal bid={modal.bid} consulting={consulting} weights={{ qualityWeight: bidData?.qualityWeight ?? selected?.qualityWeight, financialWeight: bidData?.financialWeight ?? selected?.financialWeight }} onClose={() => setModal(null)} onSubmit={(criteria, remarks, verdict) => run(() => biddingApi.submitEvaluation(modal.bid.id, criteria, remarks, verdict), 'BAC evaluation recorded. The Chairperson may close evaluation after all required reviews are complete.')} />}
-    {modal?.type === 'postQualification' && <PostQualificationModal bid={modal.bid} onClose={() => setModal(null)} onSubmit={(payload) => run(() => biddingApi.submitPostQualification(modal.bid.id, payload), 'Post-qualification recorded. Compliant bidders may proceed to BAC award recommendation.')} />}
+    {modal?.type === 'postQualification' && <PostQualificationModal bid={modal.bid} onClose={() => setModal(null)} onSubmit={(payload) => run(() => biddingApi.submitPostQualification(modal.bid.id, payload), 'Final supplier verification (post-qualification) recorded. Compliant bidders may proceed to BAC award recommendation.')} />}
     {(modal?.type === 'close' || modal?.type === 'recommend') && <CommitteeActionModal title={modal.type === 'close' ? 'Close technical evaluation' : 'BAC award recommendation'} description={modal.type === 'close' ? 'Confirm the attending BAC members. This decision closes technical evaluation and calculates the eligible financial ranking.' : 'Confirm BAC participation before forwarding the recommendation for award approval.'} onClose={() => setModal(null)} onSubmit={(payload) => modal.type === 'close' ? run(() => biddingApi.closeEvaluation(selected.id, payload), 'Technical evaluation closed. Review financial ranking and proceed to post-qualification.') : run(() => biddingApi.recommendAward(modal.bid.id, payload), 'BAC award recommendation recorded and forwarded to the approving officer.')} />}
     {(permissions.has('bidding.award') || canChair || permissions.has('bidding.view')) && <AwardQueue version={refreshToken} onChanged={refresh} />}
   </DashboardPage>

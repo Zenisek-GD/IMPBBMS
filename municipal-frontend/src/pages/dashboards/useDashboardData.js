@@ -6,9 +6,11 @@ import { fetchBudgets } from '../../api/budgetPreparation'
 import { fetchPrograms } from '../../api/planning'
 import { fetchRfqs, fetchVendors } from '../../api/bidding'
 import { fetchContracts } from '../../api/contracts'
+import { fetchDocuments } from '../../api/documentGeneration'
 import { fetchInvoices, fetchBudgetMonitor, fetchPendingItems } from '../../api/finance'
-import { fetchAuditLog } from '../../api/insights'
+import { fetchAuditLog, fetchMyWork } from '../../api/insights'
 import { fetchPublicOverview } from '../../api/publicProjects'
+import { fetchNotifications } from '../../api/notifications'
 import * as queues from './queues'
 
 // ── WHAT EACH DASHBOARD NEEDS, AND NOTHING MORE ──────────────────────────────
@@ -31,6 +33,7 @@ const SOURCES = {
   rfqs: { permission: 'bidding.view', load: () => fetchRfqs() },
   vendors: { anyOf: ['bidding.publish', 'bidders.createAccount'], load: () => fetchVendors() },
   contracts: { permission: 'contract.view', load: () => fetchContracts() },
+  documents: { anyOf: ['document.generate', 'document.approve', 'document.publish'], load: () => fetchDocuments() },
   invoices: { permission: 'payment.view', load: () => fetchInvoices() },
   budgetMonitor: { permission: 'budget.view', load: () => fetchBudgetMonitor() },
   pendingItems: { anyOf: ['pr.view', 'budget.view'], load: () => fetchPendingItems() },
@@ -42,6 +45,11 @@ const SOURCES = {
   audit: { anyOf: ['audit.viewLogs', 'audit.export'], load: () => fetchAuditLog({ limit: 8 }) },
   // Public, so no gate — and it is the one figure every role can be shown.
   publicOverview: { load: () => fetchPublicOverview() },
+  notifications: { load: () => fetchNotifications({ unreadOnly: true, limit: 8 }) },
+  // This is intentionally not gated in the browser. Every active account gets
+  // an inbox; the server reads fresh permissions and returns only its own
+  // authorised work items.
+  myWork: { load: () => fetchMyWork({ limit: 100 }) },
 }
 
 const allowed = (permissions, source) => {
@@ -62,7 +70,10 @@ export function useDashboardData(needs) {
 
   useEffect(() => {
     let cancelled = false
-    const wanted = key ? key.split(',') : []
+    // The inbox is part of every role's workday. It is fetched separately from
+    // workflow queues because a returned item or a deadline reminder can exist
+    // even when the user has no record transition to perform right now.
+    const wanted = [...new Set([...(key ? key.split(',') : []), 'notifications', 'myWork'])]
 
     const jobs = wanted
       .filter((name) => SOURCES[name] && allowed(permissions, SOURCES[name]))
@@ -86,20 +97,21 @@ export function useDashboardData(needs) {
 
   const data = state.data
 
-  // Queues are derived from the loaded data and the caller's permissions, so
-  // they stay correct without anything here knowing which role is signed in.
+  // Workflow ownership for APP, PR, planning, solicitation, awards and vendor
+  // onboarding comes from the server. Several lower-risk operational queues
+  // (budget preparation, document production, contracts and invoice handling)
+  // have no server-side transition map yet, so their existing page-specific
+  // summaries remain presentation-only supplements rather than disappearing
+  // from an officer's home screen. Their write endpoints still re-authorize.
   const queue = useMemo(
-    () =>
-      [
-        ...queues.requisitionQueue(data.prs, permissions),
-        ...queues.appQueue(data.appEntries, permissions),
-        ...queues.budgetQueue(data.budgets, permissions),
-        ...queues.investmentProgramQueue(data.programs, permissions),
-        ...queues.evaluationQueue(data.rfqs, permissions),
-        ...queues.vendorQueue(data.vendors, permissions),
-        ...queues.contractQueue(data.contracts, permissions),
-        ...queues.invoiceQueue(data.invoices, permissions),
-      ],
+    () => [
+      ...(data.myWork?.items ?? []),
+      ...queues.budgetQueue(data.budgets, permissions),
+      ...queues.evaluationQueue(data.rfqs, permissions),
+      ...queues.contractQueue(data.contracts, permissions),
+      ...queues.documentQueue(data.documents, permissions),
+      ...queues.invoiceQueue(data.invoices, permissions),
+    ],
     [data, permissions]
   )
 

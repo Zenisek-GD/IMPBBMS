@@ -11,24 +11,32 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
-import SortableTh from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useServerTable } from '../../components/ui/useServerTable'
+import * as usersApi from '../../api/users'
 
 export default function AuditLog() {
   const permissions = usePermissions()
-  const [entries, setEntries] = useState([])
   const [verification, setVerification] = useState(null)
   const [inspecting, setInspecting] = useState(null)
+  const [facets, setFacets] = useState({ actions: [], roles: [] })
+  const [roleNames, setRoleNames] = useState({})
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([insightsApi.fetchAuditLog(), insightsApi.verifyAuditChain()])
-      .then(([log, verify]) => {
-        if (cancelled) return
-        setEntries(log)
-        setVerification(verify)
+    Promise.all([
+      insightsApi.fetchAuditFacets().catch(() => ({ actions: [], roles: [] })),
+      insightsApi.verifyAuditChain().catch(() => null),
+      usersApi.fetchRoles().catch(() => []),
+    ]).then(([facetRows, verify, roleRows]) => {
+      if (cancelled) return
+      setFacets({
+        actions: facetRows.actions ?? [],
+        roles: facetRows.roles ?? [],
       })
-      .catch(() => {})
+      setVerification(verify)
+      setRoleNames(Object.fromEntries((roleRows ?? []).map((role) => [role.key, role.name])))
+    })
     return () => {
       cancelled = true
     }
@@ -36,33 +44,28 @@ export default function AuditLog() {
 
   const canExport = permissions.has('audit.export')
 
-  // Only the actions actually present, named the way the table names them, and
-  // ordered the way a reader would look for them.
-  const actionOptions = useMemo(() => {
-    const seen = new Set(entries.map((entry) => entry.actionType).filter(Boolean))
-    return [...seen]
-      .map((value) => ({ value, label: actionLabel(value) }))
-      .sort((a, b) => a.label.localeCompare(b.label))
-  }, [entries])
+  // Facet options name only values that actually occur in the log, ordered the
+  // way a reader looks for them — a dropdown full of raw keys for actions that
+  // never happened is the thing this screen is fixed to stop showing.
+  const actionOptions = useMemo(
+    () =>
+      facets.actions
+        .map((value) => ({ value, label: actionLabel(value) }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [facets]
+  )
+  const roleOptions = useMemo(
+    () =>
+      facets.roles
+        .map((value) => ({ value, label: roleNames[value] ?? value }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [facets, roleNames]
+  )
 
-  // The actor and outcome filters were query parameters behind a 250ms debounce;
-  // they are local now, so they combine with a free-text search across the
-  // action, the record and the summary, and with a column sort.
-  //
-  // Search covers the readable action name as well as the raw key, so both
-  // "signed in" and "auth.login" find the same rows.
-  const table = useTableControls(entries, {
-    searchKeys: (entry) =>
-      [
-        entry.actionType,
-        actionLabel(entry.actionType),
-        entityLabel(entry),
-        entry.summary,
-        entry.actorName,
-        entry.actorRole,
-      ]
-        .filter(Boolean)
-        .join(' '),
+  // Server-side: search, outcome/action/role filters, column sort and paging
+  // all run in the database. Actor names are covered by the search box.
+  const table = useServerTable(insightsApi.fetchAuditLog, {
+    urlKey: 'audit',
     filters: [
       {
         key: 'outcome',
@@ -73,17 +76,9 @@ export default function AuditLog() {
           { value: 'failed', label: 'Failed' },
         ],
       },
-      { key: 'actorName', label: 'All actors' },
-      { key: 'actorRole', label: 'All roles' },
-      // Explicit options, because the derived ones would be the raw keys — and
-      // a dropdown full of "auth.login.success" is the thing this screen is
-      // being fixed to stop showing.
       { key: 'actionType', label: 'All actions', options: actionOptions },
+      { key: 'actorRole', label: 'All roles', options: roleOptions },
     ],
-    accessors: {
-      sequence: (entry) => Number(entry.sequence ?? 0),
-      actionType: (entry) => actionLabel(entry.actionType),
-    },
   })
   const { pageRows, paginationProps } = table
 
@@ -144,11 +139,25 @@ export default function AuditLog() {
       </Card>
 
       <Card title="Events" icon={ScrollText} bodyClassName="">
-        {table.rows.length === 0 ? (
+        {table.loading ? (
+          <p role="status" className="px-4 py-8 text-center text-[13px] text-text-faint">
+            Loading audit entries…
+          </p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] font-medium text-navy">Audit entries could not be loaded</p>
+            <p className="mx-auto mt-1 max-w-md text-[13px] text-text-secondary">
+              Check your connection and try again.
+            </p>
+            <Button variant="secondary" size="sm" className="mt-3" onClick={table.refresh}>
+              Retry
+            </Button>
+          </div>
+        ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'No recorded events yet.'
-              : 'No events match your search or filters.'}
+            {table.isDirty
+              ? 'No events match your search or filters.'
+              : 'No recorded events yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -160,7 +169,7 @@ export default function AuditLog() {
                   <SortableTh {...table.sortProps('actionType')}>Action</SortableTh>
                   <SortableTh {...table.sortProps('actorName')}>Actor</SortableTh>
                   <SortableTh {...table.sortProps('outcome')}>Outcome</SortableTh>
-                  <SortableTh {...table.sortProps('hash')}>Chain</SortableTh>
+                  <Th>Chain</Th>
                 </tr>
               </thead>
               <tbody>
@@ -214,7 +223,9 @@ export default function AuditLog() {
             </table>
           </div>
         )}
-        <Pagination {...paginationProps} label="log entries" />
+        {!table.loading && !table.failed && table.total > 0 && (
+          <Pagination {...paginationProps} label="log entries" />
+        )}
       </Card>
 
       {inspecting && (

@@ -1,5 +1,5 @@
 import BacAttendance from '../bidding/BacAttendance'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus, FileText, Trash2, AlertTriangle, Wallet, Gavel, Info, Eye, Check } from 'lucide-react'
 import * as prApi from '../../api/purchaseRequisitions'
 import {
@@ -20,10 +20,14 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import NextStep, { NextInline } from '../../components/ui/NextStep'
+import { prNext } from '../../config/nextSteps'
+import { useServerTable } from '../../components/ui/useServerTable'
+import useDraftRecovery from '../../hooks/useDraftRecovery'
 
 const peso = (value) =>
   `₱${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -58,6 +62,18 @@ function PrFormModal({ existing, onClose, onSaved }) {
   const [threshold, setThreshold] = useState(50000)
   const [serverError, setServerError] = useState('')
   const [saving, setSaving] = useState(false)
+  const draft = useDraftRecovery({
+    key: existing ? `purchase-requisition-${existing.id}` : 'purchase-requisition-new',
+    value: { appEntryId, purpose, dateRequired, isEmergency, justification, lines },
+    onRestore: (saved) => {
+      setAppEntryId(saved.appEntryId ?? '')
+      setPurpose(saved.purpose ?? '')
+      setDateRequired(saved.dateRequired ?? '')
+      setIsEmergency(Boolean(saved.isEmergency))
+      setJustification(saved.justification ?? '')
+      setLines(Array.isArray(saved.lines) && saved.lines.length ? saved.lines : [emptyLine()])
+    },
+  })
 
   // The capitalisation threshold is configuration, not a constant — read it
   // rather than hardcoding ₱50,000 here, or the preview would go stale the day
@@ -137,6 +153,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
       }
       if (existing) await prApi.updatePr(existing.id, payload)
       else await prApi.createPr(payload)
+      draft.clearDraft()
       onSaved()
       onClose()
     } catch (err) {
@@ -147,11 +164,44 @@ function PrFormModal({ existing, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={existing ? `Edit ${existing.prNumber}` : 'New Purchase Requisition'} onClose={onClose}>
-      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
+    // Item 12: a requisition with dynamic line items is a long workflow form —
+    // a full page with logical sections, not a scroll-heavy modal.
+    <LargeFormPage
+      title={existing ? `Edit ${existing.prNumber}` : 'New purchase requisition'}
+      purpose="Each requisition draws against an approved Annual Procurement Plan (APP) entry's remaining balance."
+      onBack={onClose}
+      backLabel="Back to requisitions"
+      error={serverError}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving || !appEntryId}>
+            {saving ? 'Saving…' : 'Save draft'}
+          </Button>
+        </>
+      }
+    >
+      {draft.pendingDraft && (
+        <div role="status" className="mb-4 rounded-lg border border-info/30 bg-info-soft p-3 text-sm text-text-secondary">
+          <p>A locally saved requisition draft from {new Date(draft.pendingDraft.savedAt).toLocaleString('en-PH')} is available on this browser.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" onClick={draft.restoreDraft}>Restore draft</Button>
+            <Button size="sm" variant="secondary" onClick={draft.discardDraft}>Discard it</Button>
+          </div>
+        </div>
+      )}
+      {!draft.pendingDraft && draft.lastSavedAt && (
+        <p className="mb-3 text-xs text-text-faint">Draft recovery saved locally. Save the form to create or update the official requisition.</p>
+      )}
+      <LargeFormPage.Section
+        title="Linked procurement plan"
+        description="Which approved Annual Procurement Plan (APP) entry this requisition draws against."
+      >
         <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-            Linked APP entry (approved only)
+          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary" title="Annual Procurement Plan (APP): the year's list of what the municipality will procure">
+            Linked Annual Procurement Plan (APP) entry (approved only)
           </label>
           <select
             value={appEntryId}
@@ -159,10 +209,10 @@ function PrFormModal({ existing, onClose, onSaved }) {
             disabled={Boolean(existing)}
             className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy disabled:bg-sidebar focus:border-navy focus:outline-none"
           >
-            <option value="">Select an approved APP entry...</option>
+            <option value="">Select an approved Annual Procurement Plan (APP) entry...</option>
             {appEntries.map((entry) => (
               <option key={entry.id} value={entry.id}>
-                {entry.projectTitle} — ABC {peso(entry.abc)}
+                {entry.projectTitle} — Approved Budget for the Contract (ABC) {peso(entry.abc)}
               </option>
             ))}
           </select>
@@ -170,13 +220,13 @@ function PrFormModal({ existing, onClose, onSaved }) {
 
         {balance && (
           <div
-            className={`flex items-start gap-2 rounded border p-3 ${
+            className={`mt-3 flex items-start gap-2 rounded border p-3 ${
               overBudget ? 'border-danger/30 bg-danger/10' : 'border-navy/10 bg-chip/40'
             }`}
           >
             <Wallet size={14} className={`mt-0.5 shrink-0 ${overBudget ? 'text-danger' : 'text-navy'}`} />
             <div className="text-xs">
-              <p className="text-text-secondary">
+              <p className="text-text-secondary" title="Annual Procurement Plan (APP) balance">
                 APP balance: <strong className="text-navy">{peso(balance.remaining)}</strong> remaining of{' '}
                 {peso(balance.abc)} ({peso(balance.committed)} already committed)
               </p>
@@ -187,68 +237,80 @@ function PrFormModal({ existing, onClose, onSaved }) {
             </div>
           </div>
         )}
+      </LargeFormPage.Section>
 
-        <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Purpose</label>
-          <textarea
-            rows={2}
-            value={purpose}
-            onChange={(event) => setPurpose(event.target.value)}
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 items-end gap-3">
+      <LargeFormPage.Section
+        title="Request details"
+        description="Why this is needed and when it is required."
+      >
+        <div className="flex flex-col gap-4">
           <div>
-            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-              Date required
-            </label>
-            <input
-              type="date"
-              value={dateRequired}
-              onChange={(event) => setDateRequired(event.target.value)}
-              className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-            />
-          </div>
-          <label className="flex items-center gap-2 pb-3 text-[13px] text-text-secondary">
-            <input
-              type="checkbox"
-              checked={isEmergency}
-              onChange={(event) => setIsEmergency(event.target.checked)}
-            />
-            Emergency requisition
-          </label>
-        </div>
-
-        {!isEmergency && (
-          <p className="flex items-start gap-2 text-xs text-text-faint">
-            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-            Non-emergency requisitions must be dated at least 15 days out. Checked at submission, not while drafting.
-          </p>
-        )}
-
-        {isEmergency && (
-          <div>
-            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-              Emergency justification (minimum 30 characters)
-            </label>
+            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Purpose</label>
             <textarea
               rows={2}
-              value={justification}
-              onChange={(event) => setJustification(event.target.value)}
+              value={purpose}
+              onChange={(event) => setPurpose(event.target.value)}
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
             />
-            <p className="mt-1 text-xs text-text-faint">{justification.trim().length} / 30 characters</p>
           </div>
-        )}
 
+          <div className="grid grid-cols-2 items-end gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                Date required
+              </label>
+              <input
+                type="date"
+                value={dateRequired}
+                onChange={(event) => setDateRequired(event.target.value)}
+                className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 pb-3 text-[13px] text-text-secondary">
+              <input
+                type="checkbox"
+                checked={isEmergency}
+                onChange={(event) => setIsEmergency(event.target.checked)}
+              />
+              Emergency requisition
+            </label>
+          </div>
+
+          {!isEmergency && (
+            <p className="flex items-start gap-2 text-xs text-text-faint">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              Non-emergency requisitions must be dated at least 15 days out. Checked at submission, not while drafting.
+            </p>
+          )}
+
+          {isEmergency && (
+            <div>
+              <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                Emergency justification (minimum 30 characters)
+              </label>
+              <textarea
+                rows={2}
+                value={justification}
+                onChange={(event) => setJustification(event.target.value)}
+                className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+              />
+              <p className="mt-1 text-xs text-text-faint">{justification.trim().length} / 30 characters</p>
+            </div>
+          )}
+        </div>
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section
+        title="Line items"
+        description="What is being bought. Tick whether each item lasts over one year — that decides how it is charged."
+      >
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <label className="text-xs font-medium tracking-[0.02em] text-text-secondary">Line items</label>
+            <span className="text-xs font-medium tracking-[0.02em] text-text-secondary">Items</span>
             <button
               type="button"
               onClick={() => setLines((current) => [...current, emptyLine()])}
-              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+              className="min-h-[44px] text-[12px] font-medium tracking-[0.03em] text-navy hover:underline"
             >
               + ADD LINE
             </button>
@@ -291,7 +353,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                       disabled={lines.length === 1}
                       aria-label="Remove line"
-                      className="col-span-1 text-text-faint hover:text-danger disabled:opacity-30"
+                      className="col-span-1 flex min-h-[44px] min-w-[44px] items-center justify-center text-text-faint hover:text-danger disabled:opacity-30"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -303,7 +365,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       ticked, so nobody discovers the classification at
                       certification. */}
                   <div className="mt-2 flex flex-wrap items-center gap-3 pl-1">
-                    <label className="flex items-center gap-2 text-xs text-text-secondary">
+                    <label className="flex min-h-[44px] items-center gap-2 text-xs text-text-secondary">
                       <input
                         type="checkbox"
                         checked={Boolean(line.hasUsefulLifeOverOneYear)}
@@ -328,28 +390,8 @@ function PrFormModal({ existing, onClose, onSaved }) {
 
           <p className="mt-3 text-right text-sm font-bold text-navy">Total: {peso(total)}</p>
         </div>
-
-        {serverError && (
-          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {serverError}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            CANCEL
-          </Button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || !appEntryId}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
-          >
-            {saving ? 'SAVING...' : 'SAVE DRAFT'}
-          </button>
-        </div>
-      </div>
-    </Modal>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -389,93 +431,21 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
   const chosen = suggestion?.modes?.find((mode) => mode.key === modeKey)
   const departing = Boolean(suggestion && modeKey && modeKey !== suggestion.suggested)
 
+  // Item 12: mode determination is a complex approval screen (threshold
+  // guidance + committee decision + attendance) — a full page, not a modal.
   return (
-    <Modal title={`Determine the mode — ${pr.prNumber}`} onClose={onClose}>
-      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
-        {!suggestion ? (
-          <p className="text-[13px] text-text-faint">Loading the applicable thresholds...</p>
-        ) : (
-          <>
-            <div className="flex items-start gap-2 rounded border border-navy/10 bg-chip/40 p-3">
-              <Info size={14} className="mt-0.5 shrink-0 text-navy" />
-              <div className="text-xs text-text-secondary">
-                <p>
-                  ABC <strong className="text-navy">{peso(suggestion.abc)}</strong> — for a{' '}
-                  {suggestion.lgu.incomeClass} class {suggestion.lgu.type}, the thresholds indicate{' '}
-                  <strong className="text-navy">
-                    {suggestion.modes.find((m) => m.key === suggestion.suggested)?.name ?? suggestion.suggested}
-                  </strong>
-                  .
-                </p>
-                <p className="mt-1">{suggestion.rationale}</p>
-                <p className="mt-1 text-text-faint">{suggestion.citation}</p>
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-                Mode of procurement resolved by the committee
-              </label>
-              <select
-                value={modeKey}
-                onChange={(event) => setModeKey(event.target.value)}
-                className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-              >
-                {suggestion.modes.map((mode) => (
-                  <option key={mode.key} value={mode.key}>
-                    {mode.name} — {mode.citation}
-                    {mode.isSuggested ? ' (indicated)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {departing && (
-              <div>
-                <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-                  Why the committee departed from the indicated mode (required)
-                </label>
-                <textarea
-                  rows={3}
-                  value={justification}
-                  onChange={(event) => setJustification(event.target.value)}
-                  className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-                />
-              </div>
-            )}
-
-            {chosen?.requiresHopeApproval && (
-              <div>
-                <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-                  Prior approval of the Head of the Procuring Entity — reference (required)
-                </label>
-                <input
-                  value={hopeApprovalReference}
-                  onChange={(event) => setHopeApprovalReference(event.target.value)}
-                  placeholder="e.g. Office Order No. 2027-114"
-                  className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-text-faint">
-                  {chosen.name} cannot be adopted on the committee&apos;s own authority ({chosen.citation}).
-                </p>
-              </div>
-            )}
-          </>
-        )}
-
-        <BacAttendance value={attendance} onChange={setAttendance} />
-        {error && (
-          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2">
+    <LargeFormPage
+      title={`Determine the mode — ${pr.prNumber}`}
+      purpose="The committee sees what the thresholds indicate for this amount before it chooses, and records its determination with attendance."
+      onBack={onClose}
+      backLabel="Back to requisitions"
+      error={error}
+      actions={
+        <>
           <Button variant="secondary" onClick={onClose}>
-            CANCEL
+            Cancel
           </Button>
-          <button
-            type="button"
+          <Button
             disabled={submitting || !modeKey}
             onClick={async () => {
               setError('')
@@ -494,13 +464,104 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
                 setSubmitting(false)
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            {submitting ? 'RECORDING...' : 'RECORD DETERMINATION'}
-          </button>
+            {submitting ? 'Recording…' : 'Record determination'}
+          </Button>
+        </>
+      }
+    >
+      <LargeFormPage.Section
+        title="Threshold guidance"
+        description="What the amount indicates before the committee chooses."
+      >
+        {!suggestion ? (
+          <p className="text-[13px] text-text-faint">Loading the applicable thresholds...</p>
+        ) : (
+          <div className="flex items-start gap-2 rounded border border-navy/10 bg-chip/40 p-3">
+            <Info size={14} className="mt-0.5 shrink-0 text-navy" />
+            <div className="text-xs text-text-secondary">
+              <p>
+                ABC <strong className="text-navy">{peso(suggestion.abc)}</strong> — for a{' '}
+                {suggestion.lgu.incomeClass} class {suggestion.lgu.type}, the thresholds indicate{' '}
+                <strong className="text-navy">
+                  {suggestion.modes.find((m) => m.key === suggestion.suggested)?.name ?? suggestion.suggested}
+                </strong>
+                .
+              </p>
+              <p className="mt-1">{suggestion.rationale}</p>
+              <p className="mt-1 text-text-faint">{suggestion.citation}</p>
+            </div>
+          </div>
+        )}
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section
+        title="Committee decision"
+        description="The mode the committee resolves to adopt, with reasons where required."
+      >
+        <div className="flex flex-col gap-4">
+          {suggestion && (
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                  Mode of procurement resolved by the committee
+                </label>
+                <select
+                  value={modeKey}
+                  onChange={(event) => setModeKey(event.target.value)}
+                  className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+                >
+                  {suggestion.modes.map((mode) => (
+                    <option key={mode.key} value={mode.key}>
+                      {mode.name} — {mode.citation}
+                      {mode.isSuggested ? ' (indicated)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {departing && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                    Why the committee departed from the indicated mode (required)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={justification}
+                    onChange={(event) => setJustification(event.target.value)}
+                    className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {chosen?.requiresHopeApproval && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                    Prior approval of the Head of the Procuring Entity — reference (required)
+                  </label>
+                  <input
+                    value={hopeApprovalReference}
+                    onChange={(event) => setHopeApprovalReference(event.target.value)}
+                    placeholder="e.g. Office Order No. 2027-114"
+                    className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+                  />
+                  <p className="mt-1 text-xs text-text-faint">
+                    {chosen.name} cannot be adopted on the committee&apos;s own authority ({chosen.citation}).
+                  </p>
+                </div>
+              )}
+            </>
+          )}
         </div>
-      </div>
-    </Modal>
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section
+        title="Attendance"
+        description="Which members were present for this determination."
+      >
+        <BacAttendance value={attendance} onChange={setAttendance} />
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -598,6 +659,8 @@ function RequisitionDetail({ pr, onClose }) {
           </p>
         )}
 
+        <NextStep next={prNext(pr)} tone={PR_STATUS_TONES[pr.status]} />
+
         {/* ── Where it is in the chain ──────────────────────────────────── */}
         <section>
           <p className="mb-3 text-[11.5px] tracking-[0.04em] text-text-faint uppercase">Progress</p>
@@ -645,7 +708,7 @@ function RequisitionDetail({ pr, onClose }) {
           <Fact label="Date required" value={pr.dateRequired} />
           <Fact label="Total" value={peso(pr.totalAmount)} />
           <Fact label="Fund source" value={pr.fundSourceLabel} />
-          <Fact label="APP entry ABC" value={pr.appEntryAbc == null ? null : peso(pr.appEntryAbc)} />
+          <Fact label="Annual Procurement Plan (APP) entry budget (ABC)" value={pr.appEntryAbc == null ? null : peso(pr.appEntryAbc)} />
         </section>
 
         {/* ── The committee's determination ─────────────────────────────── */}
@@ -779,35 +842,12 @@ function RequisitionDetail({ pr, onClose }) {
 
 export default function PurchaseRequisitions() {
   const permissions = usePermissions()
-  const [prs, setPrs] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [refreshToken, setRefreshToken] = useState(0)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [returning, setReturning] = useState(null)
   const [determiningMode, setDeterminingMode] = useState(null)
   const [viewing, setViewing] = useState(null)
   const [actionError, setActionError] = useState('')
-
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
-  useEffect(() => {
-    let cancelled = false
-    prApi
-      .fetchPrs()
-      .then((data) => {
-        if (!cancelled) {
-          setPrs(data)
-          setLoading(false)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
 
   const runTransition = async (pr, action, payload) => {
     setActionError('')
@@ -826,8 +866,8 @@ export default function PurchaseRequisitions() {
   // and "₱900" compare the wrong way round as text. Emergency is a filter of
   // its own because "show me only the emergencies" is the question this queue
   // gets asked when something is on fire.
-  const table = useTableControls(prs, {
-    searchKeys: ['prNumber', 'appEntryTitle', 'fundSourceLabel', 'procurementModeName', 'purpose'],
+  const table = useServerTable(prApi.fetchPrs, {
+    urlKey: 'purchaseRequisitions',
     filters: [
       {
         key: 'status',
@@ -841,16 +881,45 @@ export default function PurchaseRequisitions() {
           { value: 'true', label: 'Emergency only' },
           { value: 'false', label: 'Routine only' },
         ],
-        accessor: (pr) => String(Boolean(pr.isEmergency)),
       },
-      { key: 'procurementModeName', label: 'All modes' },
     ],
     accessors: {
       totalAmount: (pr) => Number(pr.totalAmount ?? 0),
       status: (pr) => PR_STATUS_LABELS[pr.status] ?? pr.status,
     },
   })
-  const { pageRows, paginationProps } = table
+  const { pageRows, paginationProps, refresh, loading } = table
+
+  // Item 12: long workflow forms render as full pages, not as modals over the
+  // list. The short reason modal (return) and the read-only detail stay as
+  // modals — the detail's story-view rework belongs to Item 22.
+  if (creating) {
+    return (
+      <DashboardPage>
+        <PrFormModal onClose={() => setCreating(false)} onSaved={refresh} />
+      </DashboardPage>
+    )
+  }
+
+  if (editing) {
+    return (
+      <DashboardPage>
+        <PrFormModal existing={editing} onClose={() => setEditing(null)} onSaved={refresh} />
+      </DashboardPage>
+    )
+  }
+
+  if (determiningMode) {
+    return (
+      <DashboardPage>
+        <ModeDeterminationModal
+          pr={determiningMode}
+          onClose={() => setDeterminingMode(null)}
+          onConfirm={(payload) => runTransition(determiningMode, 'determineMode', payload)}
+        />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
@@ -867,7 +936,7 @@ export default function PurchaseRequisitions() {
       />
 
       <Card bodyClassName="p-4">
-        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search PR number, project or fund…" />
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search PR number or purpose…" />
       </Card>
 
       {actionError && (
@@ -879,11 +948,14 @@ export default function PurchaseRequisitions() {
       <Card title="Requisitions" icon={FileText} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading requisitions...</p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] text-danger">Could not load requisitions.</p>
+            <Button className="mt-3" size="sm" variant="secondary" onClick={refresh}>Try again</Button>
+          </div>
         ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'No requisitions yet.'
-              : 'No requisitions match your search or filters.'}
+            {table.isDirty ? 'No requisitions match your search or filters.' : 'No requisitions yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -891,7 +963,7 @@ export default function PurchaseRequisitions() {
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('prNumber')}>PR Number</SortableTh>
-                  <SortableTh {...table.sortProps('appEntryTitle')}>APP Entry</SortableTh>
+                  <Th><span title="Annual Procurement Plan (APP) entry">APP Entry</span></Th>
                   <SortableTh {...table.sortProps('totalAmount')}>Total</SortableTh>
                   <SortableTh {...table.sortProps('dateRequired')}>Required</SortableTh>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
@@ -954,9 +1026,10 @@ export default function PurchaseRequisitions() {
                       <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">{pr.dateRequired}</td>
                       <td className="px-4 py-3">
                         <Badge tone={PR_STATUS_TONES[pr.status]}>{PR_STATUS_LABELS[pr.status]}</Badge>
+                        <NextInline next={prNext(pr)} />
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex w-max items-center gap-2">
                           {/* First, and available to everyone who can see the
                               row: reading a requisition is not an action on it. */}
                           <button
@@ -1011,20 +1084,11 @@ export default function PurchaseRequisitions() {
 
       {viewing && <RequisitionDetail pr={viewing} onClose={() => setViewing(null)} />}
 
-      {creating && <PrFormModal onClose={() => setCreating(false)} onSaved={refresh} />}
-      {editing && <PrFormModal existing={editing} onClose={() => setEditing(null)} onSaved={refresh} />}
       {returning && (
         <ReturnModal
           pr={returning}
           onClose={() => setReturning(null)}
           onConfirm={(remarks) => runTransition(returning, 'return', { remarks })}
-        />
-      )}
-      {determiningMode && (
-        <ModeDeterminationModal
-          pr={determiningMode}
-          onClose={() => setDeterminingMode(null)}
-          onConfirm={(payload) => runTransition(determiningMode, 'determineMode', payload)}
         />
       )}
     </DashboardPage>

@@ -6,14 +6,17 @@ import { AuthContext } from './auth-context'
 import { apiClient } from '../api/client'
 
 const EXPIRED_MESSAGE = 'Your session has expired after 30 minutes. Please log in again.'
+const EXPIRY_WARNING_MS = 2 * 60 * 1000
 
 export function AuthProvider({ children }) {
   const [user, setUserState] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [authNotice, setAuthNotice] = useState('')
+  const [sessionWarning, setSessionWarning] = useState(false)
   const current = useRef(null)
   const generation = useRef(0)
   const logoutPending = useRef(null)
+  const warningAcknowledgedFor = useRef(null)
   const navigate = useNavigate()
 
   const setUser = useCallback((value) => {
@@ -29,6 +32,7 @@ export function AuthProvider({ children }) {
     generation.current += 1
     advanceAuthEpoch()
     setUser(null)
+    setSessionWarning(false)
     setAuthNotice(message)
     if (broadcast) {
       try { localStorage.setItem('auth.signedOut', JSON.stringify({ at: Date.now(), message })) } catch { /* storage unavailable */ }
@@ -96,7 +100,20 @@ export function AuthProvider({ children }) {
     const checkDeadline = () => {
       const active = current.current
       if (active && (Date.now() >= active.sessionDeadline ||
-        performance.now() >= active.sessionMonotonicDeadline)) expireSession()
+        performance.now() >= active.sessionMonotonicDeadline)) {
+        expireSession()
+        return
+      }
+      // This warning is presentation only.  The deadline remains signed in the
+      // server session and the button below rechecks it with /auth/me; neither
+      // a browser clock nor a modal can prolong a 30-minute authenticated run.
+      if (active) {
+        const deadlineKey = active.loginSessionExpiresAt
+        setSessionWarning(
+          active.sessionDeadline - Date.now() <= EXPIRY_WARNING_MS &&
+          warningAcknowledgedFor.current !== deadlineKey
+        )
+      }
     }
     const revalidate = async () => {
       checkDeadline()
@@ -162,7 +179,7 @@ export function AuthProvider({ children }) {
       return Promise.reject(error)
     })
     return () => apiClient.interceptors.response.eject(interceptor)
-  }, [user])
+  }, [user, setUser])
 
   const login = useCallback(async (email, password) => {
     await logoutPending.current?.catch(() => {})
@@ -188,8 +205,28 @@ export function AuthProvider({ children }) {
     } finally { logoutPending.current = null }
   }, [clearSession])
 
+  const continueSession = useCallback(async () => {
+    // A visible warning must not offer a fake extension.  This confirms with
+    // the authoritative session endpoint that the current session is still
+    // valid and refreshes the clock correction returned by the server.
+    try {
+      const result = await authApi.fetchCurrentUser()
+      setUser(result)
+      warningAcknowledgedFor.current = result.loginSessionExpiresAt
+      setSessionWarning(false)
+      return true
+    } catch {
+      return false
+    }
+  }, [setUser])
+
+  const dismissSessionWarning = useCallback(() => {
+    warningAcknowledgedFor.current = current.current?.loginSessionExpiresAt ?? null
+    setSessionWarning(false)
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ user, setUser, isLoading, authNotice, login, logout }}>
+    <AuthContext.Provider value={{ user, setUser, isLoading, authNotice, sessionWarning, continueSession, dismissSessionWarning, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

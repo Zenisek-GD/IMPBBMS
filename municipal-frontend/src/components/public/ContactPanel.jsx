@@ -20,13 +20,13 @@ import { MESSAGE_CATEGORIES, sendPublicMessage } from '../../api/messages'
 //     the difference between routing and disappearing.
 
 const inputClass =
-  'w-full rounded-md border border-border-muted bg-surface px-3.5 py-2.5 text-[13.5px] text-navy transition-colors placeholder:text-text-faint focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none'
+  'w-full rounded-md border border-border-strong bg-surface px-3.5 py-2.5 text-[13.5px] text-navy transition-colors placeholder:text-text-secondary focus:border-accent focus:ring-2 focus:ring-accent/15 focus:outline-none'
 
 const Field = ({ label, hint, children }) => (
   <div>
-    <label className="mb-1.5 block text-[12.5px] font-medium text-text-secondary">{label}</label>
+    <label className="mb-1.5 block text-[12.5px] font-medium text-navy">{label}</label>
     {children}
-    {hint && <p className="mt-1.5 text-[12px] leading-relaxed text-text-faint">{hint}</p>}
+    {hint && <p className="mt-1.5 text-[12px] leading-relaxed text-navy">{hint}</p>}
   </div>
 )
 
@@ -69,7 +69,7 @@ export default function ContactPanel() {
       <div className="mt-8 flex flex-col items-start gap-3 rounded-xl border border-success/25 bg-success/10 p-6">
         <CheckCircle2 size={24} className="text-success" />
         <p className="text-[15px] font-semibold text-navy">Message sent</p>
-        <p className="max-w-2xl text-[13.5px] leading-relaxed text-text-secondary">{sent}</p>
+        <p className="max-w-2xl text-[13.5px] leading-relaxed text-navy">{sent}</p>
         <button
           type="button"
           onClick={() => {
@@ -86,7 +86,7 @@ export default function ContactPanel() {
 
   return (
     <div className="mt-8 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-      <form onSubmit={submit} className="rounded-xl border border-border-muted bg-surface p-6 shadow-sm">
+      <form onSubmit={submit} className="rounded-xl border border-border-strong bg-surface p-6 shadow-sm">
         <div className="flex flex-col gap-5">
           <Field label="What is this about?" hint={chosen?.hint}>
             <select value={form.category} onChange={set('category')} className={inputClass}>
@@ -177,7 +177,7 @@ export default function ContactPanel() {
           )}
 
           <div className="flex items-center justify-between gap-4">
-            <p className="text-[12px] leading-relaxed text-text-faint">
+            <p className="text-[12px] leading-relaxed text-navy">
               Leaving your email is optional. Without one there is no way to reply to you.
             </p>
             <button
@@ -193,23 +193,19 @@ export default function ContactPanel() {
       </form>
 
       <aside className="flex flex-col gap-4">
-        <section className="rounded-xl border border-border-muted bg-surface p-5 shadow-sm">
+        <section className="rounded-xl border border-border-strong bg-surface p-5 shadow-sm">
           <span className="flex size-9 items-center justify-center rounded-lg bg-info-soft text-info">
             <ShieldQuestion size={17} />
           </span>
           <h3 className="mt-3.5 text-[15px] font-semibold text-navy">Where your message goes</h3>
-          <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-secondary">
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-navy">
             Messages are routed by subject to the office responsible for it, and appear in that
             officer&rsquo;s queue inside the system. They are not published on this site.
           </p>
-        </section>
-
-        <section className="rounded-xl border border-border-muted bg-surface p-5 shadow-sm">
-          <h3 className="text-[15px] font-semibold text-navy">This is not a formal protest</h3>
-          <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-secondary">
-            A bidder challenging a decision of the Bids and Awards Committee must file a request for
-            reconsideration, and then a protest, under RA 12009 Sec. 83–85 — with the prescribed fee
-            and sworn certifications. That is done through your bidder account, not here.
+          <p className="mt-3 border-t border-border-muted pt-3 text-[12.5px] leading-relaxed text-navy">
+            <span className="font-medium text-navy">Not a formal protest.</span> Challenging a BAC
+            decision requires a request for reconsideration, then a protest, under RA 12009 Sec.
+            83–85 — with fee and sworn certifications, filed through your bidder account, not here.
           </p>
         </section>
       </aside>

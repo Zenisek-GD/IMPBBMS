@@ -14,6 +14,8 @@ import {
   FileCheck2,
   SlidersHorizontal,
   ChevronDown,
+  Plus,
+  Minus,
   ShieldCheck,
 } from 'lucide-react'
 import * as publicApi from '../../api/publicProjects'
@@ -63,18 +65,21 @@ const CATEGORY_STYLES = {
     label: 'Completed',
     chip: 'bg-chip text-success',
     band: 'border-success/20 bg-chip text-success',
+    text: 'text-success',
     icon: CheckCircle2,
   },
   ongoing: {
     label: 'Ongoing',
     chip: 'bg-warning/10 text-warning',
     band: 'border-warning/25 bg-warning/10 text-warning',
+    text: 'text-warning',
     icon: Loader2,
   },
   upcoming: {
     label: 'Upcoming',
-    chip: 'bg-sidebar text-text-secondary',
-    band: 'border-border-muted bg-sidebar text-text-secondary',
+    chip: 'bg-sidebar text-navy',
+    band: 'border-border-muted bg-sidebar text-navy',
+    text: 'text-navy',
     icon: CalendarClock,
   },
 }
@@ -86,6 +91,73 @@ const TABS = [
   { key: 'upcoming', label: 'Upcoming' },
 ]
 
+const SORT_OPTIONS = [
+  { key: 'newest', label: 'Newest first' },
+  { key: 'budget', label: 'Largest budget' },
+  { key: 'title', label: 'Title A–Z' },
+]
+
+// Home spotlight: one open call + one recent award surfaced from data the page
+// already holds, so the front page answers "what can I bid on" and "what was
+// just awarded" without an extra fetch or a click into Announcements.
+function HomeSpotlight({ projects, announcements }) {
+  const openCall =
+    (announcements ?? []).find(
+      (entry) => entry?.source === 'solicitation' && entry?.closingInDays !== null && entry.closingInDays >= 0
+    ) ??
+    (announcements ?? []).find((entry) => entry?.source === 'solicitation') ??
+    null
+  const recentAward = (projects ?? []).find((project) => project?.awardedTo) ?? null
+
+  if (!openCall && !recentAward) return null
+
+  return (
+    <section aria-label="Highlights" className="mt-4 grid gap-4 md:grid-cols-2">
+      {openCall && (
+        <Link
+          to={openCall.projectId ? `/projects/${openCall.projectId}` : '/?view=announcements'}
+          className="group rounded-xl border border-border-strong bg-surface p-5 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md"
+        >
+          <p className="text-[11px] font-medium tracking-[0.06em] text-success uppercase">
+            Open bidding now
+          </p>
+          <h3 className="mt-2 line-clamp-2 text-[15px] font-semibold text-navy group-hover:underline">
+            {openCall.title}
+          </h3>
+          <p className="mt-1 text-[12.5px] text-navy">
+            {openCall.implementingUnit ? `${openCall.implementingUnit} • ` : ''}
+            {openCall.referenceNo ?? ''}
+          </p>
+          <p className="tabular-nums mt-2 text-[13px] font-medium text-navy">
+            {openCall.closingInDays !== null && openCall.closingInDays >= 0
+              ? `Closes in ${openCall.closingInDays}d • ${openCall.closingDate ? new Date(openCall.closingDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}`
+              : 'See announcement for deadline'}
+          </p>
+        </Link>
+      )}
+      {recentAward && (
+        <Link
+          to={`/projects/${recentAward.id}`}
+          className="group rounded-xl border border-border-strong bg-surface p-5 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md"
+        >
+          <p className="text-[11px] font-medium tracking-[0.06em] text-navy uppercase">
+            Recently awarded
+          </p>
+          <h3 className="mt-2 line-clamp-2 text-[15px] font-semibold text-navy group-hover:underline">
+            {recentAward.projectTitle}
+          </h3>
+          <p className="mt-1 text-[12.5px] text-navy">
+            {recentAward.awardedTo ?? ''}
+          </p>
+          <p className="tabular-nums mt-2 text-[13px] font-medium text-navy">
+            {compactPeso(recentAward.financials?.contractAmount ?? recentAward.financials?.budget)}
+          </p>
+        </Link>
+      )}
+    </section>
+  )
+}
+
 // ── The search field ────────────────────────────────────────────────────────
 // Promoted out of the filter card and into the masthead. On a transparency
 // portal the visitor almost always arrives with a specific thing in mind — a
@@ -94,26 +166,50 @@ const TABS = [
 // time: the masthead on the front page, the toolbar once a section is chosen.
 // `bare` drops the border and shadow for use inside the masthead's combined
 // control bar, where the bar itself already provides them.
-function SearchField({ value, onChange, className = '', bare = false }) {
+function SearchField({ value, onChange, className = '', bare = false, id = 'portal-search' }) {
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative ${className}`} role="search">
+      <label htmlFor={id} className="sr-only">
+        Search procurement records by reference, title, office, or barangay
+      </label>
       <Search
         size={16}
-        className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-text-faint"
+        className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-navy"
       />
       <input
+        id={id}
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Search by reference or project title"
-        aria-label="Search projects"
-        className={`w-full py-2.5 pr-4 pl-10 text-[14px] text-navy transition-colors placeholder:text-text-faint focus:outline-none ${
+        placeholder="Search by reference, title, office, or barangay"
+        aria-label="Search procurement records by reference, title, office, or barangay"
+        className={`w-full py-2.5 pr-4 pl-10 text-[14px] text-navy transition-colors placeholder:text-text-secondary focus:outline-none ${
           bare
-            ? 'rounded-full bg-transparent focus:ring-2 focus:ring-accent/15'
-            : 'rounded-full border border-border-muted bg-surface shadow-sm focus:border-accent focus:ring-2 focus:ring-accent/15'
+            ? 'rounded-md bg-transparent focus:ring-2 focus:ring-accent/15'
+            : 'rounded-md border border-border-strong bg-surface shadow-sm focus:border-accent focus:ring-2 focus:ring-accent/15'
         }`}
       />
     </div>
+  )
+}
+
+// Highlights the matched substring in card titles so a search result explains
+// why it matched. Case-insensitive, and bails out when there is no query.
+function Highlighted({ text, query }) {
+  if (!text || !query) return <>{text}</>
+  const needle = query.trim().toLowerCase()
+  if (!needle) return <>{text}</>
+  const haystack = String(text)
+  const index = haystack.toLowerCase().indexOf(needle)
+  if (index === -1) return <>{text}</>
+  return (
+    <>
+      {haystack.slice(0, index)}
+      <mark className="rounded-sm bg-warning/20 px-0.5 text-inherit">
+        {haystack.slice(index, index + needle.length)}
+      </mark>
+      {haystack.slice(index + needle.length)}
+    </>
   )
 }
 
@@ -137,13 +233,13 @@ function LedgerStrip({ overview, savings, releaseRate }) {
       key: 'completed',
       label: 'Completed',
       value: overview?.completed ?? 0,
-      className: 'bg-accent/50',
+      className: 'bg-eco',
     },
     {
       key: 'upcoming',
       label: 'Upcoming',
       value: overview?.upcoming ?? 0,
-      className: 'bg-border-strong',
+      className: 'bg-text-faint',
     },
   ]
 
@@ -176,7 +272,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
   return (
     <section
       aria-label="Key figures"
-      className="overflow-hidden rounded-xl border border-border-muted bg-border-muted shadow-sm"
+      className="overflow-hidden rounded-xl border border-border-strong bg-border-strong shadow-sm"
     >
       {/* Hairlines come from a 1px grid gap showing the container colour
           through, rather than `divide-*`. Divide utilities follow document
@@ -188,20 +284,24 @@ function LedgerStrip({ overview, savings, releaseRate }) {
           fold on a laptop and missing it. */}
       <div className="grid grid-cols-2 gap-px lg:grid-cols-4">
         <div className="bg-surface p-4 sm:p-5">
-          <p className="text-[11px] font-medium tracking-[0.08em] text-text-faint uppercase">
+          <p className="text-[12px] font-medium tracking-[0.06em] text-navy uppercase">
             On the public record
           </p>
 
           <p className="tabular-nums mt-2.5 text-[26px] leading-none font-semibold tracking-[-0.025em] text-navy">
             {overview ? total : '—'}
-            <span className="ml-1.5 text-[13px] font-normal tracking-normal text-text-secondary">
+            <span className="ml-1.5 text-[13px] font-normal tracking-normal text-navy">
               {total === 1 ? 'project' : 'projects'}
             </span>
           </p>
 
           {/* Three real segments summing to the figure above. Kept from the old
               tile — it is the one piece of that card that earned its space. */}
-          <div className="mt-3.5 flex h-1.5 overflow-hidden rounded-full bg-track">
+          <div
+            className="mt-3.5 flex h-1.5 overflow-hidden rounded-full bg-track"
+            role="img"
+            aria-label={`${overview?.ongoing ?? 0} ongoing, ${overview?.completed ?? 0} completed, ${overview?.upcoming ?? 0} upcoming`}
+          >
             {total > 0 &&
               segments.map((s) => (
                 <span
@@ -212,15 +312,14 @@ function LedgerStrip({ overview, savings, releaseRate }) {
               ))}
           </div>
 
-          {/* Hidden on a phone: the filter pills a few hundred pixels below
-              carry these same three counts, and on the narrowest screen the
-              legend wraps to three lines to repeat them. The bar keeps the
-              proportion visible without the words. */}
-          <ul className="mt-2.5 hidden flex-wrap items-center gap-x-3.5 gap-y-1 sm:flex">
+          {/* Always visible now: on mobile the filter pills sit far below, so
+              hiding the legend left the bar unexplained. Wraps to two lines
+              at most on narrow screens. */}
+          <ul className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1">
             {segments.map((s) => (
               <li
                 key={s.key}
-                className="flex items-center gap-1.5 text-[11.5px] text-text-secondary"
+                className="flex items-center gap-1.5 text-[12px] text-navy"
               >
                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.className}`} />
                 {s.label}
@@ -232,7 +331,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
 
         {cells.map((cell) => (
           <div key={cell.label} className="flex flex-col bg-surface p-4 sm:p-5">
-            <p className="text-[11px] font-medium tracking-[0.08em] text-text-faint uppercase">
+            <p className="text-[12px] font-medium tracking-[0.06em] text-navy uppercase">
               {cell.label}
             </p>
 
@@ -247,14 +346,28 @@ function LedgerStrip({ overview, savings, releaseRate }) {
               </p>
             )}
 
-            {/* The qualifying note is what makes a figure quotable rather than
-                just large. It is the first thing to go on a phone, where it
-                would otherwise cost more height than the figure it explains. */}
-            <p className="mt-auto hidden pt-3 text-[12px] leading-snug text-text-faint sm:block">
+            {/* Qualifying note is what makes a figure quotable rather than just
+                large. Always rendered now — on mobile it clamps to two lines
+                instead of vanishing, so numbers never appear unqualified. */}
+            <p className="mt-auto line-clamp-2 pt-2 text-[12px] leading-snug text-navy sm:pt-3">
               {cell.note}
             </p>
           </div>
         ))}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border-strong bg-surface px-4 py-2.5 sm:px-5">
+        <p className="text-[12px] text-navy">
+          Live from published plans, awards and payments
+        </p>
+        <details className="text-[12px] text-navy">
+          <summary className="cursor-pointer font-medium text-navy underline-offset-2 hover:underline">
+            How figures are computed
+          </summary>
+          <p className="mt-1 max-w-xl leading-relaxed">
+            Savings compare contracted value against the budget of awarded projects only.
+            Release rate is disbursed over contracted. Only approved and published records are counted.
+          </p>
+        </details>
       </div>
     </section>
   )
@@ -296,22 +409,60 @@ function AboutPanel({ overview }) {
     },
   ]
 
+  const steps = [
+    { n: '1', title: 'Visit the BAC Secretariat', body: 'Bring eligibility and accreditation documents in person during office hours.' },
+    { n: '2', title: 'BAC verifies eligibility', body: 'The Secretariat checks each requirement; the BAC determines eligibility.' },
+    { n: '3', title: 'Receive your bidder account', body: 'Admin/IT issues the account. Watch Announcements for open opportunities.' },
+  ]
+
   return (
     <div className="mt-8 flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-2">
         {items.map((item) => (
           <section
             key={item.title}
-            className="rounded-xl border border-border-muted bg-surface p-5 shadow-sm"
+            className="rounded-xl border border-border-strong bg-surface p-5 shadow-sm"
           >
             <span className="flex size-9 items-center justify-center rounded-lg bg-info-soft text-info">
               <item.icon size={17} />
             </span>
             <h3 className="mt-3.5 text-[15px] font-semibold text-navy">{item.title}</h3>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-secondary">{item.body}</p>
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-navy">{item.body}</p>
           </section>
         ))}
       </div>
+
+      {/* Three-step bidder journey: the most-asked citizen task, visualised so
+          nobody has to infer the process from a paragraph. Anchored for direct
+          links from the masthead CTAs. */}
+      <section
+        id="bidder"
+        aria-label="How to become a bidder in three steps"
+        className="scroll-mt-24 rounded-xl border border-border-strong bg-surface p-5 shadow-sm"
+      >
+        <h3 className="text-[15px] font-semibold text-navy">How to become a bidder in 3 steps</h3>
+        <p className="mt-1 text-[13px] text-navy">
+          There is no online sign-up. Accreditation happens at the counter.
+        </p>
+        <ol className="mt-4 grid gap-3 sm:grid-cols-3">
+          {steps.map((step) => (
+            <li key={step.n} className="rounded-lg bg-sidebar p-4">
+              <p className="flex size-7 items-center justify-center rounded-full bg-accent text-[13px] font-semibold text-accent-fg">
+                {step.n}
+              </p>
+              <p className="mt-2.5 text-[13.5px] font-semibold text-navy">{step.title}</p>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-navy">{step.body}</p>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-3 text-[12.5px] text-navy">
+          Bring questions to the BAC Secretariat office in person. Check{' '}
+          <Link to="/?view=announcements" className="font-medium text-navy underline underline-offset-2">
+            Announcements
+          </Link>{' '}
+          for calls that are open now.
+        </p>
+      </section>
 
       {/* Contact used to be its own nav section, which put "write to us" at the
           same rank as "here is the record" — and asked for a message before the
@@ -320,10 +471,10 @@ function AboutPanel({ overview }) {
           withheld and why, and then you are given somewhere to say it is wrong. */}
       <section
         id="contact"
-        className="scroll-mt-24 rounded-xl border border-border-muted bg-surface p-5 shadow-sm"
+        className="scroll-mt-24 rounded-xl border border-border-strong bg-surface p-5 shadow-sm"
       >
         <h3 className="text-[15px] font-semibold text-navy">Found something wrong?</h3>
-        <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-text-secondary">
+        <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-navy">
           If a figure here does not match a document you hold, or a project is missing, tell the
           municipality. Reports are routed to the office responsible for the record concerned.
         </p>
@@ -333,11 +484,115 @@ function AboutPanel({ overview }) {
       </section>
 
       {overview?.lgu?.name && (
-        <p className="text-[12.5px] text-text-faint">
+        <p className="text-[12.5px] text-navy">
           Published by {overview.lgu.name} under RA 12009 and its Implementing Rules and Regulations.
         </p>
       )}
     </div>
+  )
+}
+
+function RecordViewSwitch({ view, onChange }) {
+  const optionClass = (key) =>
+    `min-h-9 px-3 text-[12px] font-medium transition-colors focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+      view === key ? 'bg-surface text-navy shadow-sm' : 'text-text-secondary hover:text-navy'
+    }`
+
+  return (
+    <div className="flex items-center gap-2" role="group" aria-label="Choose record layout">
+      <span className="text-[12px] font-medium text-text-secondary">View</span>
+      <div className="flex overflow-hidden rounded-md border border-border-muted bg-sidebar">
+        <button type="button" aria-pressed={view === 'grid'} onClick={() => onChange('grid')} className={optionClass('grid')}>
+          Cards
+        </button>
+        <button type="button" aria-pressed={view === 'table'} onClick={() => onChange('table')} className={`border-l border-border-muted ${optionClass('table')}`}>
+          Table
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// The landing page answers the questions that decide whether a citizen needs
+// to search records, read the full portal guide, or visit the BAC Secretariat.
+// Native <details> keeps this compact on a phone and fully usable by keyboard
+// without adding a second state machine to a public page.
+function LandingFaq() {
+  const [openQuestion, setOpenQuestion] = useState(0)
+  const items = [
+    {
+      question: 'What records can I find here?',
+      answer: 'Search approved procurement plans, advertised opportunities, awarded contracts, deliveries and payments. Use Projects for the full public record and Announcements for current notices.',
+    },
+    {
+      question: 'Why can’t I see every bid or draft?',
+      answer: 'Drafts, internal remarks and bids under evaluation are withheld. Publishing them early could expose a competitor’s submission or present a proposal as an official decision.',
+    },
+    {
+      question: 'How does a supplier become a bidder?',
+      answer: 'Bring eligibility and accreditation requirements to the BAC Secretariat in person. The BAC verifies eligibility, then Admin/IT issues an account. There is no online sign-up.',
+    },
+    {
+      question: 'What if a published record looks wrong or incomplete?',
+      answer: 'Use the report form in About this portal. Your message is routed to the office responsible for the record so it can be reviewed through the official process.',
+    },
+  ]
+
+  return (
+    <section aria-labelledby="landing-faq-title" className="mt-6 overflow-hidden rounded-xl border border-border-strong bg-surface shadow-sm">
+      <div className="grid md:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)]">
+        <div className="flex min-h-80 flex-col border-b border-border-muted px-6 py-7 sm:px-8 sm:py-8 md:border-r md:border-b-0">
+          <div>
+            <h2 id="landing-faq-title" className="max-w-xs text-[25px] leading-[1.08] font-semibold tracking-[-0.03em] text-navy sm:text-[29px]">
+              Frequently asked questions
+            </h2>
+            <p className="mt-3 max-w-xs text-[13px] leading-relaxed text-text-secondary">
+              Clear answers before you search a public procurement record, visit the BAC Secretariat, or report a concern.
+            </p>
+          </div>
+
+          <div className="mt-auto pt-8">
+            <p className="text-[13px] font-semibold text-navy">Still have a question?</p>
+            <p className="mt-1 max-w-xs text-[12px] leading-relaxed text-text-secondary">
+              Tell the municipality if a published record looks incomplete or incorrect.
+            </p>
+            <Link
+              to="/?view=about#contact"
+              className="mt-4 inline-flex h-11 items-center gap-1.5 rounded-md bg-accent px-4 text-[13px] font-medium text-accent-fg transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              Report a concern <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          </div>
+        </div>
+
+        <div className="px-5 py-3 sm:px-7 sm:py-5">
+          {items.map((item, index) => {
+            const open = openQuestion === index
+            const Icon = open ? Minus : Plus
+            return (
+              <div key={item.question} className="border-b border-border-muted last:border-b-0">
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  aria-controls={`landing-faq-answer-${index}`}
+                  onClick={() => setOpenQuestion((current) => (current === index ? null : index))}
+                  className="flex min-h-14 w-full items-center gap-4 py-3 text-left focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+                >
+                  <span className="w-6 shrink-0 tabular-nums text-[11.5px] text-text-secondary">{String(index + 1).padStart(2, '0')}</span>
+                  <span className="flex-1 text-[13.5px] font-medium text-navy">{item.question}</span>
+                  <Icon size={16} className="shrink-0 text-navy" aria-hidden="true" />
+                </button>
+                {open && (
+                  <div id={`landing-faq-answer-${index}`} className="pb-4 pl-10 pr-8">
+                    <p className="max-w-2xl text-[12.5px] leading-relaxed text-text-secondary">{item.answer}</p>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -386,10 +641,10 @@ const OFFICIAL_GROUPS = [
 function OfficialsPanel({ officials, failed }) {
   if (failed) {
     return (
-      <div className="mt-8 flex flex-col items-center gap-2 rounded-xl border border-border-muted bg-surface px-4 py-16 text-center">
-        <FileWarning size={22} className="text-text-faint" />
+      <div className="mt-8 flex flex-col items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-16 text-center">
+        <FileWarning size={22} className="text-navy" />
         <p className="text-[15px] font-medium text-navy">The directory could not be loaded</p>
-        <p className="max-w-md text-[13.5px] text-text-secondary">
+        <p className="max-w-md text-[13.5px] text-navy">
           The transparency service is not responding. Please try again shortly.
         </p>
       </div>
@@ -414,26 +669,53 @@ function OfficialsPanel({ officials, failed }) {
     members: officials.filter((official) => group.roles.includes(official.roleKey)),
   })).filter((group) => group.members.length > 0)
 
+  const initials = (name) =>
+    String(name ?? '')
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || '•'
+
+  const scrollToContact = (event) => {
+    event.preventDefault()
+    window.location.hash = ''
+    // About view renders ContactPanel; navigate there first when needed, then
+    // scroll once it exists. Same-page case scrolls immediately.
+    const target = document.getElementById('contact')
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } else {
+      window.location.href = '/?view=about#contact'
+    }
+  }
+
   return (
     <div className="mt-8 flex flex-col gap-4">
       <div className="grid gap-4 md:grid-cols-2">
         {groups.map((group) => (
           <section
             key={group.key}
-            className="flex flex-col rounded-xl border border-border-muted bg-surface p-5 shadow-sm"
+            className="flex flex-col rounded-xl border border-border-strong bg-surface p-5 shadow-sm"
           >
             <h3 className="text-[15px] font-semibold text-navy">{group.heading}</h3>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-text-secondary">{group.blurb}</p>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-navy">{group.blurb}</p>
 
             <ul className="mt-4 flex flex-col divide-y divide-border-muted border-t border-border-muted">
               {group.members.map((official) => (
-                <li key={official.id} className="flex items-baseline gap-3 py-2.5">
+                <li key={official.id} className="flex items-center gap-3 py-2.5">
+                  <span
+                    aria-hidden="true"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full bg-navy-tint text-[12px] font-semibold text-navy"
+                  >
+                    {initials(official.name)}
+                  </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13.5px] font-medium text-navy">{official.name}</p>
-                    <p className="truncate text-[12px] text-text-secondary">{official.roleName}</p>
+                    <p className="truncate text-[12px] text-navy">{official.roleName}</p>
                   </div>
                   {official.officeCode && (
-                    <span className="shrink-0 rounded-full border border-border-muted px-2 py-0.5 font-mono text-[10.5px] text-text-faint">
+                    <span className="shrink-0 rounded-full border border-border-muted px-2 py-0.5 font-mono text-[10.5px] text-navy">
                       {official.officeCode}
                     </span>
                   )}
@@ -444,19 +726,23 @@ function OfficialsPanel({ officials, failed }) {
         ))}
       </div>
 
-      <p className="text-[12.5px] leading-relaxed text-text-faint">
+      <p className="text-[12.5px] leading-relaxed text-navy">
         Positions currently filled, as recorded in this system. Contact details are not published —
         to write to the municipality, use the form under{' '}
-        <Link to="/?view=about#contact" className="text-navy underline underline-offset-2">
+        <a
+          href="/?view=about#contact"
+          onClick={scrollToContact}
+          className="font-medium text-navy underline underline-offset-2"
+        >
           About
-        </Link>
+        </a>
         .
       </p>
     </div>
   )
 }
 
-function ProjectCard({ project }) {
+function ProjectCard({ project, query = '' }) {
   const style = CATEGORY_STYLES[project.category] ?? CATEGORY_STYLES.upcoming
   const { financials } = project
 
@@ -478,108 +764,172 @@ function ProjectCard({ project }) {
   return (
     <Link
       to={`/projects/${project.id}`}
-      className="group flex flex-col overflow-hidden rounded-xl border border-border-muted bg-surface shadow-sm transition-colors duration-150 hover:border-border-strong focus:border-accent focus:ring-2 focus:ring-accent/20 focus:outline-none"
+      aria-label={`${project.projectTitle} — view project record`}
+      className="group flex flex-col overflow-hidden rounded-xl border border-border-strong bg-surface shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md focus:border-accent focus:ring-2 focus:ring-accent/20 focus:outline-none"
     >
-      {/* Status band across the head of the card, per the wireframe. It carries
-          the stage count in words — "3 of 8 steps done" — which is the wireframe's
-          own idea and a better one than the percentage this used to show. */}
+      {/* Status band across the head of the card. Carries the stage count in
+          words — "3 of 8 steps" — which says more than a percentage bar could.
+          The segmented rail below was removed: it duplicated this same count
+          on every card. */}
       <div
-        className={`flex items-center gap-1.5 border-b px-4 py-2 text-[11.5px] font-medium ${style.band}`}
+        className={`flex items-center gap-1.5 border-b px-4 py-2 text-[12px] font-medium ${style.band}`}
       >
-        <style.icon size={13} className="shrink-0" />
+        <style.icon size={13} className="shrink-0" aria-hidden="true" />
         <span>{style.label}</span>
-        <span className="opacity-60">—</span>
+        <span aria-hidden="true" className="text-current opacity-50">
+          •
+        </span>
         <span className="tabular-nums">
-          {stage} of {LIFECYCLE_STAGE_COUNT} steps done
+          {stage} of {LIFECYCLE_STAGE_COUNT} steps
         </span>
       </div>
 
       <div className="flex flex-1 flex-col p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            {/* The wireframe sets the reference code in its own blue. This uses
-                the system's existing accent — the layout idea worth taking is
-                "the code is a distinct, scannable identifier at the top of the
-                card", not the colour it was drawn in. */}
             {project.referenceNo && (
-              <p className="truncate font-mono text-[11.5px] font-medium text-accent">
-                {project.referenceNo}
+              <p className="truncate font-mono text-[12px] font-medium text-accent">
+                <Highlighted text={project.referenceNo} query={query} />
               </p>
             )}
 
-            <h3 className="mt-1.5 text-[15px] leading-snug font-semibold tracking-[-0.01em] text-navy decoration-1 underline-offset-2 group-hover:underline">
-              {project.projectTitle}
+            <h3 className="mt-1.5 line-clamp-2 text-[15px] leading-snug font-semibold tracking-[-0.01em] text-navy decoration-1 underline-offset-2 group-hover:underline">
+              <Highlighted text={project.projectTitle} query={query} />
             </h3>
 
-            <p className="mt-1 truncate text-[12.5px] text-text-secondary">
+            <p className="mt-1 line-clamp-2 text-[12.5px] text-navy">
               {project.implementingUnit}
             </p>
           </div>
 
-          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border-muted text-text-faint transition-colors group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg">
-            <ArrowRight size={14} />
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border-muted text-navy transition-colors group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg">
+            <ArrowRight size={14} aria-hidden="true" />
           </span>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="rounded-md bg-sidebar px-2 py-1 text-[11px] font-medium text-text-secondary">
+          <span className="rounded-md bg-sidebar px-2 py-1 text-[12px] font-medium text-navy">
             {project.procurementMode}
           </span>
           {project.implementingUnitCode && (
-            <span className="rounded-md border border-border-muted px-2 py-1 font-mono text-[10.5px] text-text-faint">
+            <span className="rounded-md border border-border-muted px-2 py-1 font-mono text-[10.5px] text-navy">
               {project.implementingUnitCode}
             </span>
           )}
-          <span className="text-[11px] tracking-[0.04em] text-text-faint uppercase">
+          <span className="text-[12px] tracking-[0.04em] text-navy uppercase">
             FY {project.fiscalYear}
           </span>
         </div>
 
-        {/* Amount over its label, as in the wireframe: the figure is what the
-            eye is looking for, and the label only qualifies it. */}
+        {/* Amount over its label: the figure is what the eye is looking for,
+            and the label only qualifies it. */}
         <div className="mt-auto flex items-end justify-between gap-3 pt-4">
           <div className="min-w-0">
             <p className="tabular-nums text-[17px] leading-none font-semibold tracking-[-0.015em] text-navy">
               {peso(headlineValue)}
             </p>
-            <p className="mt-1 text-[10.5px] tracking-[0.05em] text-text-faint uppercase">
+            <p className="mt-1 text-[12px] tracking-[0.05em] text-navy uppercase">
               {headlineLabel}
             </p>
           </div>
 
-          <div className="shrink-0 text-right">
+          <div className="max-w-[12rem] shrink-0 text-right">
             {project.awardedTo ? (
-              <p className="flex items-center justify-end gap-1 text-[11.5px] text-success">
-                <CheckCircle2 size={12} className="shrink-0" />
-                <span className="max-w-[9rem] truncate">{project.awardedTo}</span>
+              <p className="flex items-center justify-end gap-1 text-[12px] text-success">
+                <CheckCircle2 size={12} className="shrink-0" aria-hidden="true" />
+                <span className="line-clamp-2">{project.awardedTo}</span>
               </p>
             ) : (
-              <p className="tabular-nums text-[11.5px] text-text-faint">
+              <p className="tabular-nums text-[12px] text-navy">
                 {project.bidsReceived} bid{project.bidsReceived === 1 ? '' : 's'}
               </p>
             )}
             {isAwarded && financials.budget > financials.contractAmount && (
-              <p className="tabular-nums mt-1 text-[11px] text-text-faint">
+              <p className="tabular-nums mt-1 text-[12px] text-navy">
                 {compactPeso(financials.budget - financials.contractAmount)} below budget
               </p>
             )}
           </div>
         </div>
       </div>
-
-      {/* Progress rail on the bottom edge, as in the wireframe. Segmented rather
-          than continuous so it counts the stages named in the band above. */}
-      <div className="flex gap-px px-4 pb-4" aria-hidden="true">
-        {Array.from({ length: LIFECYCLE_STAGE_COUNT }, (_, index) => (
-          <span
-            key={index}
-            className={`h-1 flex-1 first:rounded-l-full last:rounded-r-full ${
-              index < stage ? 'bg-accent' : 'bg-track'
-            }`}
-          />
-        ))}
-      </div>
     </Link>
+  )
+}
+
+// A register view complements cards for residents who want to browse and
+// compare a handful of records, and for suppliers, auditors and researchers
+// who need to scan many official entries without opening each one. Both views
+// point at the same published record; this is a presentation choice only.
+function ProjectRecordsTable({ projects, query }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border-strong bg-surface">
+      <table className="w-full min-w-[860px] text-left">
+        <thead className="bg-sidebar">
+          <tr>
+            <th scope="col" className="sticky left-0 z-10 bg-sidebar px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Record</th>
+            <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Office</th>
+            <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Method / FY</th>
+            <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Public status</th>
+            <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Updated</th>
+            <th scope="col" className="px-4 py-3 text-right text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Amount</th>
+            <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase"><span className="sr-only">Open record</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {projects.map((project) => {
+            const style = CATEGORY_STYLES[project.category] ?? CATEGORY_STYLES.upcoming
+            const stage = Math.min(
+              LIFECYCLE_STAGE_COUNT,
+              Math.max(1, Math.round((project.progressPercent / 100) * LIFECYCLE_STAGE_COUNT))
+            )
+            const awarded = project.financials?.contractAmount !== null && project.financials?.contractAmount !== undefined
+            const amount = awarded ? project.financials.contractAmount : project.financials?.budget
+
+            return (
+              <tr key={project.id} className="group border-t border-border-muted align-top hover:bg-sidebar/60">
+                <td className="sticky left-0 z-[1] bg-surface px-4 py-3.5 group-hover:bg-sidebar">
+                  <Link to={`/projects/${project.id}`} className="block min-w-[18rem] focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40">
+                    {project.referenceNo && (
+                      <p className="font-mono text-[12px] font-medium text-accent">
+                        <Highlighted text={project.referenceNo} query={query} />
+                      </p>
+                    )}
+                    <p className="mt-1 line-clamp-2 text-[14px] font-semibold leading-snug text-navy hover:underline">
+                      <Highlighted text={project.projectTitle} query={query} />
+                    </p>
+                  </Link>
+                </td>
+                <td className="px-4 py-3.5 text-[13px] leading-relaxed text-text-secondary">{project.implementingUnit || 'Not specified'}</td>
+                <td className="px-4 py-3.5 text-[13px] text-text-secondary">
+                  <p>{project.procurementMode || 'Not specified'}</p>
+                  <p className="mt-1 text-[12px] text-text-faint">FY {project.fiscalYear || '—'}</p>
+                </td>
+                <td className="px-4 py-3.5 text-[13px]">
+                  <p className={`flex items-center gap-1.5 font-medium ${style.text}`}>
+                    <style.icon size={13} aria-hidden="true" /> {style.label}
+                  </p>
+                  <p className="mt-1 text-[12px] text-text-secondary">{stage} of {LIFECYCLE_STAGE_COUNT} procurement steps</p>
+                </td>
+                <td className="px-4 py-3.5 text-[13px] text-text-secondary whitespace-nowrap">
+                  {project.lastUpdatedAt
+                    ? new Date(project.lastUpdatedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+                    : 'Not available'}
+                </td>
+                <td className="tabular-nums px-4 py-3.5 text-right text-[14px] font-semibold whitespace-nowrap text-navy">
+                  {peso(amount)}
+                  <p className="mt-1 text-[12px] font-normal text-text-faint">{awarded ? 'Contract amount' : 'Approved budget'}</p>
+                </td>
+                <td className="px-4 py-3.5 text-right">
+                  <Link to={`/projects/${project.id}`} className="inline-flex min-h-11 items-center text-[13px] font-medium text-navy underline decoration-border-strong underline-offset-4 hover:decoration-accent focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40">
+                    View record
+                  </Link>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -627,12 +977,40 @@ export default function PublicTransparency() {
   const [search, setSearch] = useState('')
   const [fiscalYear, setFiscalYear] = useState('')
   const [department, setDepartment] = useState('')
+  const [procMode, setProcMode] = useState('')
+  const [sort, setSort] = useState('newest')
+  const [recordView, setRecordView] = useState('grid')
+  const [requestVersion, setRequestVersion] = useState(0)
+  const [spotlight, setSpotlight] = useState([])
 
   useEffect(() => {
-    document.title = branding?.systemName
-      ? `${branding.systemName} — Transparency Portal`
-      : 'Procurement Transparency Portal'
-  }, [branding])
+    const lguName = overview?.lgu?.name
+    const base = branding?.systemName ?? 'ProcureNance'
+    document.title = lguName
+      ? `${lguName} Procurement Record — ${base}`
+      : `${base} — Procurement Transparency Portal`
+    // Keep the meta description in sync so shared links name the LGU, not the
+    // generic product. Created once in index.html, updated here when known.
+    const meta = document.querySelector('meta[name="description"]')
+    if (meta && lguName) {
+      meta.setAttribute(
+        'content',
+        `Procurement plans, biddings, awards, contracts and payments published by ${lguName} under RA 12009. No account required.`
+      )
+    }
+  }, [branding, overview])
+
+  // Deep-link scrolling for `/?view=about#contact` and `/?view=about#bidder`:
+  // react-router leaves the hash untouched, so scroll after the section renders.
+  useEffect(() => {
+    const hash = window.location.hash
+    if (!hash) return
+    const id = hash.slice(1)
+    const timer = setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [view])
 
   // Fetch branding for the public portal header and footer.
   useEffect(() => {
@@ -679,6 +1057,22 @@ export default function PublicTransparency() {
     }
   }, [view, officials])
 
+  // Spotlight source for the home highlights. One lightweight fetch; failure is
+  // silent because the highlights are progressive enhancement, not the record.
+  useEffect(() => {
+    if (view !== 'home') return
+    let cancelled = false
+    publicApi
+      .fetchAnnouncements()
+      .then((data) => {
+        if (!cancelled) setSpotlight(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [view])
+
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput.trim()), 300)
     return () => clearTimeout(timer)
@@ -690,26 +1084,55 @@ export default function PublicTransparency() {
     ...(fiscalYear ? { fiscalYear } : {}),
     ...(department ? { department } : {}),
   })
+  const requestKey = `${queryKey}:${requestVersion}`
 
   useEffect(() => {
     let cancelled = false
     publicApi
       .fetchPublicProjects(JSON.parse(queryKey))
       .then((data) => {
-        if (!cancelled) setResult({ key: queryKey, projects: data, failed: false })
+        if (!cancelled) setResult({ key: requestKey, projects: data, failed: false })
       })
       .catch(() => {
-        if (!cancelled) setResult({ key: queryKey, projects: [], failed: true })
+        if (!cancelled) setResult({ key: requestKey, projects: [], failed: true })
       })
     return () => {
       cancelled = true
     }
-  }, [queryKey])
+  }, [queryKey, requestKey])
 
   const { projects, failed } = result
-  const isLoading = result.key !== queryKey
+  const isLoading = result.key !== requestKey
 
-  const { pageRows: pageProjects, paginationProps } = usePagination(projects, 6)
+  // Client-side refinements the backend list endpoint does not take: procurement
+  // mode and sort order. Applied here over the already-fetched published set so
+  // refining never costs a round trip.
+  const modeOptions = useMemo(() => {
+    const modes = new Map()
+    for (const project of projects) {
+      if (project?.procurementMode) modes.set(project.procurementMode, true)
+    }
+    return [...modes.keys()].sort((a, b) => String(a).localeCompare(String(b)))
+  }, [projects])
+
+  const visibleProjects = useMemo(() => {
+    let rows = procMode ? projects.filter((p) => p?.procurementMode === procMode) : [...projects]
+    if (sort === 'budget') {
+      rows.sort((a, b) => (Number(b?.financials?.budget ?? 0) - Number(a?.financials?.budget ?? 0)))
+    } else if (sort === 'title') {
+      rows.sort((a, b) => String(a?.projectTitle ?? '').localeCompare(String(b?.projectTitle ?? '')))
+    } else {
+      rows.sort((a, b) => {
+        const da = a?.lastUpdatedAt ? new Date(a.lastUpdatedAt).getTime() : 0
+        const db = b?.lastUpdatedAt ? new Date(b.lastUpdatedAt).getTime() : 0
+        if (db !== da) return db - da
+        return (Number(b?.fiscalYear ?? 0) - Number(a?.fiscalYear ?? 0)) || String(a?.projectTitle ?? '').localeCompare(String(b?.projectTitle ?? ''))
+      })
+    }
+    return rows
+  }, [projects, procMode, sort])
+
+  const { pageRows: pageProjects, paginationProps } = usePagination(visibleProjects, 9)
 
   const tabCounts = useMemo(
     () => ({
@@ -743,67 +1166,93 @@ export default function PublicTransparency() {
     <div className="flex min-h-screen flex-col bg-canvas">
       <PublicHeader lguName={overview?.lgu?.name} systemName={branding?.systemName} />
 
-      <main className="flex-1">
+      <main id="main-content" className="flex-1">
         <div className="mx-auto w-full max-w-7xl px-4 sm:px-8">
           {/* ── MASTHEAD ────────────────────────────────────────────────────
-              Centred, per the wireframe: a small verified-record badge, the
-              portal's name, one line of subtext, and a single control bar
-              holding search and the category select.
-              The badge states the statute rather than a technology claim —
-              these records are published under RA 12009 and signed off by named
-              officials, which is what the reader is being asked to trust. */}
+              Light panel: badge, LGU-named title, one line of subtext, a
+              single search+scope bar, and the two primary citizen jobs as
+              CTAs. No dark tile, no grid lines — flat surface with a firm
+              outline so it sits on the tinted canvas. */}
           {showsIntro && (
-          <section className="pt-10 pb-8 text-center sm:pt-14 sm:pb-9">
-            <p className="inline-flex items-center gap-1.5 rounded-full border border-border-muted bg-surface px-3 py-1 text-[11.5px] font-medium text-text-secondary shadow-sm">
-              <ShieldCheck size={13} className="shrink-0 text-accent" />
-              Official public record
-              {overview?.lgu?.name ? ` · ${overview.lgu.name}` : ''}
-            </p>
-
-            <h1 className="mx-auto mt-5 max-w-3xl text-[27px] leading-[1.14] font-semibold tracking-[-0.03em] text-navy sm:text-[36px]">
-              Procurement Transparency Portal
-            </h1>
-
-            <p className="mx-auto mt-3.5 max-w-2xl text-[14.5px] leading-relaxed text-text-secondary sm:text-[15.5px]">
-              Every municipal procurement — plan, bidding, award, contract and payment — published
-              with the office that raised it and the officials who approved it, as required by RA
-              12009. No account required.
-            </p>
-
-            {/* Search and scope in one bar, as drawn. Two controls on one
-                surface read as a single question — "which records?" — where the
-                old toolbar's five read as a form to fill in. */}
-            <div className="mx-auto mt-7 flex max-w-3xl flex-col gap-2 rounded-2xl border border-border-muted bg-surface p-2 shadow-sm sm:flex-row sm:items-center sm:rounded-full">
-              <SearchField
-                value={searchInput}
-                onChange={setSearchInput}
-                className="flex-1"
-                bare
-              />
-              <div className="hidden h-6 w-px shrink-0 bg-border-muted sm:block" />
-              <select
-                value={tab}
-                onChange={(event) => setTab(event.target.value)}
-                aria-label="Filter by status"
-                className="shrink-0 rounded-full bg-transparent px-3.5 py-2 text-[13.5px] font-medium text-navy transition-colors hover:bg-sidebar focus:ring-2 focus:ring-accent/20 focus:outline-none"
+          <section className="pt-6 sm:pt-8">
+            <div className="overflow-hidden rounded-2xl border border-border-strong bg-surface px-5 py-8 text-center shadow-sm sm:px-8 sm:py-10">
+              <Link
+                to="/?view=about"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-sidebar px-3 py-1 text-[12px] font-medium text-navy transition-colors hover:text-navy"
               >
-                {TABS.map((item) => (
-                  <option key={item.key} value={item.key}>
-                    {item.key === 'all' ? 'All projects' : item.label}
-                  </option>
-                ))}
-              </select>
+                <ShieldCheck size={13} className="shrink-0 text-accent" aria-hidden="true" />
+                Official public record
+                {overview?.lgu?.name ? ` · ${overview.lgu.name}` : ''}
+              </Link>
+
+              <h1 className="mx-auto mt-4 max-w-3xl text-[27px] leading-[1.14] font-semibold tracking-[-0.03em] text-navy sm:text-[36px]">
+                {overview?.lgu?.name
+                  ? `${overview.lgu.name} Procurement Record`
+                  : 'Procurement Transparency Portal'}
+              </h1>
+
+              <p className="mx-auto mt-3 max-w-2xl text-[14px] leading-relaxed text-navy sm:text-[15px]">
+                Every procurement — plan, bidding, award, contract and payment — published
+                with the office that raised it and the officials who approved it, as required by RA
+                12009. No account required.
+              </p>
+
+              {/* Search and scope in one bar. Two controls on one surface read
+                  as a single question — "which records?" */}
+              <div className="mx-auto mt-6 flex max-w-3xl flex-col gap-2 rounded-2xl border border-border-strong bg-surface p-2 text-left shadow-sm sm:flex-row sm:items-center sm:rounded-full">
+                <SearchField
+                  value={searchInput}
+                  onChange={setSearchInput}
+                  className="flex-1"
+                  bare
+                  id="masthead-search"
+                />
+                <div className="hidden h-6 w-px shrink-0 bg-border-strong sm:block" />
+                <label htmlFor="masthead-status" className="sr-only">
+                  Filter projects by status
+                </label>
+                <select
+                  id="masthead-status"
+                  value={tab}
+                  onChange={(event) => setTab(event.target.value)}
+                  className="shrink-0 rounded-full bg-transparent px-3.5 py-2 text-[13.5px] font-medium text-navy transition-colors hover:bg-sidebar focus:ring-2 focus:ring-accent/20 focus:outline-none"
+                >
+                  {TABS.map((item) => (
+                    <option key={item.key} value={item.key}>
+                      {item.key === 'all' ? `All projects (${tabCounts.all})` : `${item.label} (${tabCounts[item.key] ?? 0})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <a
+                  href="#records"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-[13px] font-medium text-accent-fg transition-opacity hover:opacity-90"
+                >
+                  Find a project <ArrowDownRight size={14} aria-hidden="true" />
+                </a>
+                <Link
+                  to="/?view=about#bidder"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border-strong px-4 py-2 text-[13px] font-medium text-navy transition-colors hover:bg-sidebar"
+                >
+                  How to become a bidder <ArrowRight size={14} aria-hidden="true" />
+                </Link>
+              </div>
             </div>
           </section>
           )}
 
           {/* ── FIGURES ───────────────────────────────────────────────────── */}
           {showsIntro && (
-            <LedgerStrip overview={overview} savings={savings} releaseRate={releaseRate} />
+            <div className="mt-4">
+              <LedgerStrip overview={overview} savings={savings} releaseRate={releaseRate} />
+              <HomeSpotlight projects={projects} announcements={spotlight} />
+            </div>
           )}
 
           {/* ── RECORDS ─────────────────────────────────────────────────── */}
-          <div id="records" className={`scroll-mt-6 pb-16 ${showsIntro ? 'pt-9' : 'pt-10'}`}>
+          <div id="records" className={`scroll-mt-6 ${showsIntro ? 'pt-9 pb-6' : 'pt-10 pb-16'}`}>
             {/* The section switch used to sit here as a pill group. It moved to
                 the header, so this is now just the heading for whichever section
                 the header selected — duplicating the control in both places
@@ -818,17 +1267,14 @@ export default function PublicTransparency() {
                       ? 'Officials'
                       : 'Procurement Records'}
               </h2>
-              <p className="text-[13px] text-text-faint">
+              <p className="text-[13px] text-navy">
                 {view === 'announcements'
                   ? 'Notices, open procurements and system updates'
                   : view === 'about'
                     ? 'What is published here, and why'
                     : view === 'officials'
                       ? 'Who is accountable for these records'
-                      : // "shown", not "published": with a filter applied this is
-                        // the size of the list on screen, and saying "published"
-                        // would misreport the size of the record.
-                        `${projects.length} shown`}
+                      : `${visibleProjects.length} published • page ${paginationProps.page} of ${Math.max(1, Math.ceil(visibleProjects.length / paginationProps.pageSize))}`}
               </p>
             </div>
 
@@ -856,12 +1302,16 @@ export default function PublicTransparency() {
                         value={searchInput}
                         onChange={setSearchInput}
                         className="w-full sm:mr-auto sm:w-80"
+                        id="projects-search"
                       />
+                      <label htmlFor="projects-status" className="sr-only">
+                        Filter projects by status
+                      </label>
                       <select
+                        id="projects-status"
                         value={tab}
                         onChange={(event) => setTab(event.target.value)}
-                        aria-label="Filter by status"
-                        className="rounded-full border border-border-muted bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-text-secondary transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                        className="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
                       >
                         {TABS.map((item) => (
                           <option key={item.key} value={item.key}>
@@ -873,21 +1323,39 @@ export default function PublicTransparency() {
                     </>
                   )}
 
+                  <label htmlFor="sort-order" className="sr-only">
+                    Sort projects
+                  </label>
+                  <select
+                    id="sort-order"
+                    value={sort}
+                    onChange={(event) => setSort(event.target.value)}
+                    className="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                  >
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <RecordViewSwitch view={recordView} onChange={setRecordView} />
+
                   <button
                     type="button"
                     onClick={() => setRefineOpen((open) => !open)}
                     aria-expanded={refineOpen}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors focus:ring-2 focus:ring-accent/20 focus:outline-none ${
-                      refineOpen || fiscalYear || department
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors focus:ring-2 focus:ring-accent/20 focus:outline-none ${
+                      refineOpen || fiscalYear || department || procMode
                         ? 'border-accent/40 bg-chip text-navy'
-                        : 'border-border-muted text-text-secondary hover:border-border-strong hover:text-navy'
+                        : 'border-border-strong text-navy hover:text-navy'
                     }`}
                   >
                     <SlidersHorizontal size={13} className="shrink-0" />
                     Refine
-                    {(fiscalYear || department) && (
+                    {(fiscalYear || department || procMode) && (
                       <span className="tabular-nums rounded-full bg-accent px-1.5 text-[10.5px] text-accent-fg">
-                        {[fiscalYear, department].filter(Boolean).length}
+                        {[fiscalYear, department, procMode].filter(Boolean).length}
                       </span>
                     )}
                     <ChevronDown
@@ -898,12 +1366,15 @@ export default function PublicTransparency() {
                 </div>
 
                 {refineOpen && (
-                  <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border-muted bg-surface p-3.5">
+                  <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border-strong bg-surface p-3.5">
+                    <label htmlFor="filter-fy" className="sr-only">
+                      Filter by fiscal year
+                    </label>
                     <select
+                      id="filter-fy"
                       value={fiscalYear}
                       onChange={(event) => setFiscalYear(event.target.value)}
-                      aria-label="Filter by fiscal year"
-                      className="rounded-full border border-border-muted bg-canvas px-3.5 py-1.5 text-[12.5px] text-text-secondary transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                      className="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
                     >
                       <option value="">All fiscal years</option>
                       {(filters?.fiscalYears ?? []).map((year) => (
@@ -913,11 +1384,14 @@ export default function PublicTransparency() {
                       ))}
                     </select>
 
+                    <label htmlFor="filter-office" className="sr-only">
+                      Filter by implementing office
+                    </label>
                     <select
+                      id="filter-office"
                       value={department}
                       onChange={(event) => setDepartment(event.target.value)}
-                      aria-label="Filter by implementing office"
-                      className="max-w-[16rem] rounded-full border border-border-muted bg-canvas px-3.5 py-1.5 text-[12.5px] text-text-secondary transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                      className="max-w-[16rem] rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
                     >
                       <option value="">All offices</option>
                       {(filters?.departments ?? []).map((item) => (
@@ -927,14 +1401,32 @@ export default function PublicTransparency() {
                       ))}
                     </select>
 
-                    {(fiscalYear || department) && (
+                    <label htmlFor="filter-mode" className="sr-only">
+                      Filter by procurement mode
+                    </label>
+                    <select
+                      id="filter-mode"
+                      value={procMode}
+                      onChange={(event) => setProcMode(event.target.value)}
+                      className="max-w-[16rem] rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                    >
+                      <option value="">All procurement modes</option>
+                      {modeOptions.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode}
+                        </option>
+                      ))}
+                    </select>
+
+                    {(fiscalYear || department || procMode) && (
                       <button
                         type="button"
                         onClick={() => {
                           setFiscalYear('')
                           setDepartment('')
+                          setProcMode('')
                         }}
-                        className="rounded-full px-3 py-1.5 text-[12.5px] font-medium text-text-secondary transition-colors hover:bg-sidebar hover:text-navy"
+                        className="rounded-md px-3 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:bg-sidebar hover:text-navy"
                       >
                         Clear
                       </button>
@@ -944,55 +1436,93 @@ export default function PublicTransparency() {
 
                 <section className="mt-6" aria-live="polite">
                   {failed ? (
-                    <div className="flex flex-col items-center gap-2 rounded-xl border border-border-muted bg-surface px-4 py-16 text-center">
-                      <FileWarning size={22} className="text-text-faint" />
+                      <div className="flex flex-col items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-16 text-center" role="status">
+                      <FileWarning size={22} className="text-navy" />
                       <p className="text-[15px] font-medium text-navy">Records could not be loaded</p>
-                      <p className="max-w-md text-[13.5px] text-text-secondary">
-                        The transparency service is not responding. Please try again shortly.
+                      <p className="max-w-md text-[13.5px] leading-relaxed text-navy">
+                        The transparency service is temporarily unavailable. Your search and filters have not changed; please try again shortly.
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => setRequestVersion((current) => current + 1)}
+                        className="mt-3 inline-flex min-h-11 items-center rounded-md bg-accent px-4 text-[13px] font-medium text-accent-fg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+                      >
+                        Try again
+                      </button>
                     </div>
                   ) : isLoading && projects.length === 0 ? (
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {[0, 1, 2, 3, 4, 5].map((key) => (
+                      {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((key) => (
                         <div
                           key={key}
                           className="h-56 animate-pulse rounded-xl border border-border-muted bg-sidebar"
                         />
                       ))}
                     </div>
-                  ) : projects.length === 0 ? (
-                    <div className="flex flex-col items-center gap-2 rounded-xl border border-border-muted bg-surface px-4 py-16 text-center">
-                      <Building2 size={22} className="text-text-faint" />
+                  ) : visibleProjects.length === 0 ? (
+                    <div className="flex flex-col items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-16 text-center" role="status">
+                      <Building2 size={22} className="text-navy" />
                       <p className="text-[15px] font-medium text-navy">
                         No projects match your search
                       </p>
-                      <p className="max-w-md text-[13.5px] text-text-secondary">
-                        Try a different keyword, or clear the filters to see every published project.
+                      <p className="max-w-md text-[13.5px] leading-relaxed text-navy">
+                        Try another keyword, remove one filter, or clear all filters to see every published project.
                       </p>
+                      <div className="mt-4 flex flex-wrap justify-center gap-2">
+                        {(filters?.fiscalYears ?? []).slice(0, 3).map((year) => (
+                          <button
+                            key={year}
+                            type="button"
+                            onClick={() => {
+                              setFiscalYear(String(year))
+                              setSearchInput('')
+                              setDepartment('')
+                              setProcMode('')
+                            }}
+                            className="rounded-md border border-border-strong px-3.5 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:text-navy"
+                          >
+                            Browse FY {year}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearchInput('')
+                            setFiscalYear('')
+                            setDepartment('')
+                            setProcMode('')
+                            setTab('all')
+                          }}
+                          className="rounded-md bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-accent-fg transition-opacity hover:opacity-90"
+                        >
+                          Clear all filters
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <>
                       {search && (
-                        <p className="mb-4 text-[13px] text-text-faint">
-                          {projects.length} {projects.length === 1 ? 'result' : 'results'} for “
+                        <p className="mb-4 text-[13px] text-navy">
+                          {visibleProjects.length} {visibleProjects.length === 1 ? 'result' : 'results'} for “
                           {search}”
                         </p>
                       )}
 
-                      {/* Three across on a wide screen, per the wireframe. Two
-                          columns wasted the right-hand third of a desktop
-                          window and made each card taller than it needed to be. */}
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        {pageProjects.map((project) => (
-                          <ProjectCard key={project.id} project={project} />
-                        ))}
-                      </div>
+                      {recordView === 'grid' ? (
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          {pageProjects.map((project) => (
+                            <ProjectCard key={project.id} project={project} query={search} />
+                          ))}
+                        </div>
+                      ) : (
+                        <ProjectRecordsTable projects={pageProjects} query={search} />
+                      )}
 
-                      <div className="mt-5 overflow-hidden rounded-xl border border-border-muted bg-surface">
+                      <div className="mt-5">
                         <Pagination
                           {...paginationProps}
                           label="projects"
-                          pageSizeOptions={[6, 12, 24]}
+                          pageSizeOptions={[9, 18, 36]}
                         />
                       </div>
                     </>
@@ -1001,10 +1531,21 @@ export default function PublicTransparency() {
               </>
             )}
           </div>
+
+          {showsIntro && (
+            <div className="pb-16">
+              <LandingFaq />
+            </div>
+          )}
         </div>
       </main>
 
-      <PublicFooter transparencyFooter={branding?.transparencyFooter} />
+      <PublicFooter
+        transparencyFooter={branding?.transparencyFooter}
+        lguName={overview?.lgu?.name}
+        lguAddress={overview?.lgu?.address}
+        systemName={branding?.systemName}
+      />
     </div>
   )
 }

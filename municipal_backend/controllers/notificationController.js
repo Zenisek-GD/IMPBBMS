@@ -1,6 +1,7 @@
 import { Op } from "sequelize";
 import { Notification } from "../models/notificationModel.js";
 import { unreadCountFor } from "../services/notifier.js";
+import { parseListParams, searchCondition, pageEnvelope } from "../services/listQuery.js";
 
 const serialize = (notification) => ({
   id: notification.id,
@@ -17,19 +18,43 @@ const serialize = (notification) => ({
 
 // A user only ever sees their own inbox — there is no cross-user read.
 export const listMyNotifications = async (req, res) => {
-  const { unreadOnly, limit } = req.query;
+  const { unreadOnly, limit, search, sort, page, pageSize } = req.query;
 
   const where = { recipientId: req.currentUser.id };
   if (unreadOnly === "true") where.readAt = { [Op.is]: null };
 
+  const searchWhere = searchCondition(search, ["title", "body", "type"]);
+  const scoped = searchWhere ? { [Op.and]: [where, searchWhere] } : where;
+  const unreadCount = await unreadCountFor(req.currentUser.id);
+
+  // Paginated shape is opt-in (see listAuditLog): ?page= returns
+  // { unreadCount, rows, total, page, pageSize, totalPages }.
+  // Older callers (notification bell, dashboards) keep the plain shape.
+  if (page !== undefined || pageSize !== undefined || sort !== undefined || search !== undefined) {
+    const params = parseListParams(req.query, {
+      sorts: { createdAt: "createdAt", severity: "severity" },
+      defaultSort: { field: "createdAt", direction: "desc" },
+    });
+    const { count, rows } = await Notification.findAndCountAll({
+      where: scoped,
+      order: params.order,
+      limit: params.limit,
+      offset: params.offset,
+    });
+    return res.json({
+      unreadCount,
+      ...pageEnvelope({ rows: rows.map(serialize), total: count, page: params.page, pageSize: params.pageSize }),
+    });
+  }
+
   const notifications = await Notification.findAll({
-    where,
+    where: scoped,
     order: [["createdAt", "DESC"]],
     limit: Math.min(Number(limit) || 30, 100),
   });
 
   res.json({
-    unreadCount: await unreadCountFor(req.currentUser.id),
+    unreadCount,
     notifications: notifications.map(serialize),
   });
 };

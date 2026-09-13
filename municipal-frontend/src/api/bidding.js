@@ -46,7 +46,7 @@ export const recommendAward = (bidId, payload) =>
   apiClient.post(`/bidding/bids/${bidId}/recommend-award`, payload).then((res) => res.data)
 
 export const approveAward = (id) => apiClient.post(`/bidding/awards/${id}/approve`).then((res) => res.data)
-export const fetchAwards = () => apiClient.get('/bidding/awards').then((res) => res.data)
+export const fetchAwards = (params = {}) => apiClient.get('/bidding/awards', { params }).then((res) => res.data)
 
 // Vendor registration
 export const fetchMyVendorProfile = () => apiClient.get('/vendors/me').then((res) => res.data)

@@ -176,7 +176,7 @@ export default function ProjectTimeline({ events, disclosure, phases }) {
                 )}
 
                 {event.note && (
-                  <div className="mt-2 flex gap-2 rounded border-l-2 border-navy/25 bg-sidebar px-3 py-2">
+                  <div className="mt-2 flex gap-2 rounded-md border border-border-muted bg-sidebar px-3 py-2">
                     <MessageSquareQuote size={13} className="mt-0.5 shrink-0 text-navy/50" />
                     <p className="text-[12px] leading-relaxed text-text-secondary italic">{event.note}</p>
                   </div>

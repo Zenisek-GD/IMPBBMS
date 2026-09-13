@@ -221,7 +221,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
               <Loader2 size={14} className="animate-spin" /> Sending code…
             </>
           ) : (
-            'Continue'
+            'Send verification code'
           )}
         </button>
       </div>

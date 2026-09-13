@@ -28,7 +28,7 @@ export const Notification = sequelize.define(
     },
     readAt: { type: DataTypes.DATE, allowNull: true },
   },
-  { indexes: [{ fields: ["recipientId", "readAt"] }] }
+  { indexes: [{ fields: ["recipientId", "readAt"] }, { fields: ["recipientId", "createdAt"] }] }
 );
 
 Notification.belongsTo(User, { as: "recipient", foreignKey: "recipientId" });

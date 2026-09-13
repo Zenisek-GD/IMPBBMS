@@ -1,4 +1,4 @@
-import { User, THEME_PREFERENCES } from "../models/userModel.js";
+import { User, TEXT_SIZE_PREFERENCES, THEME_PREFERENCES } from "../models/userModel.js";
 import { MfaEnrollment, MfaRecoveryCode } from "../models/mfaModel.js";
 import { Role } from "../models/roleModel.js";
 import { Permission } from "../models/permissionModel.js";
@@ -31,6 +31,7 @@ export const serializeUser = (user) => ({
   // own theme rather than whatever the last person on this browser chose.
   themePreference: user.themePreference ?? "light",
   sidebarCollapsed: Boolean(user.sidebarCollapsed),
+  textSizePreference: user.textSizePreference ?? "normal",
   // Fixed duration for every role; server deadlines are returned separately.
   sessionTimeoutMs: sessionTtlForRole(user.Role.key),
 });
@@ -470,7 +471,7 @@ export const updatePreferences = async (req, res) => {
     return res.status(401).json({ message: "Not authenticated." });
   }
 
-  const { themePreference, sidebarCollapsed } = req.body;
+  const { themePreference, sidebarCollapsed, textSizePreference } = req.body;
   const changes = {};
 
   if (themePreference !== undefined) {
@@ -487,6 +488,16 @@ export const updatePreferences = async (req, res) => {
     changes.sidebarCollapsed = Boolean(sidebarCollapsed);
   }
 
+  if (textSizePreference !== undefined) {
+    if (!TEXT_SIZE_PREFERENCES.includes(textSizePreference)) {
+      return res.status(400).json({
+        message: "Unknown text size preference.",
+        accepted: TEXT_SIZE_PREFERENCES,
+      });
+    }
+    changes.textSizePreference = textSizePreference;
+  }
+
   if (Object.keys(changes).length === 0) {
     return res.status(400).json({ message: "Nothing to update." });
   }
@@ -501,6 +512,7 @@ export const updatePreferences = async (req, res) => {
   res.json({
     themePreference: user.themePreference,
     sidebarCollapsed: Boolean(user.sidebarCollapsed),
+    textSizePreference: user.textSizePreference,
   });
 };
 

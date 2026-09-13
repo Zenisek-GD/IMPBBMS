@@ -85,7 +85,7 @@ export const DASHBOARDS = {
   hope: {
     intro:
       'As Head of the Procuring Entity you approve what the offices below you have prepared: the investment program, the executive budget, requisitions, and awards the BAC recommends.',
-    needs: ['prs', 'appEntries', 'budgets', 'programs', 'rfqs', 'contracts', 'budgetMonitor', 'audit'],
+    needs: ['prs', 'appEntries', 'budgets', 'programs', 'rfqs', 'contracts', 'documents', 'budgetMonitor', 'audit'],
     showActivity: true,
     stats: (data) => [
       ...budgetStats(data),
@@ -137,7 +137,7 @@ export const DASHBOARDS = {
   bacChairperson: {
     intro:
       'You preside over the committee: you determine the mode of procurement, chair the evaluation, decide requests for reconsideration, and recommend the award to the Mayor — who approves it.',
-    needs: ['prs', 'rfqs', 'contracts', 'appEntries'],
+    needs: ['prs', 'rfqs', 'contracts', 'documents', 'appEntries'],
     stats: (data) => [
       {
         label: 'Under evaluation',
@@ -207,7 +207,7 @@ export const DASHBOARDS = {
   bacSecretariat: {
     intro:
       'You are the committee’s support unit: you advertise procurements, keep the registry of suppliers, make the arrangements for its meetings, and take custody of the record. The committee decides; you document.',
-    needs: ['prs', 'rfqs', 'vendors', 'contracts', 'appEntries'],
+    needs: ['prs', 'rfqs', 'vendors', 'contracts', 'documents', 'appEntries'],
     stats: (data) => [
       {
         label: 'Registrations to review',
@@ -254,7 +254,7 @@ export const DASHBOARDS = {
   headOfOffice: {
     intro:
       'You run an office: you prepare its budget request, plan its procurement in the APP, and endorse the requisitions your staff raise. Staff cannot endorse their own request — that signature is yours.',
-    needs: ['prs', 'appEntries', 'budgets', 'programs', 'pendingItems'],
+    needs: ['prs', 'appEntries', 'budgets', 'programs', 'documents', 'pendingItems'],
     stats: (data) => [
       {
         label: 'Awaiting your endorsement',
@@ -282,7 +282,7 @@ export const DASHBOARDS = {
   departmentRequester: {
     intro:
       'You prepare your office’s budget request, its APP entries, and its purchase requisitions. Each requisition goes to your head of office for endorsement before it moves.',
-    needs: ['prs', 'appEntries', 'budgets', 'pendingItems'],
+    needs: ['prs', 'appEntries', 'budgets', 'documents', 'pendingItems'],
     stats: (data) => [
       {
         label: 'Drafts to submit',

@@ -20,6 +20,7 @@ import {
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
 const contractIncludes = {
   include: [
@@ -74,21 +75,79 @@ const serialize = (contract) => ({
 export const listContracts = async (req, res) => {
   const { status } = req.query;
   const where = {};
-  if (status) where.status = status;
+  const canViewAll = req.permissions.has("contract.view");
+  if (status && canViewAll) where.status = status;
 
   // A supplier sees only their own contracts.
-  if (req.permissions.has("delivery.submitInvoice") && !req.permissions.has("contract.view")) {
+  if (req.permissions.has("delivery.submitInvoice") && !canViewAll) {
     const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
-    if (!vendor) return res.json([]);
+    if (!vendor) {
+      const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
+      return res.json(wantsPaging ? pageEnvelope({ rows: [], total: 0, page: 1, pageSize: 25 }) : []);
+    }
     where.vendorId = vendor.id;
+    if (status) where.status = status;
   }
   // Observers see only what is already in force (Section 2.2).
-  if (req.permissions.has("contract.viewPublished") && !req.permissions.has("contract.view")) {
+  if (req.permissions.has("contract.viewPublished") && !canViewAll) {
     where.status = { [Op.in]: ["active", "completed"] };
   }
 
-  const contracts = await Contract.findAll({ where, ...contractIncludes, order: [["createdAt", "DESC"]] });
-  res.json(contracts.map(serialize));
+  if (req.query.signatures === "both") {
+    where.signedByLguAt = { [Op.ne]: null };
+    where.signedByVendorAt = { [Op.ne]: null };
+  } else if (req.query.signatures === "lgu") {
+    where.signedByLguAt = { [Op.ne]: null };
+    where.signedByVendorAt = null;
+  } else if (req.query.signatures === "vendor") {
+    where.signedByLguAt = null;
+    where.signedByVendorAt = { [Op.ne]: null };
+  } else if (req.query.signatures === "none") {
+    where.signedByLguAt = null;
+    where.signedByVendorAt = null;
+  }
+  const search = searchCondition(req.query.search, [
+    "contractNo",
+    "poRef",
+    "$award.noaNumber$",
+    "$award.rfq.referenceNo$",
+    "$award.rfq.title$",
+    "$vendor.businessName$",
+  ]);
+  if (search) where[Op.and] = [search];
+
+  const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
+  if (!wantsPaging) {
+    const contracts = await Contract.findAll({ where, ...contractIncludes, order: [["createdAt", "DESC"]] });
+    return res.json(contracts.map(serialize));
+  }
+
+  const paging = parseListParams(req.query, {
+    sorts: {
+      contractNo: "contractNo",
+      amount: "amount",
+      status: "status",
+      startDate: "startDate",
+      deliveryDeadline: "deliveryDeadline",
+      createdAt: "createdAt",
+    },
+    defaultSort: { field: "createdAt", direction: "desc" },
+  });
+  const { rows, count } = await Contract.findAndCountAll({
+    where,
+    ...contractIncludes,
+    order: paging.order,
+    limit: paging.limit,
+    offset: paging.offset,
+    distinct: true,
+    subQuery: false,
+  });
+  return res.json(pageEnvelope({
+    rows: rows.map(serialize),
+    total: count,
+    page: paging.page,
+    pageSize: paging.pageSize,
+  }));
 };
 
 // Lifecycle step 10: the contract is generated from an issued award.

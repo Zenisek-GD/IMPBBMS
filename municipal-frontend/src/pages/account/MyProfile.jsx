@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { KeyRound, Pencil, ShieldCheck, UserCircle, Mail, Building2, BadgeCheck } from 'lucide-react'
+import { KeyRound, Pencil, ShieldCheck, UserCircle, Mail, Building2, BadgeCheck, Type } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
+import { useTextSize } from '../../context/useTextSize'
 import { EditDisplayNameModal, ChangePasswordModal } from '../../components/layout/ProfileModals'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
@@ -55,6 +56,7 @@ function Section({ title, description, action, children }) {
 
 export default function MyProfile() {
   const { user } = useAuth()
+  const { preference: textSize, setPreference: setTextSize } = useTextSize()
   const [editingName, setEditingName] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
 
@@ -118,6 +120,35 @@ export default function MyProfile() {
               Changing your password signs the new one in immediately and emails a confirmation to
               your registered address. If you receive that email without having asked for it, tell
               the System Administrator.
+            </p>
+          </div>
+        </Section>
+
+        <Section
+          title="Reading comfort"
+          description="Make text easier to read across the whole system. This is saved to your account."
+        >
+          <div className="px-4 py-4">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Text size">
+              {[
+                { key: 'normal', label: 'Normal' },
+                { key: 'large', label: 'Large' },
+                { key: 'extraLarge', label: 'Extra large' },
+              ].map((option) => (
+                <Button
+                  key={option.key}
+                  variant={textSize === option.key ? 'primary' : 'secondary'}
+                  icon={Type}
+                  aria-pressed={textSize === option.key}
+                  onClick={() => setTextSize(option.key)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+            <p className="mt-3 text-[12.5px] leading-relaxed text-text-secondary">
+              You can also use your browser zoom. This setting enlarges labels, forms, tables,
+              buttons, notices and dialog text together.
             </p>
           </div>
         </Section>

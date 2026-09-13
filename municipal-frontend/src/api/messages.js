@@ -53,7 +53,7 @@ export const sendPublicMessage = (payload) =>
 
 // Officers only, and scoped server-side to the messages routed to a permission
 // the caller holds.
-export const fetchMessages = () => apiClient.get('/messages').then((res) => res.data)
+export const fetchMessages = (params = {}) => apiClient.get('/messages', { params }).then((res) => res.data)
 
 export const updateMessage = (id, payload) =>
   apiClient.patch(`/messages/${id}`, payload).then((res) => res.data)

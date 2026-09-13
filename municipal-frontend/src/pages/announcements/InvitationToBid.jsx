@@ -14,6 +14,12 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
+import ReasonModal from '../../components/ui/ReasonModal'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 import RichTextEditor from '../../components/ui/RichTextEditor'
 
 // ── INVITATION TO BID ────────────────────────────────────────────────────────
@@ -53,6 +59,7 @@ const labelClass = 'text-xs text-text-secondary'
 function AttachmentPanel({ announcementId, onError }) {
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
+  const [removing, setRemoving] = useState(null)
 
   const reload = useCallback(() => {
     if (!announcementId) return
@@ -87,15 +94,7 @@ function AttachmentPanel({ announcementId, onError }) {
             <button
               type="button"
               aria-label={`Remove ${file.filename}`}
-              onClick={async () => {
-                if (!window.confirm(`Remove "${file.filename}" from this notice?`)) return
-                try {
-                  await api.deleteAnnouncementAttachment(file.id)
-                  reload()
-                } catch (err) {
-                  onError(err.response?.data?.message ?? 'Could not remove that file.')
-                }
-              }}
+              onClick={() => setRemoving(file)}
               className="text-text-faint hover:text-danger"
             >
               <Trash2 size={13} />
@@ -127,6 +126,26 @@ function AttachmentPanel({ announcementId, onError }) {
           }}
         />
       </label>
+      {removing && (
+        <ReasonModal
+          title={`Remove "${removing.label || removing.filename}"?`}
+          consequence="Bidders will no longer be able to download this file from the notice."
+          confirmLabel="Remove file"
+          danger
+          requireReason={false}
+          onClose={() => setRemoving(null)}
+          onConfirm={async () => {
+            const file = removing
+            setRemoving(null)
+            try {
+              await api.deleteAnnouncementAttachment(file.id)
+              reload()
+            } catch (err) {
+              onError(err.response?.data?.message ?? 'Could not remove that file.')
+            }
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -229,115 +248,118 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
     fieldErrors[field] ? <p className="mt-1 text-[11px] text-danger">{fieldErrors[field]}</p> : null
 
   return (
-    <Modal
+    // Item 12: an invitation carries the solicitation link, rich-text body,
+    // particulars, schedule, contact, publication and attachments — large
+    // document creation on a full page, not an xl modal.
+    <LargeFormPage
       title={existing ? `Edit — ${existing.title}` : 'New Invitation to Bid'}
-      subtitle="The public posting. The official signed letter is generated separately in Documents."
-      onClose={onClose}
-      size="xl"
+      purpose="The public posting. The official signed letter is generated separately in Documents."
+      onBack={onClose}
+      backLabel="Back to invitations"
+      error={error}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>Close</Button>
+          <Button icon={Send} onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : id ? 'Save changes' : 'Save draft'}
+          </Button>
+        </>
+      }
     >
-      <div className="flex flex-col gap-4">
-        {error && (
-          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {error}
-          </p>
-        )}
-        {savedAt && !error && (
-          <p className="rounded border border-success/20 bg-success/10 px-3 py-2 text-sm text-success">
-            Saved as a draft. Nothing is public until you publish it.
-          </p>
-        )}
+      {savedAt && !error && (
+        <p role="status" className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">
+          Saved as a draft. Nothing is public until you publish it.
+        </p>
+      )}
 
-        {/* ── Link to the solicitation ── */}
-        <div className="rounded border border-navy/10 bg-chip/40 p-3">
-          <label className={labelClass}>
-            <span className="flex items-center gap-1.5">
-              <Link2 size={12} /> Solicitation this notice invites bids for
-            </span>
-            <select
-              value={form.rfqId ?? ''}
-              onChange={(event) => pullFromSolicitation(event.target.value)}
-              className={`mt-1 ${inputClass}`}
-            >
-              <option value="">Not linked — the notice precedes the solicitation</option>
-              {solicitations.map((rfq) => (
-                <option key={rfq.id} value={rfq.id}>
-                  {rfq.referenceNo} — {rfq.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className="mt-1 text-[11px] text-text-faint">
-            Linking copies the reference, ABC, mode and schedule from the record. You can still change
-            anything below; the values are frozen on the notice once saved, so editing the solicitation
-            later will not silently rewrite a published invitation.
-          </p>
-        </div>
+      {/* ── Link to the solicitation ── */}
+      <LargeFormPage.Section
+        title="Linked solicitation"
+        description="Linking copies the reference, ABC, mode and schedule from the record. Values freeze on the notice once saved."
+      >
+        <label className={labelClass}>
+          <span className="flex items-center gap-1.5">
+            <Link2 size={12} /> Solicitation this notice invites bids for
+          </span>
+          <select
+            value={form.rfqId ?? ''}
+            onChange={(event) => pullFromSolicitation(event.target.value)}
+            className={`mt-1 ${inputClass}`}
+          >
+            <option value="">Not linked — the notice precedes the solicitation</option>
+            {solicitations.map((rfq) => (
+              <option key={rfq.id} value={rfq.id}>
+                {rfq.referenceNo} — {rfq.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      </LargeFormPage.Section>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className={labelClass}>
-            Title
-            <input value={form.title} onChange={(e) => set('title', e.target.value)} className={`mt-1 ${inputClass}`} />
-            {err('title')}
-          </label>
-          <label className={labelClass}>
-            Reference number
-            <input
-              value={form.referenceNo}
-              onChange={(e) => set('referenceNo', e.target.value)}
-              placeholder="ITB-2026-014"
-              className={`mt-1 ${inputClass}`}
-            />
-          </label>
-        </div>
-
-        {/* ── Body ── */}
-        <div>
-          <p className={`mb-1 ${labelClass}`}>Announcement text</p>
-          <RichTextEditor value={form.bodyHtml} onChange={(html) => set('bodyHtml', html)} minHeight="240px" />
-          {err('body')}
-        </div>
-
-        {/* ── Procurement particulars ── */}
-        <div className="rounded border border-border-muted p-3">
-          <p className="mb-2 text-[11px] font-medium tracking-[0.05em] text-text-secondary uppercase">
-            Procurement particulars
-          </p>
+      <LargeFormPage.Section title="Notice">
+        <div className="flex flex-col gap-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className={labelClass}>
-              Approved Budget for the Contract
+              Title
+              <input value={form.title} onChange={(e) => set('title', e.target.value)} className={`mt-1 ${inputClass}`} />
+              {err('title')}
+            </label>
+            <label className={labelClass}>
+              Reference number
               <input
-                type="number"
-                value={form.abc}
-                onChange={(e) => set('abc', e.target.value)}
-                className={`mt-1 ${inputClass}`}
-              />
-              {err('abc')}
-            </label>
-            <label className={labelClass}>
-              Source of funds
-              <input value={form.fundSource} onChange={(e) => set('fundSource', e.target.value)} className={`mt-1 ${inputClass}`} />
-            </label>
-            <label className={labelClass}>
-              Mode of procurement
-              <input value={form.procurementMethod} onChange={(e) => set('procurementMethod', e.target.value)} className={`mt-1 ${inputClass}`} />
-            </label>
-            <label className={labelClass}>
-              Legal basis
-              <input
-                value={form.procurementMethodCitation}
-                onChange={(e) => set('procurementMethodCitation', e.target.value)}
-                placeholder="IRR Sec. 26"
+                value={form.referenceNo}
+                onChange={(e) => set('referenceNo', e.target.value)}
+                placeholder="ITB-2026-014"
                 className={`mt-1 ${inputClass}`}
               />
             </label>
           </div>
-        </div>
 
-        {/* ── Schedule ── */}
-        <div className="rounded border border-border-muted p-3">
-          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium tracking-[0.05em] text-text-secondary uppercase">
-            <CalendarClock size={12} /> Schedule
-          </p>
+          {/* ── Body ── */}
+          <div>
+            <p className={`mb-1 ${labelClass}`}>Announcement text</p>
+            <RichTextEditor value={form.bodyHtml} onChange={(html) => set('bodyHtml', html)} minHeight="240px" />
+            {err('body')}
+          </div>
+        </div>
+      </LargeFormPage.Section>
+
+      {/* ── Procurement particulars ── */}
+      <LargeFormPage.Section title="Procurement particulars">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className={labelClass}>
+            Approved Budget for the Contract
+            <input
+              type="number"
+              value={form.abc}
+              onChange={(e) => set('abc', e.target.value)}
+              className={`mt-1 ${inputClass}`}
+            />
+            {err('abc')}
+          </label>
+          <label className={labelClass}>
+            Source of funds
+            <input value={form.fundSource} onChange={(e) => set('fundSource', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+          <label className={labelClass}>
+            Mode of procurement
+            <input value={form.procurementMethod} onChange={(e) => set('procurementMethod', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+          <label className={labelClass}>
+            Legal basis
+            <input
+              value={form.procurementMethodCitation}
+              onChange={(e) => set('procurementMethodCitation', e.target.value)}
+              placeholder="IRR Sec. 26"
+              className={`mt-1 ${inputClass}`}
+            />
+          </label>
+        </div>
+      </LargeFormPage.Section>
+
+      {/* ── Schedule ── */}
+      <LargeFormPage.Section title="Schedule">
+        <div className="flex flex-col gap-3">
           <div className="grid gap-3 sm:grid-cols-3">
             <label className={labelClass}>
               Pre-bid conference
@@ -355,38 +377,34 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
               {err('bidOpeningAt')}
             </label>
           </div>
-          <label className={`mt-3 block ${labelClass}`}>
+          <label className={`block ${labelClass}`}>
             Venue
             <input value={form.venue} onChange={(e) => set('venue', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
         </div>
+      </LargeFormPage.Section>
 
-        {/* ── Contact ── */}
-        <div className="rounded border border-border-muted p-3">
-          <p className="mb-2 text-[11px] font-medium tracking-[0.05em] text-text-secondary uppercase">
-            BAC Secretariat contact
-          </p>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <label className={labelClass}>
-              Contact person
-              <input value={form.contactPerson} onChange={(e) => set('contactPerson', e.target.value)} className={`mt-1 ${inputClass}`} />
-            </label>
-            <label className={labelClass}>
-              Email
-              <input value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} className={`mt-1 ${inputClass}`} />
-            </label>
-            <label className={labelClass}>
-              Telephone
-              <input value={form.contactPhone} onChange={(e) => set('contactPhone', e.target.value)} className={`mt-1 ${inputClass}`} />
-            </label>
-          </div>
+      {/* ── Contact ── */}
+      <LargeFormPage.Section title="Contact">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className={labelClass}>
+            Contact person
+            <input value={form.contactPerson} onChange={(e) => set('contactPerson', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+          <label className={labelClass}>
+            Email
+            <input value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+          <label className={labelClass}>
+            Telephone
+            <input value={form.contactPhone} onChange={(e) => set('contactPhone', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
         </div>
+      </LargeFormPage.Section>
 
-        {/* ── Publication ── */}
-        <div className="rounded border border-border-muted p-3">
-          <p className="mb-2 text-[11px] font-medium tracking-[0.05em] text-text-secondary uppercase">
-            Publication
-          </p>
+      {/* ── Publication ── */}
+      <LargeFormPage.Section title="Publication">
+        <div className="flex flex-col gap-3">
           <div className="grid gap-3 sm:grid-cols-3">
             <label className={labelClass}>
               Publish automatically on
@@ -404,28 +422,21 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
               {err('registrationDeadline')}
             </label>
           </div>
-          <label className="mt-3 flex items-center gap-2 text-xs text-text-secondary">
+          <label className="flex min-h-[44px] items-center gap-2 text-xs text-text-secondary">
             <input type="checkbox" checked={form.pinned} onChange={(e) => set('pinned', e.target.checked)} />
             Pin to the top of the public list
           </label>
         </div>
+      </LargeFormPage.Section>
 
-        {/* ── Attachments ── */}
-        <div className="rounded border border-border-muted p-3">
-          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium tracking-[0.05em] text-text-secondary uppercase">
-            <Paperclip size={12} /> Bidding documents
-          </p>
-          <AttachmentPanel announcementId={id} onError={setError} />
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>CLOSE</Button>
-          <Button icon={Send} onClick={save} disabled={saving}>
-            {saving ? 'SAVING…' : id ? 'SAVE CHANGES' : 'SAVE DRAFT'}
-          </Button>
-        </div>
-      </div>
-    </Modal>
+      {/* ── Attachments ── */}
+      <LargeFormPage.Section
+        title="Bidding documents"
+        description="Files bidders can download from the notice."
+      >
+        <AttachmentPanel announcementId={id} onError={setError} />
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -511,11 +522,11 @@ export default function InvitationToBid() {
   const permissions = usePermissions()
   const [notices, setNotices] = useState([])
   const [solicitations, setSolicitations] = useState([])
-  const [statusFilter, setStatusFilter] = useState('')
-  const [search, setSearch] = useState('')
   const [editing, setEditing] = useState(null)
   const [creating, setCreating] = useState(false)
   const [previewing, setPreviewing] = useState(null)
+  const [withdrawing, setWithdrawing] = useState(null)
+  const [publishing, setPublishing] = useState(null)
   const [loading, setLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [error, setError] = useState('')
@@ -556,14 +567,41 @@ export default function InvitationToBid() {
 
   const canManage = permissions.has('announcements.manage')
 
-  const visible = notices.filter((notice) => {
-    if (statusFilter && notice.status !== statusFilter) return false
-    if (!search.trim()) return true
-    const needle = search.trim().toLowerCase()
-    return [notice.title, notice.referenceNo, notice.procurementMethod]
-      .filter(Boolean)
-      .some((field) => String(field).toLowerCase().includes(needle))
+  const table = useTableControls(notices, {
+    searchKeys: ['title', 'referenceNo', 'procurementMethod'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: [
+          { value: 'draft', label: 'Draft' },
+          { value: 'published', label: 'Published' },
+          { value: 'archived', label: 'Archived' },
+        ],
+      },
+    ],
+    accessors: {
+      abc: (notice) => Number(notice.abc ?? 0),
+      submissionDeadline: (notice) => notice.submissionDeadline ?? '',
+    },
   })
+  const { pageRows, paginationProps } = table
+
+  // Item 12: the invitation editor is large document creation — a full page,
+  // not an xl modal over the list. Preview and publish/withdraw confirmations
+  // stay modals: brief views and focused confirmations.
+  if (creating || editing) {
+    return (
+      <DashboardPage>
+        <NoticeEditor
+          existing={editing}
+          solicitations={solicitations}
+          onClose={() => { setCreating(false); setEditing(null); refresh() }}
+          onSaved={(saved) => setEditing(saved)}
+        />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
@@ -592,46 +630,34 @@ export default function InvitationToBid() {
         </p>
       )}
 
-      <Card bodyClassName="flex flex-wrap gap-3 p-4">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search title, reference or mode…"
-          className="min-w-[220px] flex-1 rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-        >
-          <option value="">All statuses</option>
-          <option value="draft">Draft</option>
-          <option value="published">Published</option>
-          <option value="archived">Archived</option>
-        </select>
+      <Card bodyClassName="p-4">
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search title, reference or mode…" />
       </Card>
 
       <Card title="Invitations" icon={Megaphone} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading invitations…</p>
-        ) : visible.length === 0 ? (
+        ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            No Invitation to Bid notices yet.
+            {table.totalBeforeFilters === 0
+              ? 'No Invitation to Bid notices yet.'
+              : 'No notices match your search or filters.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Reference', 'Invitation', 'ABC', 'Deadline', 'Status', 'Actions'].map((head) => (
-                    <th key={head} className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase">
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('referenceNo')}>Reference</SortableTh>
+                  <SortableTh {...table.sortProps('title')}>Invitation</SortableTh>
+                  <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
+                  <SortableTh {...table.sortProps('submissionDeadline')}>Deadline</SortableTh>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
-                {visible.map((notice) => (
+                {pageRows.map((notice) => (
                   <tr key={notice.id} className="border-t border-border-muted">
                     <td className="px-4 py-3 font-mono text-xs text-navy">{notice.referenceNo ?? '—'}</td>
                     <td className="px-4 py-3">
@@ -666,7 +692,7 @@ export default function InvitationToBid() {
                               className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline">
                               EDIT
                             </button>
-                            <button type="button" onClick={() => act(() => api.publishAnnouncement(notice.id))}
+                            <button type="button" onClick={() => setPublishing(notice)}
                               className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-accent hover:underline">
                               <Globe size={11} /> PUBLISH
                             </button>
@@ -675,10 +701,7 @@ export default function InvitationToBid() {
 
                         {canManage && notice.status === 'published' && (
                           <>
-                            <button type="button" onClick={() => {
-                              const reason = window.prompt('Why is this notice being withdrawn?')
-                              if (reason?.trim()) act(() => api.withdrawAnnouncement(notice.id, reason))
-                            }}
+                            <button type="button" onClick={() => setWithdrawing(notice)}
                               className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-danger hover:underline">
                               <Undo2 size={11} /> WITHDRAW
                             </button>
@@ -706,6 +729,9 @@ export default function InvitationToBid() {
             </table>
           </div>
         )}
+        {!loading && table.rows.length > 0 && (
+          <Pagination {...paginationProps} label="notices" />
+        )}
       </Card>
 
       <p className="flex items-start gap-2 text-xs text-text-faint">
@@ -714,16 +740,38 @@ export default function InvitationToBid() {
         solicitation under Documents, so the two cannot quote different figures.
       </p>
 
-      {(creating || editing) && (
-        <NoticeEditor
-          existing={editing}
-          solicitations={solicitations}
-          onClose={() => { setCreating(false); setEditing(null); refresh() }}
-          onSaved={(saved) => setEditing(saved)}
+      {previewing && <PreviewModal notice={previewing} onClose={() => setPreviewing(null)} />}
+
+      {withdrawing && (
+        <ReasonModal
+          title={`Withdraw "${withdrawing.title}"?`}
+          consequence="The notice leaves the transparency portal immediately. Bidders will no longer see this invitation."
+          reasonLabel="Why is it being withdrawn?"
+          confirmLabel="Withdraw notice"
+          danger
+          onClose={() => setWithdrawing(null)}
+          onConfirm={(reason) => {
+            const notice = withdrawing
+            setWithdrawing(null)
+            act(() => api.withdrawAnnouncement(notice.id, reason))
+          }}
         />
       )}
 
-      {previewing && <PreviewModal notice={previewing} onClose={() => setPreviewing(null)} />}
+      {publishing && (
+        <ReasonModal
+          title={`Publish "${publishing.title}"?`}
+          consequence="The invitation goes live on the transparency portal immediately with its particulars frozen. Bidders can act on it from that moment."
+          confirmLabel="Publish invitation"
+          requireReason={false}
+          onClose={() => setPublishing(null)}
+          onConfirm={() => {
+            const notice = publishing
+            setPublishing(null)
+            act(() => api.publishAnnouncement(notice.id))
+          }}
+        />
+      )}
     </DashboardPage>
   )
 }

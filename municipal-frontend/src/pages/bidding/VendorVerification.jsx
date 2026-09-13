@@ -1,5 +1,5 @@
 import BacAttendance from './BacAttendance'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Users,
   ShieldCheck,
@@ -22,11 +22,12 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import Pagination from '../../components/ui/Pagination'
 import FormField from '../../components/ui/FormField'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import { useServerTable } from '../../components/ui/useServerTable'
 import CounterSubmissionModal from './CounterSubmissionModal'
 
 const STATUS_TONES = {
@@ -229,7 +230,7 @@ function RequirementRow({ document, busy, onDecide }) {
               onClick={() => onDecide('rejected', remarks).then(() => setRejecting(false))}
               className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline disabled:opacity-40"
             >
-              CONFIRM INVALID
+              MARK INVALID
             </button>
           </div>
         </div>
@@ -328,30 +329,65 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
   }
 
   return (
-    <Modal title={`Review — ${current.businessName}`} onClose={onClose}>
-      {/* Which call this application answered, when it answered one. An
-          unsolicited application is legitimate, so this simply says so rather
-          than flagging it. */}
-      <div className="mb-4 rounded-md border border-border-muted bg-chip px-3 py-2.5">
-        <p className="text-[11px] tracking-[0.04em] text-text-faint uppercase">Applied to</p>
-        <p className="mt-0.5 text-[12.5px] text-navy">
-          {current.callTitle ?? 'General accreditation — not tied to one procurement'}
-        </p>
-        {current.callRegistrationDeadline && (
-          <p className="text-[11.5px] text-text-secondary">
-            {/* Tense matters here. An officer reviewing a live call needs to know
-                more may still arrive; one reviewing a closed call is looking at
-                the final set. */}
-            {new Date(current.callRegistrationDeadline) > new Date()
-              ? 'Registration closes'
-              : 'Registration closed'}{' '}
-            {formatDate(current.callRegistrationDeadline)}
+    // Item 12: eligibility review assembles per-requirement findings, files
+    // and a committee decision — a complex review screen on a full page, not
+    // a modal.
+    <LargeFormPage
+      title={`Review — ${current.businessName}`}
+      purpose={
+        canDecide
+          ? 'Determine whether this bidder is eligible, on the file the Secretariat has assembled and checked.'
+          : 'Check each requirement. Determining eligibility is the BAC\u2019s decision, taken on the file you assemble here.'
+      }
+      onBack={onClose}
+      backLabel="Back to bidder registrations"
+      error={error}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {canDecide ? 'Cancel' : 'Close'}
+          </Button>
+          {canDecide && (
+            <>
+              <Button variant="danger" disabled={busy} onClick={() => decide('return')}>
+                Return
+              </Button>
+              {/* Approval requires every requirement to have been examined and
+                  none to have failed. The server refuses either way; this stops
+                  the officer discovering that only after clicking. */}
+              <Button disabled={busy || !review.complete} onClick={() => decide('verify')}>
+                Verify
+              </Button>
+            </>
+          )}
+        </>
+      }
+    >
+      <LargeFormPage.Section title="Application">
+        {/* Which call this application answered, when it answered one. An
+            unsolicited application is legitimate, so this simply says so rather
+            than flagging it. */}
+        <div className="rounded-md border border-border-muted bg-chip px-3 py-2.5">
+          <p className="text-[11px] tracking-[0.04em] text-text-faint uppercase">Applied to</p>
+          <p className="mt-0.5 text-[12.5px] text-navy">
+            {current.callTitle ?? 'General accreditation — not tied to one procurement'}
           </p>
-        )}
+          {current.callRegistrationDeadline && (
+            <p className="text-[11.5px] text-text-secondary">
+              {/* Tense matters here. An officer reviewing a live call needs to know
+                  more may still arrive; one reviewing a closed call is looking at
+                  the final set. */}
+              {new Date(current.callRegistrationDeadline) > new Date()
+                ? 'Registration closes'
+                : 'Registration closed'}{' '}
+              {formatDate(current.callRegistrationDeadline)}
+            </p>
+          )}
+        </div>
 
         {/* Provenance of the paper file: when it came over the counter and who
             says so. This is what a protest about timeliness turns on. */}
-        <p className="mt-1 text-[11.5px] text-text-secondary">
+        <p className="mt-2 text-[11.5px] text-text-secondary">
           Received {formatDate(current.receivedAt ?? current.submittedAt)}
           {current.recordedByName && ` · recorded by ${current.recordedByName}`}
           {current.callRegistrationDeadline &&
@@ -360,26 +396,21 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
               <span className="ml-1.5 font-medium text-danger">after the deadline</span>
             )}
         </p>
-      </div>
+      </LargeFormPage.Section>
 
-      {/* ── Requirement-by-requirement findings ───────────────────────────
-          The accreditation decision is a statement that the requirements are
-          complete and valid, so it is assembled from findings on each one
-          rather than taken as a single verdict on the pile. */}
-      <div className="mb-4">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">
-            Requirements ({review.verified}/{review.total} checked)
-          </p>
-          {review.unreviewed > 0 && (
+      <LargeFormPage.Section
+        title={`Requirements (${review.verified}/${review.total} checked)`}
+        description="The accreditation decision is assembled from findings on each requirement rather than taken as a single verdict on the pile."
+      >
+        {review.unreviewed > 0 && (
+          <p className="mb-2">
             <Badge tone="warning">{review.unreviewed} left to check</Badge>
-          )}
-        </div>
-
+          </p>
+        )}
         {(current.documents ?? []).length === 0 ? (
           <p className="text-[13px] text-text-faint">No requirements declared.</p>
         ) : (
-          <ol className="flex max-h-64 flex-col gap-2 overflow-y-auto">
+          <ol className="flex flex-col gap-2">
             {current.documents.map((document) => (
               <RequirementRow
                 key={document.id}
@@ -397,16 +428,13 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
             ))}
           </ol>
         )}
-      </div>
+      </LargeFormPage.Section>
 
-      <div className="mb-4">
-        <p className="mb-2 text-[11px] tracking-[0.03em] text-text-faint uppercase">
-          Submitted files ({files.length})
-        </p>
+      <LargeFormPage.Section title={`Submitted files (${files.length})`}>
         {files.length === 0 ? (
           <p className="text-[13px] text-text-faint">No files uploaded.</p>
         ) : (
-          <ol className="flex max-h-56 flex-col gap-2 overflow-y-auto">
+          <ol className="flex flex-col gap-2">
             {files.map((file) => (
               <li
                 key={file.id}
@@ -424,7 +452,7 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
                 <button
                   type="button"
                   onClick={() => downloadDocument(file.id, file.filename)}
-                  className="flex shrink-0 items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                  className="flex min-h-[44px] shrink-0 items-center gap-1 px-2 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                 >
                   <Download size={12} /> OPEN
                 </button>
@@ -432,45 +460,48 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
             ))}
           </ol>
         )}
-      </div>
+      </LargeFormPage.Section>
 
       {canDecide && (
-        <>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-            Remarks (required to return or blacklist)
-          </label>
-          <textarea
-            rows={3}
-            value={remarks}
-            onChange={(event) => setRemarks(event.target.value)}
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-          />
-        </>
-      )}
+        <LargeFormPage.Section
+          title="Decision"
+          description="Verify eligibility, or return the registration with remarks so the applicant can supply a replacement."
+        >
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                Remarks (required to return or blacklist)
+              </label>
+              <textarea
+                rows={3}
+                value={remarks}
+                onChange={(event) => setRemarks(event.target.value)}
+                className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+              />
+            </div>
 
-      {error && (
-        <p role="alert" className="mt-3 rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-          {error}
-        </p>
-      )}
+            {/* Says why the button is unavailable. A disabled control with no
+                explanation reads as a broken screen. */}
+            {!review.complete && (
+              <p className="text-[11.5px] leading-relaxed text-text-faint">
+                {review.total === 0
+                  ? 'This registration declares no requirements, so there is nothing to verify.'
+                  : review.rejected > 0
+                    ? `${review.rejected} requirement${review.rejected === 1 ? ' was' : 's were'} marked invalid. Return the registration with remarks so the applicant can supply a replacement.`
+                    : `Check the remaining ${review.unreviewed} requirement${review.unreviewed === 1 ? '' : 's'} before approving this bidder.`}
+              </p>
+            )}
 
-      {/* Says why the button is unavailable. A disabled control with no
-          explanation reads as a broken screen. */}
-      {canDecide && !review.complete && (
-        <p className="mt-3 text-[11.5px] leading-relaxed text-text-faint">
-          {review.total === 0
-            ? 'This registration declares no requirements, so there is nothing to verify.'
-            : review.rejected > 0
-              ? `${review.rejected} requirement${review.rejected === 1 ? ' was' : 's were'} marked invalid. Return the registration with remarks so the applicant can supply a replacement.`
-              : `Check the remaining ${review.unreviewed} requirement${review.unreviewed === 1 ? '' : 's'} before approving this bidder.`}
-        </p>
+            <BacAttendance value={attendance} onChange={setAttendance} />
+          </div>
+        </LargeFormPage.Section>
       )}
 
       {/* The Secretariat's half of the job ends here. Saying so is the whole
           point — an officer who has just checked every requirement and finds no
           approve button would otherwise think the screen is broken. */}
       {!canDecide && (
-        <p className="mt-3 rounded-md border border-border-muted bg-chip px-3 py-2.5 text-[11.5px] leading-relaxed text-text-secondary">
+        <p className="rounded-md border border-border-muted bg-chip px-3 py-2.5 text-[11.5px] leading-relaxed text-text-secondary">
           {canCheckDocuments ? (
             <>
               Checking the requirements is this office&rsquo;s part. Determining whether the bidder
@@ -483,37 +514,7 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
           )}
         </p>
       )}
-
-      {canDecide && <BacAttendance value={attendance} onChange={setAttendance} />}
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          {canDecide ? 'CANCEL' : 'CLOSE'}
-        </Button>
-        {canDecide && (
-          <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => decide('return')}
-              className="rounded-sm border border-danger/30 px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-danger"
-            >
-              RETURN
-            </button>
-            <button
-              type="button"
-              // Approval requires every requirement to have been examined and
-              // none to have failed. The server refuses either way; this stops
-              // the officer discovering that only after clicking.
-              disabled={busy || !review.complete}
-              onClick={() => decide('verify')}
-              className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
-            >
-              VERIFY
-            </button>
-          </>
-        )}
-      </div>
-    </Modal>
+    </LargeFormPage>
   )
 }
 
@@ -537,28 +538,40 @@ export default function VendorVerification() {
   const canDecideEligibility = has('vendor.determineEligibility') // BAC Chair / Vice-Chair
   const canOpenReview = canIntake || canDecideEligibility
 
-  const [vendors, setVendors] = useState([])
   const [reviewing, setReviewing] = useState(null)
   const [recording, setRecording] = useState(false)
   const [creatingFor, setCreatingFor] = useState(null)
   const [resendingId, setResendingId] = useState(null)
   const [banner, setBanner] = useState(null)
-  const [refreshToken, setRefreshToken] = useState(0)
-
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
-  useEffect(() => {
-    let cancelled = false
-    biddingApi
-      .fetchVendors()
-      .then((data) => {
-        if (!cancelled) setVendors(data)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
+  const table = useServerTable(biddingApi.fetchVendors, {
+    urlKey: 'vendorRegistrations',
+    filters: [
+      {
+        key: 'registrationStatus',
+        label: 'All registrations',
+        options: ['draft', 'submitted', 'verified', 'returned', 'blacklisted'],
+      },
+      {
+        key: 'hasAccount',
+        label: 'Account issued?',
+        options: [
+          { value: 'true', label: 'Account issued' },
+          { value: 'false', label: 'No account yet' },
+        ],
+      },
+      {
+        key: 'organizationType',
+        label: 'All organisation types',
+        options: [
+          { value: 'corporation', label: 'Corporation' },
+          { value: 'partnership', label: 'Partnership' },
+          { value: 'soleProprietorship', label: 'Sole proprietorship' },
+          { value: 'cooperative', label: 'Cooperative' },
+        ],
+      },
+    ],
+  })
+  const { pageRows, paginationProps, refresh } = table
 
   const resendInvitation = async (vendor) => {
     setResendingId(vendor.id)
@@ -577,45 +590,47 @@ export default function VendorVerification() {
     }
   }
 
-  const pending = vendors.filter((vendor) => vendor.registrationStatus === 'submitted').length
+  // Whole-queue totals come from the server, not from this page of records.
+  const pending = Number(table.meta?.pending ?? 0)
+  const awaitingAccount = Number(table.meta?.awaitingAccount ?? 0)
 
-  // Approved registrations with nobody invited yet — the officer's other queue,
-  // and easy to forget about because nothing prompts for it.
-  const awaitingAccount = vendors.filter((vendor) => vendor.canCreateAccount).length
 
-  // Two filters that answer the questions this queue actually gets asked: what
-  // is waiting on me, and who has been approved but still cannot sign in.
-  const table = useTableControls(vendors, {
-    searchKeys: [
-      'businessName',
-      'contactEmail',
-      'contactPerson',
-      'referenceCode',
-      'organizationType',
-    ],
-    filters: [
-      {
-        key: 'registrationStatus',
-        label: 'All registrations',
-        options: ['draft', 'submitted', 'verified', 'returned', 'blacklisted'],
-      },
-      {
-        key: 'hasAccount',
-        label: 'Account issued?',
-        options: [
-          { value: 'true', label: 'Account issued' },
-          { value: 'false', label: 'No account yet' },
-        ],
-        accessor: (vendor) => String(Boolean(vendor.hasAccount)),
-      },
-      { key: 'organizationType', label: 'All organisation types' },
-    ],
-    accessors: {
-      documents: (vendor) => vendor.documents?.length ?? 0,
-      hasAccount: (vendor) => String(Boolean(vendor.hasAccount)),
-    },
-  })
-  const { pageRows, paginationProps } = table
+  // Item 12: counter submission and eligibility review are long workflow
+  // forms — full pages, not modals over the queue. Account issuance (one
+  // focused action) stays a modal.
+  if (recording) {
+    return (
+      <DashboardPage>
+        <CounterSubmissionModal
+          onClose={() => setRecording(false)}
+          onRecorded={(result) => {
+            setBanner({
+              tone: result.receivedAfterDeadline ? 'danger' : 'success',
+              message: result.receivedAfterDeadline
+                ? `Recorded ${result.businessName} (${result.referenceCode}) — flagged as received after the call's deadline. Check each document, then decide.`
+                : `Recorded ${result.businessName} (${result.referenceCode}). Check each document, then approve or return it.`,
+            })
+            setRecording(false)
+            refresh()
+          }}
+        />
+      </DashboardPage>
+    )
+  }
+
+  if (reviewing) {
+    return (
+      <DashboardPage>
+        <ReviewModal
+          vendor={reviewing}
+          onClose={() => setReviewing(null)}
+          onDecided={refresh}
+          canCheckDocuments={canIntake}
+          canDecide={canDecideEligibility}
+        />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
@@ -706,11 +721,16 @@ export default function VendorVerification() {
       </Card>
 
       <Card title="Registered Bidders" icon={Users} bodyClassName="">
-        {table.rows.length === 0 ? (
+        {table.loading ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading registered bidders…</p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] text-danger">Could not load the bidder register.</p>
+            <Button className="mt-3" size="sm" variant="secondary" onClick={refresh}>Try again</Button>
+          </div>
+        ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'No bidders registered yet.'
-              : 'No bidders match your search or filters.'}
+            {table.isDirty ? 'No bidders match your search or filters.' : 'No bidders registered yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -719,7 +739,7 @@ export default function VendorVerification() {
                 <tr>
                   <SortableTh {...table.sortProps('businessName')}>Business</SortableTh>
                   <SortableTh {...table.sortProps('contactEmail')}>Accredited email</SortableTh>
-                  <SortableTh {...table.sortProps('documents')}>Docs</SortableTh>
+                  <Th>Docs</Th>
                   <SortableTh {...table.sortProps('registrationStatus')}>Registration</SortableTh>
                   <SortableTh {...table.sortProps('hasAccount')}>Account</SortableTh>
                   <Th>Actions</Th>
@@ -854,31 +874,6 @@ export default function VendorVerification() {
         )}
         <Pagination {...paginationProps} label="bidders" />
       </Card>
-
-      {recording && (
-        <CounterSubmissionModal
-          onClose={() => setRecording(false)}
-          onRecorded={(result) => {
-            setBanner({
-              tone: result.receivedAfterDeadline ? 'danger' : 'success',
-              message: result.receivedAfterDeadline
-                ? `Recorded ${result.businessName} (${result.referenceCode}) — flagged as received after the call's deadline. Check each document, then decide.`
-                : `Recorded ${result.businessName} (${result.referenceCode}). Check each document, then approve or return it.`,
-            })
-            refresh()
-          }}
-        />
-      )}
-
-      {reviewing && (
-        <ReviewModal
-          vendor={reviewing}
-          onClose={() => setReviewing(null)}
-          onDecided={refresh}
-          canCheckDocuments={canIntake}
-          canDecide={canDecideEligibility}
-        />
-      )}
 
       {creatingFor && (
         <CreateAccountModal

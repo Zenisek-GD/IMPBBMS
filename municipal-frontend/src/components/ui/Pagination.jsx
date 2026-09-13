@@ -36,11 +36,11 @@ export default function Pagination({
   const showControls = totalPages > 1
 
   const stepClass =
-    'flex h-7 w-7 items-center justify-center rounded-md border border-border-muted bg-surface text-text-secondary transition-colors hover:border-border-strong hover:text-navy disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-muted'
+    'flex h-11 w-11 items-center justify-center rounded-md border border-border-muted bg-surface text-text-secondary transition-colors hover:border-border-strong hover:text-navy disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-muted'
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-muted px-4 py-2">
-      <p className="text-[11px] text-text-faint">
+      <p className="text-[12px] text-text-faint">
         {totalItems === 0 ? (
           `No ${label}`
         ) : (
@@ -54,13 +54,13 @@ export default function Pagination({
 
       <div className="flex items-center gap-3">
         {onPageSizeChange && totalItems > pageSizeOptions[0] && (
-          <label className="flex items-center gap-1.5 text-[11px] text-text-faint">
+          <label className="flex items-center gap-1.5 text-[12px] text-text-faint">
             Rows
             <select
               value={pageSize}
               onChange={(event) => onPageSizeChange(Number(event.target.value))}
               aria-label="Rows per page"
-              className="rounded-md border border-border-muted bg-surface px-1.5 py-1 text-[11px] text-text-secondary focus:border-accent focus:outline-none"
+              className="rounded-md border border-border-muted bg-surface px-1.5 py-1 text-[12px] text-text-secondary focus:border-accent focus:outline-none"
             >
               {pageSizeOptions.map((option) => (
                 <option key={option} value={option}>
@@ -85,7 +85,7 @@ export default function Pagination({
 
             {windowFor(page, totalPages).map((slot, index) =>
               slot === '…' ? (
-                <span key={`gap-${index}`} className="px-1 text-[11px] text-text-faint">
+                <span key={`gap-${index}`} className="px-1 text-[12px] text-text-faint">
                   …
                 </span>
               ) : (
@@ -94,7 +94,7 @@ export default function Pagination({
                   type="button"
                   onClick={() => onPageChange(slot)}
                   aria-current={slot === page ? 'page' : undefined}
-                  className={`h-7 min-w-7 rounded-md px-1.5 text-[11px] font-medium transition-colors ${
+                  className={`h-11 min-w-11 rounded-md px-1.5 text-xs font-medium transition-colors ${
                     slot === page
                       ? 'bg-accent text-accent-fg'
                       : 'border border-border-muted bg-surface text-text-secondary hover:border-border-strong hover:text-navy'

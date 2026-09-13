@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import { AuditLog } from "../models/auditLogModel.js";
 import { User } from "../models/userModel.js";
 import { verifyChain } from "../services/auditLog.js";
+import { parseListParams, searchCondition, pageEnvelope } from "../services/listQuery.js";
 
 const serialize = (entry) => ({
   id: entry.id,
@@ -22,8 +23,16 @@ const serialize = (entry) => ({
   prevHash: entry.prevHash,
 });
 
+const AUDIT_SORTS = {
+  sequence: "sequence",
+  recordedAt: "recordedAt",
+  actionType: "actionType",
+  actorName: "actorName",
+  outcome: "outcome",
+};
+
 export const listAuditLog = async (req, res) => {
-  const { actionType, entityRef, entityId, outcome, actor, limit } = req.query;
+  const { actionType, entityRef, entityId, outcome, actor, limit, search, sort, page, pageSize } = req.query;
 
   const where = {};
   if (actionType) where.actionType = actionType;
@@ -31,9 +40,30 @@ export const listAuditLog = async (req, res) => {
   if (entityId) where.entityId = Number(entityId);
   if (outcome) where.outcome = outcome;
   if (actor) where.actorName = { [Op.like]: `%${actor}%` };
+  if (req.query.actorRole) where.actorRole = req.query.actorRole;
+
+  const searchWhere = searchCondition(search, ["summary", "actorName", "actionType", "entityRef"]);
+  const scoped = searchWhere ? { [Op.and]: [where, searchWhere] } : where;
+
+  // Paginated shape is opt-in: callers that pass page/pageSize/sort/search get
+  // { rows, total, page, pageSize, totalPages }. Older callers (dashboard feed,
+  // export preview) keep receiving the plain array.
+  if (page !== undefined || pageSize !== undefined || sort !== undefined || search !== undefined) {
+    const params = parseListParams(req.query, {
+      sorts: AUDIT_SORTS,
+      defaultSort: { field: "sequence", direction: "desc" },
+    });
+    const { count, rows } = await AuditLog.findAndCountAll({
+      where: scoped,
+      order: params.order,
+      limit: params.limit,
+      offset: params.offset,
+    });
+    return res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: params.page, pageSize: params.pageSize }));
+  }
 
   const entries = await AuditLog.findAll({
-    where,
+    where: scoped,
     order: [["sequence", "DESC"]],
     limit: Math.min(Number(limit) || 100, 500),
   });
@@ -45,6 +75,31 @@ export const listAuditLog = async (req, res) => {
 // checked, so verification is a first-class endpoint rather than a script.
 export const verifyAuditChain = async (req, res) => {
   res.json(await verifyChain());
+};
+
+// Distinct filter values for the server-side audit table, so its dropdowns
+// name only actions and roles that actually occur — without downloading the
+// whole log to derive them client-side.
+export const getAuditFacets = async (req, res) => {
+  const [actions, roles] = await Promise.all([
+    AuditLog.findAll({
+      attributes: ["actionType"],
+      group: ["actionType"],
+      order: [["actionType", "ASC"]],
+      raw: true,
+    }),
+    AuditLog.findAll({
+      attributes: ["actorRole"],
+      where: { actorRole: { [Op.ne]: null } },
+      group: ["actorRole"],
+      order: [["actorRole", "ASC"]],
+      raw: true,
+    }),
+  ]);
+  res.json({
+    actions: actions.map((row) => row.actionType).filter(Boolean),
+    roles: roles.map((row) => row.actorRole).filter(Boolean),
+  });
 };
 
 // Section 2.2 / Section 11: Internal Auditors need full workflow history

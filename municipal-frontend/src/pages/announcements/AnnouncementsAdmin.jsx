@@ -12,6 +12,7 @@ import StatCard from '../../components/ui/StatCard'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
@@ -207,14 +208,6 @@ const announcementSchema = z
 // Module scope: a component declared inside a render is a new type every pass,
 // which remounts its whole subtree instead of updating it — and in a form that
 // means every field loses focus as you type.
-const Section = ({ heading, note, children }) => (
-  <section className="border-t border-border-muted pt-5 first:border-0 first:pt-0">
-    <p className="text-[11.5px] font-medium tracking-[0.05em] text-text-faint uppercase">{heading}</p>
-    {note && <p className="mt-1 text-[12.5px] leading-relaxed text-text-faint">{note}</p>}
-    <div className="mt-3.5 flex flex-col gap-4">{children}</div>
-  </section>
-)
-
 function AnnouncementFormModal({ title, defaultValues, onSubmit, onClose }) {
   const [serverError, setServerError] = useState('')
   const {
@@ -255,11 +248,28 @@ function AnnouncementFormModal({ title, defaultValues, onSubmit, onClose }) {
     'w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none'
 
   return (
-    // Two columns at `lg`, so the form is about half as tall as it was. It was
-    // one column of seven stacked fields, which is what made it "too long".
-    <Modal title={title} size="lg" onClose={onClose}>
-      <form onSubmit={handleSubmit(submit)} noValidate className="flex flex-col gap-6">
-        <Section heading="The notice">
+    // Item 12: a sectioned notice form with dates and rich content is large
+    // document creation — a full page, not a modal. (WithdrawModal stays a
+    // modal: entering a short reason is what modals are for.)
+    <LargeFormPage
+      title={title}
+      purpose="What the public needs to know. Line breaks are preserved. Nothing is public until you publish it."
+      onBack={onClose}
+      backLabel="Back to announcements"
+      error={serverError}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={isSubmitting} onClick={handleSubmit(submit)}>
+            {isSubmitting ? 'Saving…' : 'Save draft'}
+          </Button>
+        </>
+      }
+    >
+      <LargeFormPage.Section title="The notice">
+        <div className="flex flex-col gap-4">
           <FormField label="Title" error={errors.title?.message} registration={register('title')} />
 
           <div>
@@ -296,12 +306,14 @@ function AnnouncementFormModal({ title, defaultValues, onSubmit, onClose }) {
               placeholder="e.g. ITB-2026-014"
             />
           </div>
-        </Section>
+        </div>
+      </LargeFormPage.Section>
 
-        <Section
-          heading="Dates"
-          note="Setting a registration deadline is what turns a notice into a call for bidders — there is no separate switch, because two controls expressing one fact are two controls that can disagree."
-        >
+      <LargeFormPage.Section
+        title="Dates"
+        description="Setting a registration deadline is what turns a notice into a call for bidders — there is no separate switch, because two controls expressing one fact are two controls that can disagree."
+      >
+        <div className="flex flex-col gap-4">
           <DeadlineField
             label="Bidder registration deadline (optional)"
             name="registrationDeadline"
@@ -320,35 +332,13 @@ function AnnouncementFormModal({ title, defaultValues, onSubmit, onClose }) {
             hint="Leave blank to keep the notice up until it is withdrawn by hand."
           />
 
-          <label className="flex items-center gap-2.5 text-[13px] text-text-secondary">
+          <label className="flex min-h-[44px] items-center gap-2.5 text-[13px] text-text-secondary">
             <input type="checkbox" {...register('pinned')} className="size-4" />
             Pin to the top of the public announcements list
           </label>
-        </Section>
-
-        {serverError && (
-          <p
-            role="alert"
-            className="rounded-md border border-danger/25 bg-danger/10 px-3.5 py-2.5 text-[13px] text-danger"
-          >
-            {serverError}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2 border-t border-border-muted pt-5">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="rounded-md bg-accent px-4 py-2.5 text-[13px] font-medium text-accent-fg disabled:opacity-60"
-          >
-            {isSubmitting ? 'Saving…' : 'Save draft'}
-          </button>
         </div>
-      </form>
-    </Modal>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -486,6 +476,56 @@ export default function AnnouncementsAdmin() {
     },
   })
   const { pageRows, paginationProps } = table
+
+  // Item 12: the notice form renders as a full page, not as a modal over the
+  // list. Withdrawing (a short reason) stays a modal.
+  if (creating) {
+    return (
+      <DashboardPage>
+        <AnnouncementFormModal
+          title="New announcement"
+          defaultValues={{
+            title: '',
+            body: '',
+            category: 'general',
+            referenceNo: '',
+            registrationDeadline: '',
+            expiresAt: '',
+            pinned: false,
+          }}
+          onClose={() => setCreating(false)}
+          onSubmit={async (values) => {
+            await announcementsApi.createAnnouncement(values)
+            load()
+          }}
+        />
+      </DashboardPage>
+    )
+  }
+
+  if (editing) {
+    return (
+      <DashboardPage>
+        <AnnouncementFormModal
+          title={`Edit "${editing.title}"`}
+          defaultValues={{
+            title: editing.title,
+            body: editing.body,
+            category: editing.category,
+            referenceNo: editing.referenceNo ?? '',
+            registrationDeadline: toLocalInput(editing.registrationDeadline),
+            expiresAt: toLocalInput(editing.expiresAt),
+            pinned: editing.pinned,
+          }}
+          onClose={() => setEditing(null)}
+          onSubmit={async (values) => {
+            await announcementsApi.updateAnnouncement(editing.id, values)
+            load()
+          }}
+        />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
@@ -640,46 +680,6 @@ export default function AnnouncementsAdmin() {
         )}
         <Pagination {...paginationProps} label="announcements" />
       </Card>
-
-      {creating && (
-        <AnnouncementFormModal
-          title="New announcement"
-          defaultValues={{
-            title: '',
-            body: '',
-            category: 'general',
-            referenceNo: '',
-            registrationDeadline: '',
-            expiresAt: '',
-            pinned: false,
-          }}
-          onClose={() => setCreating(false)}
-          onSubmit={async (values) => {
-            await announcementsApi.createAnnouncement(values)
-            load()
-          }}
-        />
-      )}
-
-      {editing && (
-        <AnnouncementFormModal
-          title={`Edit "${editing.title}"`}
-          defaultValues={{
-            title: editing.title,
-            body: editing.body,
-            category: editing.category,
-            referenceNo: editing.referenceNo ?? '',
-            registrationDeadline: toLocalInput(editing.registrationDeadline),
-            expiresAt: toLocalInput(editing.expiresAt),
-            pinned: editing.pinned,
-          }}
-          onClose={() => setEditing(null)}
-          onSubmit={async (values) => {
-            await announcementsApi.updateAnnouncement(editing.id, values)
-            load()
-          }}
-        />
-      )}
 
       {withdrawing && (
         <WithdrawModal

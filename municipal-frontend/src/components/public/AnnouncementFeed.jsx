@@ -57,8 +57,8 @@ const CATEGORY_LABELS = {
 const CATEGORY_TONES = {
   procurementOpportunity: 'text-success',
   newProject: 'text-success',
-  systemUpdate: 'text-text-secondary',
-  general: 'text-text-secondary',
+  systemUpdate: 'text-navy',
+  general: 'text-navy',
 }
 
 // Trims the body to a standfirst without cutting a word in half.
@@ -71,7 +71,7 @@ const excerpt = (text, limit) => {
 
 function Kicker({ entry }) {
   const label = CATEGORY_LABELS[entry.category] ?? 'Notice'
-  const tone = CATEGORY_TONES[entry.category] ?? 'text-text-secondary'
+  const tone = CATEGORY_TONES[entry.category] ?? 'text-navy'
 
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] font-medium tracking-[0.06em] uppercase">
@@ -81,7 +81,7 @@ function Kicker({ entry }) {
           <span className="text-border-strong" aria-hidden>
             •
           </span>
-          <span className="inline-flex items-center gap-1 text-text-faint">
+          <span className="inline-flex items-center gap-1 text-navy">
             <Pin size={10} /> Pinned
           </span>
         </>
@@ -89,7 +89,7 @@ function Kicker({ entry }) {
       <span className="text-border-strong" aria-hidden>
         •
       </span>
-      <span className="text-text-faint">
+      <span className="text-navy">
         {entry.source === 'solicitation' ? 'Auto-listed' : 'Posted'}{' '}
         {shortDate(entry.publishedAt)}
       </span>
@@ -115,11 +115,11 @@ function DeadlineNote({ deadline, daysRemaining, compact = false }) {
       <p className="flex items-start gap-2 text-[12.5px] font-medium text-navy">
         <CalendarClock
           size={15}
-          className={`mt-px shrink-0 ${urgent ? 'text-warning' : 'text-text-secondary'}`}
+          className={`mt-px shrink-0 ${urgent ? 'text-warning' : 'text-navy'}`}
         />
         Requirements must be submitted by {dateTime(deadline)}
       </p>
-      <p className="mt-1 pl-[23px] text-[12px] leading-relaxed text-text-secondary">
+      <p className="mt-1 pl-[23px] text-[12px] leading-relaxed text-navy">
         {daysRemaining !== null && daysRemaining <= 0
           ? 'Closing today.'
           : `${daysRemaining} day${daysRemaining === 1 ? '' : 's'} left.`}{' '}
@@ -145,21 +145,21 @@ function SolicitationFacts({ entry, compact = false }) {
       }`}
     >
       <div>
-        <dt className="text-[10.5px] tracking-[0.05em] text-text-faint uppercase">Mode</dt>
-        <dd className="mt-1 text-[13px] text-text-secondary">{entry.mode ?? '—'}</dd>
+        <dt className="text-[10.5px] tracking-[0.05em] text-navy uppercase">Mode</dt>
+        <dd className="mt-1 text-[13px] text-navy">{entry.mode ?? '—'}</dd>
       </div>
       <div>
-        <dt className="text-[10.5px] tracking-[0.05em] text-text-faint uppercase">Budget (ABC)</dt>
+        <dt className="text-[10.5px] tracking-[0.05em] text-navy uppercase">Budget (ABC)</dt>
         <dd className="tabular-nums mt-1 text-[13.5px] font-semibold text-navy">
           {peso(entry.abc)}
         </dd>
       </div>
       <div className={compact ? 'col-span-2' : ''}>
-        <dt className="text-[10.5px] tracking-[0.05em] text-text-faint uppercase">Bids close</dt>
-        <dd className="tabular-nums mt-1 text-[13px] text-text-secondary">
+        <dt className="text-[10.5px] tracking-[0.05em] text-navy uppercase">Bids close</dt>
+        <dd className="tabular-nums mt-1 text-[13px] text-navy">
           {shortDate(entry.closingDate)}
           {entry.closingInDays !== null && entry.closingInDays >= 0 && (
-            <span className="text-text-faint"> · in {entry.closingInDays}d</span>
+            <span className="text-navy"> · in {entry.closingInDays}d</span>
           )}
         </dd>
       </div>
@@ -178,7 +178,7 @@ function LeadArticle({ entry }) {
       </h3>
 
       {entry.projectTitle && (
-        <p className="mt-2 text-[13.5px] text-text-secondary">
+        <p className="mt-2 text-[13.5px] text-navy">
           {entry.implementingUnit ? `${entry.implementingUnit} · ` : ''}
           {entry.projectTitle}
         </p>
@@ -190,13 +190,13 @@ function LeadArticle({ entry }) {
           enough — the paragraphs an officer typed survive without the form ever
           having accepted markup. */}
       {entry.body && (
-        <p className="mt-4 max-w-3xl text-[15px] leading-relaxed whitespace-pre-line text-text-secondary">
+        <p className="mt-4 max-w-3xl text-[15px] leading-relaxed whitespace-pre-line text-navy">
           {entry.body}
         </p>
       )}
 
       {entry.referenceNo && (
-        <p className="mt-4 font-mono text-[12px] text-text-faint">Ref. {entry.referenceNo}</p>
+        <p className="mt-4 font-mono text-[12px] text-navy">Ref. {entry.referenceNo}</p>
       )}
 
       {entry.source === 'solicitation' && <SolicitationFacts entry={entry} />}
@@ -223,7 +223,7 @@ function LeadArticle({ entry }) {
 // ── A card in the grid below the lead ───────────────────────────────────────
 function ArticleCard({ entry }) {
   return (
-    <article className="flex flex-col rounded-xl border border-border-muted bg-surface p-5 shadow-sm">
+    <article className="flex flex-col rounded-xl border border-border-strong bg-surface p-5 shadow-sm">
       <Kicker entry={entry} />
 
       <h3 className="mt-2.5 text-[17px] leading-snug font-semibold tracking-[-0.015em] text-navy">
@@ -231,20 +231,20 @@ function ArticleCard({ entry }) {
       </h3>
 
       {entry.projectTitle && (
-        <p className="mt-1 text-[12.5px] text-text-secondary">
+        <p className="mt-1 text-[12.5px] text-navy">
           {entry.implementingUnit ? `${entry.implementingUnit} · ` : ''}
           {entry.projectTitle}
         </p>
       )}
 
       {entry.body && (
-        <p className="mt-2.5 text-[13.5px] leading-relaxed text-text-secondary">
+        <p className="mt-2.5 text-[13.5px] leading-relaxed text-navy">
           {excerpt(entry.body, 190)}
         </p>
       )}
 
       {entry.referenceNo && (
-        <p className="mt-3 font-mono text-[11.5px] text-text-faint">Ref. {entry.referenceNo}</p>
+        <p className="mt-3 font-mono text-[11.5px] text-navy">Ref. {entry.referenceNo}</p>
       )}
 
       {entry.source === 'solicitation' && <SolicitationFacts entry={entry} compact />}
@@ -312,10 +312,10 @@ export default function AnnouncementFeed() {
 
   if (failed) {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-xl border border-border-muted bg-surface px-4 py-16 text-center">
-        <FileWarning size={22} className="text-text-faint" />
+      <div className="flex flex-col items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-16 text-center">
+        <FileWarning size={22} className="text-navy" />
         <p className="text-[15px] font-medium text-navy">Announcements could not be loaded</p>
-        <p className="max-w-md text-[13.5px] text-text-secondary">
+        <p className="max-w-md text-[13.5px] text-navy">
           The service is not responding. Please try again shortly.
         </p>
       </div>
@@ -324,10 +324,10 @@ export default function AnnouncementFeed() {
 
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-xl border border-border-muted bg-surface px-4 py-16 text-center">
-        <Megaphone size={22} className="text-text-faint" />
+      <div className="flex flex-col items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-16 text-center">
+        <Megaphone size={22} className="text-navy" />
         <p className="text-[15px] font-medium text-navy">No announcements right now</p>
-        <p className="max-w-md text-[13.5px] text-text-secondary">
+        <p className="max-w-md text-[13.5px] text-navy">
           Notices about upcoming procurement, open opportunities and system updates appear here.
         </p>
       </div>

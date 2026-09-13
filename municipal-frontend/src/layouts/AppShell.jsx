@@ -16,7 +16,7 @@ import { fetchPendingCounts } from '../api/reports'
 // without one are routed to /coming-soon instead (see roleLanding.js), so
 // `nav` should always resolve here — but fall back defensively just in case.
 export default function AppShell() {
-  const { user, logout } = useAuth()
+  const { user, logout, sessionWarning, continueSession, dismissSessionWarning } = useAuth()
   const location = useLocation()
   const [mobileNavLocation, setMobileNavLocation] = useState(null)
   const mobileNavOpen = mobileNavLocation === location.key
@@ -28,6 +28,7 @@ export default function AppShell() {
   const [shortcutOverrides, setShortcutOverrides] = useState(null)
   const [confirmingLogout, setConfirmingLogout] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(false)
   const [pending, setPending] = useState({ userId: null, counts: {} })
   const canViewReports = user?.permissions?.some((permission) => ['app.view', 'app.viewPublished', 'bidding.view', 'bidding.evaluate', 'bidding.technicalInput', 'contract.view', 'contract.viewPublished', 'delivery.submitInvoice', 'audit.viewAll', 'audit.viewLogs'].includes(permission))
 
@@ -92,6 +93,12 @@ export default function AppShell() {
       }
     }
   }, [logout])
+
+  const confirmActiveSession = useCallback(async () => {
+    setCheckingSession(true)
+    try { await continueSession() }
+    finally { setCheckingSession(false) }
+  }, [continueSession])
 
   // Seeded from the account, so the rail opens the way this user last left it
   // — on whatever machine they sign in from.
@@ -200,6 +207,29 @@ export default function AppShell() {
               </Button>
               <Button variant="danger" icon={LogOut} disabled={signingOut} onClick={signOut}>
                 {signingOut ? 'Signing out…' : 'Sign out'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {sessionWarning && !confirmingLogout && (
+        <Modal
+          title="Session ending soon"
+          size="sm"
+          onClose={dismissSessionWarning}
+        >
+          <div className="flex flex-col gap-4">
+            <p className="text-sm leading-relaxed text-text-secondary">
+              For your security, this session ends after 30 minutes. Save any unfinished work now.
+              Continuing checks the server session but cannot extend its fixed deadline.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" disabled={checkingSession} onClick={() => setConfirmingLogout(true)}>
+                Sign out now
+              </Button>
+              <Button disabled={checkingSession} onClick={confirmActiveSession}>
+                {checkingSession ? 'Checking session…' : 'Continue working'}
               </Button>
             </div>
           </div>

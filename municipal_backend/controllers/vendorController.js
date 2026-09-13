@@ -14,6 +14,7 @@ import { recordAudit, auditFromRequest, AUDIT_ACTIONS } from "../services/auditL
 import { issueActivationToken } from "../services/activation.js";
 import { sendActivationInvitation } from "../services/mailer.js";
 import { activationTtlHours } from "../config/mail.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
 const withIncludes = {
   include: [
@@ -435,40 +436,94 @@ const invitationsFor = async (userIds) => {
 };
 
 export const listVendors = async (req, res) => {
-  const { status, search } = req.query;
+  const { search } = req.query;
+  // `status` was the original public parameter. The console names its filter
+  // after the stored field, so accept both without changing older callers.
+  const status = req.query.registrationStatus ?? req.query.status;
   const where = {};
   if (status) where.registrationStatus = status;
-  if (search) {
-    where[Op.or] = [
-      { businessName: { [Op.like]: `%${search}%` } },
-      { referenceCode: { [Op.like]: `%${search}%` } },
-      { contactEmail: { [Op.like]: `%${search}%` } },
-    ];
+  if (ORGANIZATION_TYPES.includes(req.query.organizationType)) {
+    where.organizationType = req.query.organizationType;
+  }
+  if (req.query.hasAccount === "true") where.userId = { [Op.not]: null };
+  if (req.query.hasAccount === "false") where.userId = null;
+  const searched = searchCondition(search, ["businessName", "referenceCode", "contactEmail", "contactPerson"]);
+  if (searched) Object.assign(where, searched);
+
+  const defaultOrder = [
+    [
+      sequelize.literal(
+        "CASE WHEN `Vendor`.`registrationStatus` = 'submitted' THEN 0 ELSE 1 END"
+      ),
+      "ASC",
+    ],
+    ["submittedAt", "DESC"],
+    ["businessName", "ASC"],
+  ];
+  const paged = req.query.page !== undefined || req.query.pageSize !== undefined || req.query.sort !== undefined;
+
+  // Preserve the legacy array response for dashboard summaries and older
+  // consumers. New console requests always supply page/pageSize and receive a
+  // bounded envelope instead.
+  if (!paged) {
+    const vendors = await Vendor.findAll({
+      where,
+      ...withIncludes,
+      // Submitted registrations first — that is the queue the officer is here to
+      // work through — then most recently submitted within each status.
+      order: defaultOrder,
+    });
+
+    const invitations = await invitationsFor(vendors.map((vendor) => vendor.userId));
+    return res.json(
+      vendors.map((vendor) =>
+        serialize(vendor, summariseInvitation(invitations.get(vendor.userId) ?? null))
+      )
+    );
   }
 
-  const vendors = await Vendor.findAll({
-    where,
-    ...withIncludes,
-    // Submitted registrations first — that is the queue the officer is here to
-    // work through — then most recently submitted within each status.
-    order: [
-      [
-        sequelize.literal(
-          "CASE WHEN `Vendor`.`registrationStatus` = 'submitted' THEN 0 ELSE 1 END"
-        ),
-        "ASC",
-      ],
-      ["submittedAt", "DESC"],
-      ["businessName", "ASC"],
-    ],
+  const page = parseListParams(req.query, {
+    sorts: {
+      businessName: "businessName",
+      contactEmail: "contactEmail",
+      registrationStatus: "registrationStatus",
+      hasAccount: "userId",
+    },
+    defaultSort: { field: "businessName", direction: "asc" },
   });
-
+  const order = req.query.sort ? page.order : defaultOrder;
+  const [{ count, rows: vendors }, pending, awaitingAccount] = await Promise.all([
+    Vendor.findAndCountAll({
+      where,
+      ...withIncludes,
+      order,
+      limit: page.limit,
+      offset: page.offset,
+      distinct: true,
+    }),
+    Vendor.count({ where: { registrationStatus: "submitted" } }),
+    Vendor.count({
+      where: {
+        registrationStatus: "verified",
+        userId: null,
+        contactEmail: { [Op.not]: null },
+      },
+    }),
+  ]);
   const invitations = await invitationsFor(vendors.map((vendor) => vendor.userId));
-  res.json(
-    vendors.map((vendor) =>
-      serialize(vendor, summariseInvitation(invitations.get(vendor.userId) ?? null))
-    )
-  );
+  return res.json({
+    ...pageEnvelope({
+      rows: vendors.map((vendor) =>
+        serialize(vendor, summariseInvitation(invitations.get(vendor.userId) ?? null))
+      ),
+      total: count,
+      page: page.page,
+      pageSize: page.pageSize,
+    }),
+    // Header badges report the operational queues, not merely the currently
+    // selected page. They deliberately stay server-derived as records grow.
+    summary: { pending, awaitingAccount },
+  });
 };
 
 export const reviewVendor = async (req, res) => {

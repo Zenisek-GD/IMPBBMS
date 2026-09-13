@@ -27,6 +27,7 @@ import {
   procurementAmountError,
 } from "../services/procurementThresholds.js";
 import { checkVendorEligibility } from "../services/vendorEligibility.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { unresolvedProtestsFor } from "./protestController.js";
 import { ObserverInvitation, ObserverOrganization } from "../models/observerModel.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
@@ -150,9 +151,12 @@ export const updateRfqSchedule = async (req, res) => {
 };
 
 export const listRfqs = async (req, res) => {
-  const { status } = req.query;
+  const { status, search } = req.query;
   const where = {};
   if (status) where.status = status;
+  if (req.query.prebidRequired === "true" || req.query.prebidRequired === "false") where.prebidRequired = req.query.prebidRequired === "true";
+  const searched = searchCondition(search, ["referenceNo", "title"]);
+  if (searched) Object.assign(where, searched);
 
   // A vendor sees only what is actually open to bid on, never drafts.
   if (req.permissions.has("bidding.submitBid") && !req.permissions.has("bidding.publish")) {
@@ -163,8 +167,17 @@ export const listRfqs = async (req, res) => {
     where.status = { [Op.in]: ["awarded", "closed", "opened", "evaluated"] };
   }
 
-  const rfqs = await Rfq.findAll({ where, ...rfqIncludes, order: [["createdAt", "DESC"]] });
-  res.json(rfqs.map(serializeRfq));
+  const paged = ["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
+  if (!paged) {
+    const rfqs = await Rfq.findAll({ where, ...rfqIncludes, order: [["createdAt", "DESC"]] });
+    return res.json(rfqs.map(serializeRfq));
+  }
+  const page = parseListParams(req.query, {
+    sorts: { referenceNo: "referenceNo", title: "title", abc: "abc", closingDate: "closingDate", openingDate: "openingDate", status: "status", createdAt: "createdAt" },
+    defaultSort: { field: "createdAt", direction: "desc" },
+  });
+  const { count, rows } = await Rfq.findAndCountAll({ where, ...rfqIncludes, ...page, distinct: true });
+  res.json(pageEnvelope({ rows: rows.map(serializeRfq), total: count, page: page.page, pageSize: page.pageSize }));
 };
 
 export const createRfq = async (req, res) => {
@@ -1370,28 +1383,69 @@ export const disapproveAward = async (req, res) => {
 };
 
 export const listAwards = async (req, res) => {
-  const awards = await Award.findAll({
-    where: req.permissions.has("bidding.view") ? {} : { status: { [Op.in]: ["issued", "accepted"] } },
-    include: [
-      { model: Rfq, as: "rfq" },
-      { model: Vendor, as: "vendor" },
-      { model: User, as: "recommendedBy", attributes: ["id", "name"] },
-    ],
-    order: [["createdAt", "DESC"]],
+  const where = req.permissions.has("bidding.view")
+    ? {}
+    : { status: { [Op.in]: ["issued", "accepted"] } };
+  // A public-view-only caller remains limited to issued/accepted records even
+  // if they put a different status in the query string.
+  if (req.query.status && req.permissions.has("bidding.view")) where.status = req.query.status;
+  const search = searchCondition(req.query.search, [
+    "noaNumber",
+    "status",
+    "$rfq.referenceNo$",
+    "$rfq.title$",
+    "$vendor.businessName$",
+  ]);
+  if (search) where[Op.and] = [search];
+  const include = [
+    { model: Rfq, as: "rfq" },
+    { model: Vendor, as: "vendor" },
+    { model: User, as: "recommendedBy", attributes: ["id", "name"] },
+  ];
+  const serializeAward = (award) => ({
+    id: award.id,
+    noaNumber: award.noaNumber,
+    noaDate: award.noaDate,
+    amount: Number(award.amount),
+    status: award.status,
+    referenceNo: award.rfq?.referenceNo ?? null,
+    projectTitle: award.rfq?.title ?? null,
+    vendorName: award.vendor?.businessName ?? null,
+    recommendedByName: award.recommendedBy?.name ?? null,
+    recommendedById: award.recommendedById,
   });
 
-  res.json(
-    awards.map((award) => ({
-      id: award.id,
-      noaNumber: award.noaNumber,
-      noaDate: award.noaDate,
-      amount: Number(award.amount),
-      status: award.status,
-      referenceNo: award.rfq?.referenceNo ?? null,
-      projectTitle: award.rfq?.title ?? null,
-      vendorName: award.vendor?.businessName ?? null,
-      recommendedByName: award.recommendedBy?.name ?? null,
-      recommendedById: award.recommendedById,
-    }))
-  );
+  // Keep the original array response for selection dialogs and other callers
+  // that predate the list protocol; the award workspace opts in explicitly.
+  const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
+  if (!wantsPaging) {
+    const awards = await Award.findAll({ where, include, order: [["createdAt", "DESC"]] });
+    return res.json(awards.map(serializeAward));
+  }
+
+  const paging = parseListParams(req.query, {
+    sorts: {
+      noaNumber: "noaNumber",
+      noaDate: "noaDate",
+      amount: "amount",
+      status: "status",
+      createdAt: "createdAt",
+    },
+    defaultSort: { field: "createdAt", direction: "desc" },
+  });
+  const { rows, count } = await Award.findAndCountAll({
+    where,
+    include,
+    order: paging.order,
+    limit: paging.limit,
+    offset: paging.offset,
+    distinct: true,
+    subQuery: false,
+  });
+  return res.json(pageEnvelope({
+    rows: rows.map(serializeAward),
+    total: count,
+    page: paging.page,
+    pageSize: paging.pageSize,
+  }));
 };

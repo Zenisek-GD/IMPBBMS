@@ -24,7 +24,16 @@
    with its own label, or it disappears. */
 :root {
   color-scheme: light;
+  font-size: 16px;
 }
+
+/* A reading preference scales the whole interface at the root, so px-based
+   text — which is most of this system — grows together with rem-based
+   controls: forms, tables, navigation, dialogs and notices. Root `zoom`
+   behaves like browser zoom (breakpoints and fixed dialogs respond to it),
+   and it stacks with browser zoom rather than fighting it. */
+:root[data-text-size='large'] { zoom: 1.125; }
+:root[data-text-size='extraLarge'] { zoom: 1.25; }
 
 .dark {
   --color-canvas: #0c0f0d;
@@ -39,7 +48,9 @@
   --color-navy-tint: rgba(34, 197, 94, 0.14);
   --color-text-primary: #f1f5f2;
   --color-text-secondary: #b2bcb6;
-  --color-text-faint: #7c877f;
+  /* Lifted for small text on near-black surfaces; the old value fell under
+     4.5:1 against the dark card fills. */
+  --color-text-faint: #96a29c;
 
   /* A filled control on a dark surface reads as light-on-dark, so accent and its
      foreground swap rather than darkening further. The bright green stays bright
@@ -105,7 +116,9 @@
    Token *names* are unchanged, so the several hundred existing utility classes
    are untouched — `text-navy` still means "the strong foreground colour". */
 @theme {
-  --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  /* Production CSP allows local fonts only. This keeps one crisp, neutral UI
+     face on Windows while retaining compatible system fallbacks elsewhere. */
+  --font-sans: "Segoe UI", "Helvetica Neue", "Noto Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
 
   /* ── A TINTED PAGE, WHITE CARDS ─────────────────────────────────────────
@@ -141,8 +154,12 @@
   --color-navy: #101512;
   --color-navy-tint: rgba(21, 128, 61, 0.08);
   --color-text-primary: #101512;
-  --color-text-secondary: #4c5450;
-  --color-text-faint: #838d88;
+  /* Darkened a notch for reading-size text: #4c5450 passed AA but sat in the
+     grey zone officers described as hard to scan all day. */
+  --color-text-secondary: #3f4642;
+  /* #838d88 failed AA under 18px. #5d6762 clears 4.5:1 on white, so small
+     meta text is dimmed but still readable. */
+  --color-text-faint: #5d6762;
 
   /* Green replaces navy as the filled-control colour. #15803d rather than the
      brighter green it is derived from: a primary button carries white label
@@ -207,11 +224,13 @@
   /* Softer, more generous corners — with the page now tinted, a card is an
      object rather than a drawn rectangle, and objects in the references are
      rounded more than this was. Every step goes up roughly one notch. */
-  --radius-sm: 0.5rem;
-  --radius-DEFAULT: 0.75rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.25rem;
+  /* Precise, document-like edges for a clean municipal-service interface.
+     Full pills remain reserved for compact filters, status and count controls. */
+  --radius-sm: 0.375rem;
+  --radius-DEFAULT: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
 
   /* Diffuse rather than tight. On a tinted page a card is lifted by the spread
      of its shadow, not by the darkness of its edge — a hard shadow against a
@@ -238,6 +257,8 @@ html {
      property were not re-resolving on a theme flip, leaving default body text
      on the light foreground colour. */
   color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-synthesis: none;
 }
 
 body {
@@ -248,12 +269,35 @@ body {
      whole application, including the headings, the cards and the dialogs. The
      result read as cramped rather than efficient.
      Tables keep their own smaller sizes; everything else breathes. */
-  font-size: 14px;
-  line-height: 1.55;
+  /* This is the readable default for prose, notices, and unclassed controls.
+     Dense data grids retain their intentional compact text utilities. */
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
   color: inherit;
   background: transparent;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Stable typographic roles make the interface consistent across public pages,
+   operational workspaces, dialogs and reports. Utilities remain available for
+   intentional local adjustments. */
+:where(h1, h2, h3, h4, h5, h6) {
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-weight: 650;
+  line-height: 1.16;
+  letter-spacing: -0.024em;
+}
+
+:where(button, input, select, textarea) {
+  font: inherit;
+}
+
+:where(th, td, input, select, textarea) {
+  letter-spacing: -0.004em;
 }
 
 #root {

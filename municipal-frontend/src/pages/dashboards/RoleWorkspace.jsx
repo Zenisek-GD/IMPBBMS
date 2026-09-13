@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Activity, ArrowRight, Inbox, Landmark, Compass } from 'lucide-react'
+import { Activity, ArrowRight, Inbox, Landmark, Compass, Bell, CalendarClock, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
 import { ROLE_NAV } from '../../config/navigation'
 import DashboardPage from '../../components/ui/DashboardPage'
@@ -8,6 +8,7 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import { dashboardFor } from './dashboardConfig'
 import { useDashboardData } from './useDashboardData'
+import { recentlyCompleted } from './queues'
 
 // ── THE ROLE'S OWN DASHBOARD ─────────────────────────────────────────────────
 // This file used to render one identical screen for thirteen routes. The four
@@ -35,11 +36,29 @@ const dateTime = (value) =>
     minute: '2-digit',
   })
 
+const dueState = (value) => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const remaining = date.getTime() - Date.now()
+  if (remaining < 0) return { label: `Overdue since ${date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`, tone: 'text-danger' }
+  if (remaining <= 3 * 24 * 60 * 60 * 1000) return { label: `Due ${date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`, tone: 'text-warning' }
+  return { label: `Due ${date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`, tone: 'text-text-faint' }
+}
+
 const TONE_TEXT = {
   warning: 'text-warning',
   danger: 'text-danger',
   success: 'text-success',
 }
+
+// Module scope (like dueState above): urgency is read at render time, and the
+// compiler purity rule forbids inline Date.now() in the component body.
+const isQueueOverdue = (item) => item.dueAt != null && new Date(item.dueAt).getTime() < Date.now()
+const isQueueDueSoon = (item) =>
+  item.dueAt != null &&
+  !isQueueOverdue(item) &&
+  new Date(item.dueAt).getTime() - Date.now() <= 3 * 24 * 60 * 60 * 1000
 
 function StatCard({ label, value, hint, tone }) {
   return (
@@ -61,12 +80,20 @@ export default function RoleWorkspace() {
   const nav = ROLE_NAV[user?.role]
   const quickLinks = nav?.sections?.flatMap((section) => section.items) ?? []
   const stats = loading ? [] : (config.stats?.(data) ?? [])
+  const done = loading ? [] : recentlyCompleted(data, user)
+
+  // Urgency grouping: overdue first, then due within three days, then the
+  // rest. An item without a due date is never "overdue" — it simply waits.
+  const overdue = queue.filter(isQueueOverdue)
+  const dueSoon = queue.filter(isQueueDueSoon)
+  const waiting = queue.filter((item) => !isQueueOverdue(item) && !isQueueDueSoon(item))
 
   // Only the Administrator, the Mayor and the Internal Auditor. The feed used to
   // be gated on `audit.viewAll`, which ten roles hold — so a Treasurer's
   // dashboard led with the whole municipality's activity instead of their own
   // work. The Auditor keeps it because reading this trail is the job.
   const showActivity = config.showActivity && Array.isArray(data.audit)
+  const unreadNotifications = data.notifications?.notifications ?? []
 
   return (
     <DashboardPage>
@@ -122,38 +149,69 @@ export default function RoleWorkspace() {
                   {failedSources.length ? 'Pending items could not be fully checked. Retry the dashboard or open the relevant page.' : 'Nothing is waiting on you right now.'}
                 </p>
               ) : (
-                <ul className="divide-y divide-border-muted">
-                  {queue.slice(0, 8).map((item) => (
-                    <li key={item.id}>
-                      <Link
-                        to={item.href}
-                        className="group flex items-start justify-between gap-3 px-4 py-3 hover:bg-sidebar"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-[13px] font-medium text-navy">{item.title}</p>
-                          <p className="truncate text-[12px] text-text-secondary">{item.subtitle}</p>
-                          <p className="mt-0.5 text-[11px] text-warning">{item.stage}</p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {item.amount != null && (
-                            <span className="text-[12px] whitespace-nowrap text-text-faint">
-                              {peso(item.amount)}
-                            </span>
-                          )}
-                          <ArrowRight
-                            size={15}
-                            className="text-text-faint transition-transform group-hover:translate-x-0.5"
-                          />
-                        </div>
-                      </Link>
-                    </li>
+                <>
+                  {[
+                    { heading: 'Overdue', rows: overdue, tone: 'text-danger' },
+                    { heading: 'Due soon', rows: dueSoon, tone: 'text-warning' },
+                    { heading: overdue.length + dueSoon.length > 0 ? 'Needs your action' : null, rows: waiting, tone: 'text-text-faint' },
+                  ].filter((group) => group.rows.length > 0).map((group) => (
+                    <div key={group.heading ?? 'all'}>
+                      {group.heading && (
+                        <p className={`border-b border-border-muted bg-sidebar px-4 py-1.5 text-[11px] font-semibold tracking-[0.04em] uppercase ${group.tone}`}>
+                          {group.heading} ({group.rows.length})
+                        </p>
+                      )}
+                      <ul className="divide-y divide-border-muted">
+                        {group.rows.slice(0, group.heading ? 5 : 8).map((item) => (
+                          <li key={item.id}>
+                            <Link
+                              to={item.href}
+                              className="group flex items-start justify-between gap-3 px-4 py-3 hover:bg-sidebar"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-medium text-navy">{item.title}</p>
+                                <p className="truncate text-[12px] text-text-secondary">{item.subtitle}</p>
+                                <p className="mt-0.5 text-[11px] text-warning">{item.stage}</p>
+                                <p className="mt-0.5 text-[12px] text-navy">
+                                  Your action: <span className="font-medium">{item.action}</span>
+                                </p>
+                                {dueState(item.dueAt) && (
+                                  <p className={`mt-1 flex items-center gap-1 text-[11px] font-medium ${dueState(item.dueAt).tone}`}>
+                                    <CalendarClock size={12} /> {dueState(item.dueAt).label}
+                                  </p>
+                                )}
+                                {isQueueOverdue(item) && (
+                                  <p className="mt-0.5 text-[11px] text-danger">
+                                    Overdue — downstream stages cannot proceed until this is done.
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                                {item.amount != null && (
+                                  <span className="text-[12px] whitespace-nowrap text-text-faint">
+                                    {peso(item.amount)}
+                                  </span>
+                                )}
+                                <span className="inline-flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-[11.5px] font-medium whitespace-nowrap text-accent-fg">
+                                  {item.actionLabel}
+                                  <ArrowRight
+                                    size={13}
+                                    className="transition-transform group-hover:translate-x-0.5"
+                                  />
+                                </span>
+                              </div>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                  {queue.length > 8 && (
-                    <li className="px-4 py-2 text-[11px] text-text-faint">
-                      and {queue.length - 8} more
-                    </li>
+                  {queue.length > overdue.slice(0, 5).length + dueSoon.slice(0, 5).length + waiting.slice(0, 8).length && (
+                    <p className="px-4 py-2 text-[11px] text-text-faint">
+                      Open the relevant page to see the rest of your queue.
+                    </p>
                   )}
-                </ul>
+                </>
               )}
             </Card>
 
@@ -184,6 +242,61 @@ export default function RoleWorkspace() {
               </Card>
             )}
           </div>
+
+          {done.length > 0 && (
+            <Card
+              title="Recently completed by you"
+              icon={CheckCircle2}
+              bodyClassName=""
+            >
+              <ul className="divide-y divide-border-muted">
+                {done.map((item) => (
+                  <li key={item.id}>
+                    <Link
+                      to={item.href}
+                      className="group flex items-start justify-between gap-3 px-4 py-3 hover:bg-sidebar"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-medium text-navy">{item.title}</p>
+                        {item.subtitle && (
+                          <p className="truncate text-[12px] text-text-secondary">{item.subtitle}</p>
+                        )}
+                        <p className="mt-0.5 text-[12px] text-success">{item.detail}</p>
+                      </div>
+                      <time className="shrink-0 font-mono text-[11px] whitespace-nowrap text-text-faint">
+                        {new Date(item.completedAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
+                      </time>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+
+          <Card
+            title="Messages and updates"
+            icon={Bell}
+            action={unreadNotifications.length > 0 && <Badge tone="warning">{unreadNotifications.length} unread</Badge>}
+            bodyClassName=""
+          >
+            {unreadNotifications.length === 0 ? (
+              <p className="px-4 py-7 text-center text-[13px] text-text-faint">No unread messages or updates.</p>
+            ) : (
+              <ul className="divide-y divide-border-muted">
+                {unreadNotifications.slice(0, 5).map((notice) => (
+                  <li key={notice.id}>
+                    <Link to={notice.link || '/profile'} className="group flex items-start justify-between gap-3 px-4 py-3 hover:bg-sidebar">
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-medium text-navy">{notice.title}</p>
+                        {notice.body && <p className="mt-0.5 line-clamp-2 text-[12px] leading-relaxed text-text-secondary">{notice.body}</p>}
+                      </div>
+                      {notice.severity === 'high' || notice.severity === 'critical' ? <AlertTriangle size={15} className="mt-0.5 shrink-0 text-danger" /> : <ArrowRight size={15} className="mt-0.5 shrink-0 text-text-faint group-hover:translate-x-0.5" />}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
 
           <Card title="Where to go next" icon={Compass} bodyClassName="">
             {quickLinks.length === 0 ? (

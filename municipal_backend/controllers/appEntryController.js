@@ -19,6 +19,7 @@ import { notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
 import { assertBacAction, committeeSnapshot } from "../services/procurementGovernance.js";
 import { actorAudit, workflowError } from "../services/workflowSupport.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
 // IRR Sec. 7.7 — the lump sum for foreseeable emergencies "shall not be more
 // than four percent (4%) of the Procuring Entity's total appropriations for
@@ -292,7 +293,10 @@ export const listAppEntries = async (req, res) => {
   if (fiscalYear) where.fiscalYear = Number(fiscalYear);
   if (status) where.status = status;
   if (department) where.implementingUnitId = Number(department);
-  if (search) where.projectTitle = { [Op.like]: `%${search}%` };
+  if (req.query.procurementMode) where.procurementMode = req.query.procurementMode;
+  if (req.query.targetStartQuarter) where.targetStartQuarter = req.query.targetStartQuarter;
+  const searched = searchCondition(search, ["projectTitle", "description", "fundSource", "accountCode"]);
+  if (searched) Object.assign(where, searched);
 
   // Section 2.2: observers see approved/published entries only.
   if (!req.permissions.has("app.view") && req.permissions.has("app.viewPublished")) {
@@ -307,8 +311,17 @@ export const listAppEntries = async (req, res) => {
     where.implementingUnitId = req.currentUser.departmentId;
   }
 
-  const entries = await AppEntry.findAll({ where, ...withIncludes, order: [["createdAt", "DESC"]] });
-  res.json(entries.map(serialize));
+  const paged = ["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
+  if (!paged) {
+    const entries = await AppEntry.findAll({ where, ...withIncludes, order: [["createdAt", "DESC"]] });
+    return res.json(entries.map(serialize));
+  }
+  const page = parseListParams(req.query, {
+    sorts: { projectTitle: "projectTitle", abc: "abc", targetStartQuarter: "targetStartQuarter", status: "status", createdAt: "createdAt" },
+    defaultSort: { field: "createdAt", direction: "desc" },
+  });
+  const { count, rows } = await AppEntry.findAndCountAll({ where, ...withIncludes, ...page, distinct: true });
+  res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: page.page, pageSize: page.pageSize }));
 };
 
 // ── Submission of the approved APP to the GPPB (Sec. 7.7.5) ──────────────────

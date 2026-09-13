@@ -11,6 +11,11 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import ReasonModal from '../../components/ui/ReasonModal'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useTableControls } from '../../components/ui/useTableControls'
 import RichTextEditor from '../../components/ui/RichTextEditor'
 
 // Template authoring. The screen is built around one idea: an author should
@@ -382,6 +387,7 @@ export default function TemplateManager() {
   const [loading, setLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [error, setError] = useState('')
+  const [archiving, setArchiving] = useState(null)
 
   const refresh = useCallback(() => setRefreshToken((t) => t + 1), [])
 
@@ -406,6 +412,23 @@ export default function TemplateManager() {
       setError(err.response?.data?.message ?? 'Could not open that template.')
     }
   }
+
+  // Declared before the editor early-return: hooks cannot sit behind it.
+  const table = useTableControls(templates, {
+    searchKeys: ['name', 'description', 'documentTypeLabel', 'status'],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: [
+          { value: 'draft', label: 'Draft' },
+          { value: 'active', label: 'Active' },
+          { value: 'archived', label: 'Archived' },
+        ],
+      },
+    ],
+  })
+  const { pageRows, paginationProps } = table
 
   if (editing) {
     return (
@@ -432,25 +455,33 @@ export default function TemplateManager() {
         <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p>
       )}
 
+      <Card bodyClassName="p-4">
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search name, type or status…" />
+      </Card>
+
       <Card title="Templates" icon={FileText} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading templates…</p>
-        ) : templates.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">No templates yet.</p>
+        ) : table.rows.length === 0 ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+            {table.totalBeforeFilters === 0
+              ? 'No templates yet.'
+              : 'No templates match your search or filters.'}
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Template', 'Type', 'Version', 'Status', 'Actions'].map((head) => (
-                    <th key={head} className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase">
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('name')}>Template</SortableTh>
+                  <SortableTh {...table.sortProps('documentTypeLabel')}>Type</SortableTh>
+                  <Th>Version</Th>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
-                {templates.map((template) => (
+                {pageRows.map((template) => (
                   <tr key={template.id} className="border-t border-border-muted">
                     <td className="px-4 py-3">
                       <p className="text-[13px] text-navy">{template.name}</p>
@@ -481,11 +512,7 @@ export default function TemplateManager() {
                         {canManage && template.status !== 'archived' && (
                           <button
                             type="button"
-                            onClick={async () => {
-                              if (!window.confirm(`Archive "${template.name}"? It can no longer be generated from.`)) return
-                              await api.archiveTemplate(template.id)
-                              refresh()
-                            }}
+                            onClick={() => setArchiving(template)}
                             className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                           >
                             <Archive size={11} /> ARCHIVE
@@ -499,6 +526,9 @@ export default function TemplateManager() {
             </table>
           </div>
         )}
+        {!loading && table.rows.length > 0 && (
+          <Pagination {...paginationProps} label="templates" />
+        )}
       </Card>
 
       {creating && (
@@ -506,6 +536,28 @@ export default function TemplateManager() {
           options={options}
           onClose={() => setCreating(false)}
           onCreated={(created) => { setCreating(false); setEditing(created) }}
+        />
+      )}
+
+      {archiving && (
+        <ReasonModal
+          title={`Archive "${archiving.name}"?`}
+          consequence="It can no longer be generated from. Documents already issued from it are unaffected."
+          confirmLabel="Archive template"
+          danger
+          requireReason={false}
+          onClose={() => setArchiving(null)}
+          onConfirm={async () => {
+            const template = archiving
+            setArchiving(null)
+            setError('')
+            try {
+              await api.archiveTemplate(template.id)
+              refresh()
+            } catch (err) {
+              setError(err.response?.data?.message ?? 'Could not archive that template.')
+            }
+          }}
         />
       )}
     </DashboardPage>

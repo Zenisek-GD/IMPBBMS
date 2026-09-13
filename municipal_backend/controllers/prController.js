@@ -27,6 +27,7 @@ import {
 } from "../services/prWorkflow.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
 // ── What a requester may actually write ──────────────────────────────────────
 // Everything else on the model — status, the four certification stamps, the
@@ -294,7 +295,11 @@ export const listPrs = async (req, res) => {
   const { status, search } = req.query;
   const where = {};
   if (status) where.status = status;
-  if (search) where.prNumber = { [Op.like]: `%${search}%` };
+  if (req.query.isEmergency === "true" || req.query.isEmergency === "false") {
+    where.isEmergency = req.query.isEmergency === "true";
+  }
+  const searched = searchCondition(search, ["prNumber", "purpose"]);
+  if (searched) Object.assign(where, searched);
 
   // A requester without a review permission sees only their department's.
   // Every office that has to act on the chain needs the whole queue: they sit
@@ -314,8 +319,17 @@ export const listPrs = async (req, res) => {
     where.departmentId = req.currentUser.departmentId;
   }
 
-  const prs = await PrHeader.findAll({ where, ...withIncludes, order: [["createdAt", "DESC"]] });
-  res.json(prs.map(serialize));
+  const paged = ["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
+  if (!paged) {
+    const prs = await PrHeader.findAll({ where, ...withIncludes, order: [["createdAt", "DESC"]] });
+    return res.json(prs.map(serialize));
+  }
+  const page = parseListParams(req.query, {
+    sorts: { prNumber: "prNumber", dateRequired: "dateRequired", totalAmount: "totalAmount", status: "status", createdAt: "createdAt" },
+    defaultSort: { field: "createdAt", direction: "desc" },
+  });
+  const { count, rows } = await PrHeader.findAndCountAll({ where, ...withIncludes, ...page, distinct: true });
+  res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: page.page, pageSize: page.pageSize }));
 };
 
 export const createPr = async (req, res) => {

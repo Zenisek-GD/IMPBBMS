@@ -63,7 +63,7 @@ function Section({ title, icon: Icon, children, action }) {
 function Field({ label, value, mono }) {
   return (
     <div>
-      <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">{label}</p>
+      <p className="text-[11px] tracking-[0.03em] text-navy uppercase">{label}</p>
       <p className={`mt-0.5 text-[13px] text-navy ${mono ? 'font-mono text-xs' : ''}`}>{value ?? '—'}</p>
     </div>
   )
@@ -85,7 +85,7 @@ function RecordTable({ columns, rows, empty }) {
   const [sort, setSort] = useState(null)
 
   if (!rows?.length) {
-    return <p className="px-4 py-8 text-center text-[13px] text-text-faint">{empty}</p>
+    return <p className="px-4 py-8 text-center text-[13px] text-navy">{empty}</p>
   }
 
   const sortColumn = sort && columns.find(([label]) => label === sort.label)
@@ -232,8 +232,8 @@ export default function PublicProjectDetail() {
     return (
       <div className="flex min-h-screen flex-col bg-canvas">
         <PublicHeader systemName={branding?.systemName} />
-        <main className="flex-1 px-8 py-16 text-center text-[13px] text-text-faint">Loading project…</main>
-        <PublicFooter transparencyFooter={branding?.transparencyFooter} />
+        <main id="main-content" className="flex-1 px-8 py-16 text-center text-[13px] text-navy">Loading project…</main>
+        <PublicFooter transparencyFooter={branding?.transparencyFooter} systemName={branding?.systemName} />
       </div>
     )
   }
@@ -242,24 +242,24 @@ export default function PublicProjectDetail() {
     return (
       <div className="flex min-h-screen flex-col bg-canvas">
         <PublicHeader systemName={branding?.systemName} />
-        <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-16 text-center">
-          <FileWarning size={26} className="mx-auto text-text-faint" />
+        <main id="main-content" className="mx-auto w-full max-w-3xl flex-1 px-6 py-16 text-center">
+          <FileWarning size={26} className="mx-auto text-navy" />
           <h1 className="mt-3 text-lg font-semibold text-navy">
             {status === 'notFound' ? 'This project is not published' : 'Records could not be loaded'}
           </h1>
-          <p className="mx-auto mt-1.5 max-w-md text-[13px] text-text-secondary">
+          <p className="mx-auto mt-1.5 max-w-md text-[13px] text-navy">
             {status === 'notFound'
               ? 'It may still be in preparation, or the link may be incorrect. Only projects the LGU has approved appear here.'
               : 'The transparency service is not responding. Please try again shortly.'}
           </p>
           <Link
-            to="/"
+            to="/?view=projects#records"
             className="mt-5 inline-flex items-center gap-1.5 rounded border border-navy px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-navy uppercase"
           >
-            <ArrowLeft size={13} /> Back to all projects
+            <ArrowLeft size={13} /> Back to procurement records
           </Link>
         </main>
-        <PublicFooter transparencyFooter={branding?.transparencyFooter} />
+        <PublicFooter transparencyFooter={branding?.transparencyFooter} systemName={branding?.systemName} />
       </div>
     )
   }
@@ -271,12 +271,12 @@ export default function PublicProjectDetail() {
     <div className="flex min-h-screen flex-col bg-canvas">
       <PublicHeader systemName={branding?.systemName} />
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
+      <main id="main-content" className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
         <Link
-          to="/"
-          className="inline-flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-text-secondary hover:text-navy"
+          to="/?view=projects#records"
+          className="inline-flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-navy hover:text-navy"
         >
-          <ArrowLeft size={14} /> All projects
+          <ArrowLeft size={14} /> Back to procurement records
         </Link>
 
         <header className="mt-4">
@@ -286,7 +286,7 @@ export default function PublicProjectDetail() {
             >
               <style.icon size={12} /> {style.label}
             </span>
-            <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] text-text-secondary">
+            <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] text-navy">
               FY {project.fiscalYear}
             </span>
             {project.referenceNo && (
@@ -299,12 +299,12 @@ export default function PublicProjectDetail() {
           <h1 className="mt-3 max-w-4xl text-lg leading-tight font-bold tracking-[-0.02em] text-navy sm:text-[22px]">
             {project.projectTitle}
           </h1>
-          <p className="mt-1.5 text-sm text-text-secondary">
+          <p className="mt-1.5 text-sm text-navy">
             {project.implementingUnit}
             {project.procurementMode && ` · ${project.procurementMode}`}
           </p>
           {project.description && (
-            <p className="mt-3 max-w-4xl text-[13px] leading-relaxed text-text-secondary">{project.description}</p>
+            <p className="mt-3 max-w-4xl text-[13px] leading-relaxed text-navy">{project.description}</p>
           )}
         </header>
 
@@ -313,7 +313,7 @@ export default function PublicProjectDetail() {
         <section className="mt-6 overflow-hidden rounded-lg border border-border-muted bg-surface">
           <div className="flex items-center justify-between border-b border-border-muted px-4 py-3">
             <h2 className="text-[13px] font-semibold text-navy">Project Lifecycle</h2>
-            <span className="text-[11px] tracking-[0.03em] text-text-secondary uppercase">
+            <span className="text-[11px] tracking-[0.03em] text-navy uppercase">
               {project.phaseLabel} · {project.progressPercent}%
             </span>
           </div>
@@ -326,7 +326,7 @@ export default function PublicProjectDetail() {
                       ? 'border-navy bg-accent text-accent-fg'
                       : phase.reached
                         ? 'border-success/30 bg-success/10 text-success'
-                        : 'border-border-muted bg-surface text-text-faint'
+                        : 'border-border-muted bg-surface text-navy'
                   }`}
                 >
                   {phase.reached && !phase.current ? <Check size={13} /> : null}
@@ -334,35 +334,35 @@ export default function PublicProjectDetail() {
                 <div className="min-w-0">
                   <p
                     className={`text-[13px] font-semibold ${
-                      phase.reached ? 'text-navy' : 'text-text-faint'
+                      phase.reached ? 'text-navy' : 'text-navy'
                     }`}
                   >
                     {phase.label}
                   </p>
-                  <p className="mt-0.5 text-[12px] leading-snug text-text-faint">{phase.detail}</p>
+                  <p className="mt-0.5 text-[12px] leading-snug text-navy">{phase.detail}</p>
                 </div>
               </li>
             ))}
           </ol>
         </section>
 
-        <nav className="mt-6 flex flex-wrap gap-2">
+        <nav className="mt-6 inline-flex items-center gap-0.5 rounded-full border border-border-muted bg-surface p-1 shadow-sm" aria-label="Project sections">
           {TABS.map((item) => (
             <button
               key={item.key}
               type="button"
               onClick={() => setTab(item.key)}
               aria-pressed={tab === item.key}
-              className={`flex items-center gap-2 rounded border px-4 py-2 text-[11px] font-medium tracking-[0.03em] uppercase transition-colors ${
+              className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors ${
                 tab === item.key
-                  ? 'border-navy bg-accent text-accent-fg'
-                  : 'border-border-muted bg-surface text-text-secondary hover:border-navy/40'
+                  ? 'bg-accent text-accent-fg shadow-sm'
+                  : 'text-navy hover:bg-navy-tint hover:text-navy'
               }`}
             >
               <item.icon size={13} />
               {item.label}
               {item.key === 'documents' && documents.length > 0 && (
-                <span className={tab === item.key ? 'text-white/70' : 'text-text-faint'}>{documents.length}</span>
+                <span className={tab === item.key ? 'text-white/70' : 'text-navy'}>{documents.length}</span>
               )}
             </button>
           ))}
@@ -513,7 +513,7 @@ export default function PublicProjectDetail() {
           <div className="mt-4">
             <Section title="Complete Project Timeline" icon={History}>
               {extrasLoading ? (
-                <p role="status" className="px-4 py-10 text-center text-[13px] text-text-faint">Loading timeline…</p>
+                <p role="status" className="px-4 py-10 text-center text-[13px] text-navy">Loading timeline…</p>
               ) : extras.timelineFailed ? (
                 <div role="alert" className="px-4 py-10 text-center text-sm text-danger">
                   <p>The timeline could not be loaded. Please try again.</p>
@@ -526,7 +526,7 @@ export default function PublicProjectDetail() {
                   phases={timeline.phases}
                 />
               ) : (
-                <p className="px-4 py-10 text-center text-[13px] text-text-faint">Loading timeline…</p>
+                <p className="px-4 py-10 text-center text-[13px] text-navy">Loading timeline…</p>
               )}
             </Section>
           </div>
@@ -536,7 +536,7 @@ export default function PublicProjectDetail() {
           <div className="mt-4">
             <Section title="Supporting Documents" icon={Paperclip}>
               {extrasLoading ? (
-                <p role="status" className="px-4 py-10 text-center text-[13px] text-text-faint">Loading documents…</p>
+                <p role="status" className="px-4 py-10 text-center text-[13px] text-navy">Loading documents…</p>
               ) : extras.documentsFailed ? (
                 <div role="alert" className="px-4 py-10 text-center text-sm text-danger">
                   <p>Documents could not be loaded. Please try again.</p>
@@ -544,10 +544,10 @@ export default function PublicProjectDetail() {
                 </div>
               ) : documents.length === 0 ? (
                 <div className="px-4 py-10 text-center">
-                  <p className="text-[13px] text-text-faint">
+                  <p className="text-[13px] text-navy">
                     No public documents are attached to this project.
                   </p>
-                  <p className="mx-auto mt-1.5 max-w-lg text-[12px] text-text-faint">
+                  <p className="mx-auto mt-1.5 max-w-lg text-[12px] text-navy">
                     Only solicitation documents and signed contracts are published. Supplier eligibility files
                     and bid submissions are not public records.
                   </p>
@@ -561,15 +561,15 @@ export default function PublicProjectDetail() {
                     >
                       <div className="min-w-0">
                         <p className="flex items-center gap-2 text-[13px] font-medium text-navy">
-                          <FileText size={14} className="shrink-0 text-text-faint" />
+                          <FileText size={14} className="shrink-0 text-navy" />
                           {document.label ?? document.filename}
                         </p>
-                        <p className="mt-0.5 text-[11px] text-text-faint">
+                        <p className="mt-0.5 text-[11px] text-navy">
                           {document.filename} · {Math.max(1, Math.round(document.sizeBytes / 1024))} KB ·
                           attached to {document.attachedTo} · {shortDate(document.uploadedAt)}
                         </p>
                         <p
-                          className="mt-0.5 font-mono text-[10px] break-all text-text-faint"
+                          className="mt-0.5 font-mono text-[10px] break-all text-navy"
                           title="SHA-256 checksum — verify your download matches the published file"
                         >
                           {document.checksum.slice(0, 32)}…
@@ -590,7 +590,7 @@ export default function PublicProjectDetail() {
         )}
       </main>
 
-      <PublicFooter transparencyFooter={branding?.transparencyFooter} />
+      <PublicFooter transparencyFooter={branding?.transparencyFooter} systemName={branding?.systemName} />
     </div>
   )
 }

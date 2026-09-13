@@ -9,11 +9,12 @@ import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
-import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh from '../../components/ui/SortableTh'
+import Term from '../../components/ui/Term'
 import { useTableControls } from '../../components/ui/useTableControls'
 
 // The appropriation register — the Appropriation Ordinance as the system holds
@@ -61,53 +62,99 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
     'w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none'
 
   return (
-    <Modal title="Record an appropriation line" onClose={onClose}>
-      <form onSubmit={handleSubmit(submit)} noValidate className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
-        <p className="rounded border border-border-muted bg-chip/40 px-3 py-2 text-xs text-text-secondary">
-          Record what the Sanggunian enacted. A line marked <strong>draft</strong> authorises nothing and cannot be
-          planned or charged against.
-        </p>
+    // Item 12: eleven fields across ordinance, budget and coding dimensions —
+    // a financial form on a full page, not a scroll-heavy modal.
+    <LargeFormPage
+      title="Record an appropriation line"
+      purpose="Record what the Sanggunian enacted. A line marked draft authorises nothing and cannot be planned or charged against."
+      onBack={onClose}
+      backLabel="Back to appropriations"
+      error={serverError}
+      actions={
+        <>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSubmitting} onClick={handleSubmit(submit)}>
+            {isSubmitting ? 'Recording…' : 'Record line'}
+          </Button>
+        </>
+      }
+    >
+      <LargeFormPage.Section
+        title="Ordinance"
+        description="Which ordinance enacted this line and what it is for."
+      >
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="Ordinance number" registration={register('ordinanceNo')} placeholder="Ord. No. 2026-01" />
+            <FormField label="Ordinance date" type="date" registration={register('ordinanceDate')} />
+          </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="Ordinance number" registration={register('ordinanceNo')} placeholder="Ord. No. 2026-01" />
-          <FormField label="Ordinance date" type="date" registration={register('ordinanceDate')} />
+          <FormField label="Title" registration={register('title')} placeholder="e.g. Local Roads Outlay" />
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="Fiscal year" type="number" registration={register('fiscalYear')} />
+            <div>
+              <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+                Type
+              </label>
+              <select {...register('type')} className={selectClass}>
+                {(options?.types ?? []).map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+              Status
+            </label>
+            <select {...register('status')} className={selectClass}>
+              <option value="enacted">Enacted — chargeable</option>
+              <option value="draft">Draft — not yet chargeable</option>
+            </select>
+          </div>
         </div>
+      </LargeFormPage.Section>
 
-        <FormField label="Title" registration={register('title')} placeholder="e.g. Local Roads Outlay" />
-
-        <div className="grid gap-4 sm:grid-cols-2">
+      <LargeFormPage.Section
+        title="Budget classification"
+        description="How much, from which fund and class, for which office."
+      >
+        <div className="flex flex-col gap-4">
           <FormField label="Appropriated amount (₱)" type="number" step="0.01" registration={register('amount')} />
-          <FormField label="Fiscal year" type="number" registration={register('fiscalYear')} />
-        </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
-              Fund
-            </label>
-            <select {...register('fund')} className={selectClass}>
-              {(options?.funds ?? []).map((fund) => (
-                <option key={fund.key} value={fund.key}>
-                  {fund.label}
-                </option>
-              ))}
-            </select>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+                Fund
+              </label>
+              <select {...register('fund')} className={selectClass}>
+                {(options?.funds ?? []).map((fund) => (
+                  <option key={fund.key} value={fund.key}>
+                    {fund.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+                Expense class
+              </label>
+              <select {...register('expenseClass')} className={selectClass}>
+                {(options?.expenseClasses ?? []).map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
-              Expense class
-            </label>
-            <select {...register('expenseClass')} className={selectClass}>
-              {(options?.expenseClasses ?? []).map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
               Implementing office
@@ -121,51 +168,14 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
               ))}
             </select>
           </div>
-          <div>
-            <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
-              Type
-            </label>
-            <select {...register('type')} className={selectClass}>
-              {(options?.types ?? []).map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="PAP code" registration={register('papCode')} />
+            <FormField label="UACS code" registration={register('uacsCode')} />
           </div>
         </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="PAP code" registration={register('papCode')} />
-          <FormField label="UACS code" registration={register('uacsCode')} />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
-            Status
-          </label>
-          <select {...register('status')} className={selectClass}>
-            <option value="enacted">Enacted — chargeable</option>
-            <option value="draft">Draft — not yet chargeable</option>
-          </select>
-        </div>
-
-        {serverError && (
-          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {serverError}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-3 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            CANCEL
-          </Button>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'RECORDING...' : 'RECORD LINE'}
-          </Button>
-        </div>
-      </form>
-    </Modal>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -251,6 +261,24 @@ export default function Appropriations() {
 
   const { pageRows: linePage, paginationProps: lineProps } = lineTable
   const { pageRows: obligationPage, paginationProps: obligationProps } = obligationTable
+
+  // Item 12: the appropriation form renders as a full page, not as a modal
+  // over the register.
+  if (creating) {
+    return (
+      <DashboardPage>
+        <AppropriationForm
+          options={options}
+          departments={departments}
+          onClose={() => setCreating(false)}
+          onSubmit={async (values) => {
+            await financeApi.createAppropriation(values)
+            refresh()
+          }}
+        />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
@@ -364,8 +392,12 @@ export default function Appropriations() {
         <Pagination {...lineProps} label="appropriation lines" />
         </Card>
       ) : (
-        <Card title="Obligation Register" icon={Scale} bodyClassName="">
+        <Card title="Obligation Register — confirmed budget obligations" icon={Scale} bodyClassName="">
           <div className="border-b border-border-muted p-4">
+            <p className="mb-3 text-[12.5px] leading-relaxed text-text-secondary">
+              Each entry confirms a sum set aside against an appropriation, so it cannot be spent
+              twice. <Term term="Obligation" short help />
+            </p>
             <TableToolbar
               {...obligationTable.toolbarProps}
               searchPlaceholder="Search ORS, requisition or appropriation…"
@@ -421,18 +453,6 @@ export default function Appropriations() {
           )}
         <Pagination {...obligationProps} label="obligations" />
         </Card>
-      )}
-
-      {creating && (
-        <AppropriationForm
-          options={options}
-          departments={departments}
-          onClose={() => setCreating(false)}
-          onSubmit={async (values) => {
-            await financeApi.createAppropriation(values)
-            refresh()
-          }}
-        />
       )}
     </DashboardPage>
   )

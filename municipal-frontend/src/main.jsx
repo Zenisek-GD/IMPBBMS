@@ -5,6 +5,7 @@ import './index.css'
 import App from './App.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { ThemeProvider } from './context/ThemeContext.jsx'
+import { TextSizeProvider } from './context/TextSizeContext.jsx'
 import AppErrorBoundary from './components/ui/AppErrorBoundary.jsx'
 
 // ThemeProvider sits inside AuthProvider because the theme is a property of the
@@ -16,7 +17,9 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <AuthProvider>
         <ThemeProvider>
-          <App />
+          <TextSizeProvider>
+            <App />
+          </TextSizeProvider>
         </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>

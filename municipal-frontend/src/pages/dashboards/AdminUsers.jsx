@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -13,11 +13,12 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import ReasonModal from '../../components/ui/ReasonModal'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import { useServerTable } from '../../components/ui/useServerTable'
 
 // Which roles are external to the LGU comes from the API (Role.isExternal), so
 // the rule lives in one place — see EXTERNAL_ROLES in userController.js.
@@ -173,7 +174,7 @@ function UserFormModal({ title, roles, departments, defaultValues, onSubmit, onC
             disabled={isSubmitting}
             className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            {isSubmitting ? 'SAVING...' : 'SAVE'}
+            {isSubmitting ? 'SAVING...' : 'SAVE USER'}
           </button>
         </div>
       </form>
@@ -183,41 +184,57 @@ function UserFormModal({ title, roles, departments, defaultValues, onSubmit, onC
 
 export default function AdminUsers() {
   const { user: currentUser } = useAuth()
-  const [users, setUsers] = useState([])
   const [roles, setRoles] = useState([])
   const [departments, setDepartments] = useState([])
-  const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [resetResult, setResetResult] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      // Fetched whole and filtered in the browser. The search and the two
-      // filters used to be query parameters, which meant every keystroke was a
-      // round trip and none of them could be combined with a column sort.
-      const data = await usersApi.fetchUsers()
-      setUsers(data)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const [toggling, setToggling] = useState(null)
 
   useEffect(() => {
     usersApi.fetchRoles().then(setRoles).catch(() => setRoles([]))
     fetchDepartments().then(setDepartments).catch(() => setDepartments([]))
   }, [])
 
-  useEffect(() => {
-    const timer = setTimeout(load, 250)
-    return () => clearTimeout(timer)
-  }, [load])
+  // Server-side: search, role/department/status filters, column sort and paging
+  // all run in the database. Role and department filters send ids/keys while
+  // showing names, so the dropdowns read the same as the table cells.
+  const table = useServerTable(usersApi.fetchUsers, {
+    urlKey: 'users',
+    filters: [
+      {
+        key: 'role',
+        label: 'All roles',
+        options: roles.map((role) => ({ value: role.key, label: role.name })),
+      },
+      {
+        key: 'department',
+        label: 'All departments',
+        options: departments
+          .filter((department) => department.status === 'active')
+          .map((department) => ({ value: String(department.id), label: department.name })),
+      },
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: [
+          { value: 'active', label: 'Active' },
+          { value: 'pendingActivation', label: 'Awaiting activation' },
+          { value: 'inactive', label: 'Inactive' },
+        ],
+      },
+    ],
+  })
+  const { pageRows, paginationProps } = table
 
   const toggleStatus = async (target) => {
     const next = target.status === 'active' ? 'inactive' : 'active'
-    await usersApi.updateUser(target.id, { status: next })
-    load()
+    try {
+      await usersApi.updateUser(target.id, { status: next })
+    } finally {
+      setToggling(null)
+      table.refresh()
+    }
   }
 
   // Emails the holder an invitation to set a new password, and returns nothing
@@ -226,7 +243,7 @@ export default function AdminUsers() {
     try {
       const data = await usersApi.resetUserPassword(target.id)
       setResetResult(data)
-      load()
+      table.refresh()
     } catch (err) {
       setResetResult({
         emailSent: false,
@@ -234,17 +251,6 @@ export default function AdminUsers() {
       })
     }
   }
-
-  const table = useTableControls(users, {
-    searchKeys: ['name', 'email', 'roleName', 'departmentName'],
-    filters: [
-      { key: 'roleName', label: 'All roles' },
-      { key: 'departmentName', label: 'All departments' },
-      { key: 'status', label: 'All statuses' },
-    ],
-    initialSort: { key: 'name', direction: 'asc' },
-  })
-  const { pageRows, paginationProps } = table
 
   return (
     <DashboardPage>
@@ -259,17 +265,27 @@ export default function AdminUsers() {
       />
 
       <Card bodyClassName="p-4">
-        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search name, email, role or office…" />
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search name or email…" />
       </Card>
 
       <Card bodyClassName="">
-        {loading ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading users...</p>
+        {table.loading ? (
+          <p role="status" className="px-4 py-8 text-center text-[13px] text-text-faint">Loading users...</p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] font-medium text-navy">Users could not be loaded</p>
+            <p className="mx-auto mt-1 max-w-md text-[13px] text-text-secondary">
+              Check your connection and try again.
+            </p>
+            <Button variant="secondary" size="sm" className="mt-3" onClick={table.refresh}>
+              Retry
+            </Button>
+          </div>
         ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'No users yet.'
-              : 'No users match your search or filters.'}
+            {table.isDirty
+              ? 'No users match your search or filters.'
+              : 'No users yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -278,8 +294,8 @@ export default function AdminUsers() {
                 <tr>
                   <SortableTh {...table.sortProps('name')}>Name</SortableTh>
                   <SortableTh {...table.sortProps('email')}>Email</SortableTh>
-                  <SortableTh {...table.sortProps('roleName')}>Role</SortableTh>
-                  <SortableTh {...table.sortProps('departmentName')}>Department</SortableTh>
+                  <Th>Role</Th>
+                  <Th>Department</Th>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
                   <Th>Actions</Th>
                 </tr>
@@ -355,7 +371,7 @@ export default function AdminUsers() {
                           {!isSelf && (
                             <button
                               type="button"
-                              onClick={() => toggleStatus(row)}
+                              onClick={() => setToggling(row)}
                               className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                             >
                               {row.status === 'active' ? 'DEACTIVATE' : 'REACTIVATE'}
@@ -370,7 +386,9 @@ export default function AdminUsers() {
             </table>
           </div>
         )}
-        <Pagination {...paginationProps} label="users" />
+        {!table.loading && !table.failed && table.total > 0 && (
+          <Pagination {...paginationProps} label="users" />
+        )}
       </Card>
 
       {creating && (
@@ -383,7 +401,7 @@ export default function AdminUsers() {
           onClose={() => setCreating(false)}
           onSubmit={async (values) => {
             await usersApi.createUser(values)
-            load()
+            table.refresh()
           }}
         />
       )}
@@ -402,7 +420,7 @@ export default function AdminUsers() {
           onClose={() => setEditing(null)}
           onSubmit={async (values) => {
             await usersApi.updateUser(editing.id, values)
-            load()
+            table.refresh()
           }}
         />
       )}
@@ -438,6 +456,22 @@ export default function AdminUsers() {
             <Button onClick={() => setResetResult(null)}>Close</Button>
           </div>
         </Modal>
+      )}
+
+      {toggling && (
+        <ReasonModal
+          title={toggling.status === 'active' ? `Deactivate ${toggling.name}?` : `Reactivate ${toggling.name}?`}
+          consequence={
+            toggling.status === 'active'
+              ? 'The account can no longer sign in, effective immediately. Their records and audit history are kept.'
+              : 'The account can sign in again with its existing credentials.'
+          }
+          confirmLabel={toggling.status === 'active' ? 'Deactivate account' : 'Reactivate account'}
+          danger={toggling.status === 'active'}
+          requireReason={false}
+          onClose={() => setToggling(null)}
+          onConfirm={() => toggleStatus(toggling)}
+        />
       )}
     </DashboardPage>
   )

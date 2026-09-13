@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { FileSignature, Plus, Truck, PenLine, Send, GitBranch, ShieldCheck } from 'lucide-react'
 import * as contractsApi from '../../api/contracts'
 import { CONTRACT_STATUS_LABELS, CONTRACT_STATUS_TONES } from '../../api/contracts'
@@ -13,7 +13,10 @@ import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import ReasonModal from '../../components/ui/ReasonModal'
+import { NextInline } from '../../components/ui/NextStep'
+import { contractNext } from '../../config/nextSteps'
+import { useServerTable } from '../../components/ui/useServerTable'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -392,28 +395,12 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
 
 export default function Contracts() {
   const permissions = usePermissions()
-  const [contracts, setContracts] = useState([])
   const [drafting, setDrafting] = useState(false)
   const [delivering, setDelivering] = useState(null)
   const [varying, setVarying] = useState(null)
   const [warranting, setWarranting] = useState(null)
+  const [signing, setSigning] = useState(null)
   const [actionError, setActionError] = useState('')
-  const [refreshToken, setRefreshToken] = useState(0)
-
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
-  useEffect(() => {
-    let cancelled = false
-    contractsApi
-      .fetchContracts()
-      .then((data) => {
-        if (!cancelled) setContracts(data)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
 
   const run = async (fn) => {
     setActionError('')
@@ -432,15 +419,14 @@ export default function Contracts() {
   // "Awaiting a signature" is the question this page exists to answer, so it is
   // a filter of its own rather than something a reader has to spot by scanning
   // two badges down a column.
-  const table = useTableControls(contracts, {
-    searchKeys: ['contractNo', 'noaNumber', 'projectTitle', 'vendorName'],
+  const table = useServerTable(contractsApi.fetchContracts, {
+    urlKey: 'contracts',
     filters: [
       {
         key: 'status',
         label: 'All statuses',
         options: Object.entries(CONTRACT_STATUS_LABELS).map(([value, label]) => ({ value, label })),
       },
-      { key: 'vendorName', label: 'All suppliers' },
       {
         key: 'signatures',
         label: 'Signatures',
@@ -450,20 +436,10 @@ export default function Contracts() {
           { value: 'vendor', label: 'Awaiting the LGU' },
           { value: 'none', label: 'Unsigned' },
         ],
-        accessor: (contract) => {
-          if (contract.signedByLguAt && contract.signedByVendorAt) return 'both'
-          if (contract.signedByLguAt) return 'lgu'
-          if (contract.signedByVendorAt) return 'vendor'
-          return 'none'
-        },
       },
     ],
-    accessors: {
-      amount: (contract) => Number(contract.amount ?? 0),
-      status: (contract) => CONTRACT_STATUS_LABELS[contract.status] ?? contract.status,
-    },
   })
-  const { pageRows, paginationProps } = table
+  const { pageRows, paginationProps, refresh } = table
 
   return (
     <DashboardPage>
@@ -486,15 +462,21 @@ export default function Contracts() {
       )}
 
       <Card title="Contracts" icon={FileSignature} bodyClassName="">
-        {contracts.length > 0 && (
-          <div className="border-b border-border-muted p-4">
-            <TableToolbar
-              {...table.toolbarProps}
-              searchPlaceholder="Search contract, NOA, project or supplier…"
-            />
+        <div className="border-b border-border-muted p-4">
+          <TableToolbar
+            {...table.toolbarProps}
+            searchPlaceholder="Search contract, award (NOA), project or supplier…"
+          />
+        </div>
+        {table.loading ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading contracts…</p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] font-medium text-navy">Contracts could not be loaded</p>
+            <p className="mx-auto mt-1 max-w-md text-[13px] text-text-secondary">Check your connection and try again.</p>
+            <Button variant="secondary" size="sm" className="mt-3" onClick={refresh}>Retry</Button>
           </div>
-        )}
-        {table.rows.length === 0 ? (
+        ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
             {table.totalBeforeFilters === 0
               ? 'No contracts yet.'
@@ -506,8 +488,8 @@ export default function Contracts() {
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('contractNo')}>Contract</SortableTh>
-                  <SortableTh {...table.sortProps('projectTitle')}>Project</SortableTh>
-                  <SortableTh {...table.sortProps('vendorName')}>Supplier</SortableTh>
+                  <Th>Project</Th>
+                  <Th>Supplier</Th>
                   <SortableTh {...table.sortProps('amount')}>Amount</SortableTh>
                   <Th>Signatures</Th>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
@@ -542,9 +524,10 @@ export default function Contracts() {
                       <Badge tone={CONTRACT_STATUS_TONES[contract.status]}>
                         {CONTRACT_STATUS_LABELS[contract.status]}
                       </Badge>
+                      <NextInline next={contractNext(contract)} />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex w-max items-center gap-2">
                         {canDraft && contract.status === 'draft' && (
                           <button
                             type="button"
@@ -559,7 +542,7 @@ export default function Contracts() {
                           !(isSupplier ? contract.signedByVendorAt : contract.signedByLguAt) && (
                             <button
                               type="button"
-                              onClick={() => run(() => contractsApi.signContract(contract.id))}
+                              onClick={() => setSigning(contract)}
                               className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
                               <PenLine size={12} /> SIGN
@@ -606,7 +589,7 @@ export default function Contracts() {
             </table>
           </div>
         )}
-        <Pagination {...paginationProps} label="contracts" />
+        {!table.loading && !table.failed && table.rows.length > 0 && <Pagination {...paginationProps} label="contracts" />}
       </Card>
 
       {drafting && <DraftModal onClose={() => setDrafting(false)} onCreated={refresh} />}
@@ -625,6 +608,24 @@ export default function Contracts() {
           contract={warranting}
           onClose={() => setWarranting(null)}
           onPosted={refresh}
+        />
+      )}
+      {signing && (
+        <ReasonModal
+          title={`Sign ${signing.contractNo}?`}
+          consequence={
+            isSupplier
+              ? 'Your signature commits your company to deliver as agreed. It cannot be withdrawn unilaterally afterwards.'
+              : 'Your signature binds the municipality to this contract. It takes effect once both parties have signed.'
+          }
+          confirmLabel="Sign contract"
+          requireReason={false}
+          onClose={() => setSigning(null)}
+          onConfirm={() => {
+            const contract = signing
+            setSigning(null)
+            run(() => contractsApi.signContract(contract.id))
+          }}
         />
       )}
     </DashboardPage>

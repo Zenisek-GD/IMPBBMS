@@ -9,6 +9,7 @@ import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../service
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { computeDeductions } from "../services/deductions.js";
 import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
 const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
@@ -65,19 +66,59 @@ const serialize = (invoice) => ({
 });
 
 export const listInvoices = async (req, res) => {
-  const { status } = req.query;
+  const { status, search } = req.query;
   const where = {};
   if (status) where.status = status;
+  const searched = searchCondition(search, [
+    "invoiceNo",
+    "supplierInvoiceRef",
+    "remarks",
+    "$contract.contractNo$",
+    "$vendor.businessName$",
+    "$payment.disbursementNo$",
+  ]);
+  if (searched) Object.assign(where, searched);
+  if (req.query.paymentStatus === "none") where["$payment.id$"] = null;
+  if (["prepared", "released", "cancelled"].includes(req.query.paymentStatus)) {
+    where["$payment.status$"] = req.query.paymentStatus;
+  }
 
   // A supplier sees only their own invoices.
   if (req.permissions.has("delivery.submitInvoice") && !req.permissions.has("payment.view")) {
     const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
-    if (!vendor) return res.json([]);
+    if (!vendor) {
+      if (["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined)) {
+        const page = parseListParams(req.query);
+        return res.json(pageEnvelope({ rows: [], total: 0, page: page.page, pageSize: page.pageSize }));
+      }
+      return res.json([]);
+    }
     where.vendorId = vendor.id;
   }
 
-  const invoices = await Invoice.findAll({ where, ...invoiceIncludes, order: [["createdAt", "DESC"]] });
-  res.json(invoices.map(serialize));
+  const paged = ["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
+  if (!paged) {
+    const invoices = await Invoice.findAll({ where, ...invoiceIncludes, order: [["createdAt", "DESC"]] });
+    return res.json(invoices.map(serialize));
+  }
+  const page = parseListParams(req.query, {
+    sorts: {
+      invoiceNo: "invoiceNo",
+      amount: "amount",
+      submittedAt: "submittedAt",
+      status: "status",
+      createdAt: "createdAt",
+    },
+    defaultSort: { field: "createdAt", direction: "desc" },
+  });
+  const { count, rows } = await Invoice.findAndCountAll({
+    where,
+    ...invoiceIncludes,
+    ...page,
+    distinct: true,
+    subQuery: false,
+  });
+  return res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: page.page, pageSize: page.pageSize }));
 };
 
 // Lifecycle step 12: the supplier invoices after delivery.

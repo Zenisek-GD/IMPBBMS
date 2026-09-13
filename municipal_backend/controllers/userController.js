@@ -7,6 +7,7 @@ import { validatePassword } from "./passwordResetController.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { issueActivationToken } from "../services/activation.js";
 import { sendActivationInvitation } from "../services/mailer.js";
+import { parseListParams, pageEnvelope } from "../services/listQuery.js";
 
 const serialize = (user) => ({
   id: user.id,
@@ -46,22 +47,52 @@ export const listRoles = async (req, res) => {
   );
 };
 
+const USER_SORTS = {
+  name: "name",
+  email: "email",
+  status: "status",
+  createdAt: "createdAt",
+};
+
 export const listUsers = async (req, res) => {
-  const { search, role, status, department } = req.query;
+  const { search, role, status, department, sort, page, pageSize } = req.query;
 
   const where = {};
   if (search) {
-    where[Op.or] = [
-      { name: { [Op.like]: `%${search}%` } },
-      { email: { [Op.like]: `%${search}%` } },
-    ];
+    const needle = String(search).trim().slice(0, 120);
+    if (needle) {
+      where[Op.or] = [
+        { name: { [Op.like]: `%${needle}%` } },
+        { email: { [Op.like]: `%${needle}%` } },
+      ];
+    }
   }
   if (status) where.status = status;
   if (department) where.departmentId = department;
 
+  const include = [{ model: Role, ...(role ? { where: { key: role } } : {}) }, { model: Department }];
+
+  // Paginated shape is opt-in (see listAuditLog): ?page= returns
+  // { rows, total, page, pageSize, totalPages }, otherwise the plain array.
+  if (page !== undefined || pageSize !== undefined || sort !== undefined) {
+    const params = parseListParams(req.query, {
+      sorts: USER_SORTS,
+      defaultSort: { field: "createdAt", direction: "desc" },
+    });
+    const { count, rows } = await User.findAndCountAll({
+      where,
+      include,
+      distinct: true,
+      order: params.order,
+      limit: params.limit,
+      offset: params.offset,
+    });
+    return res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: params.page, pageSize: params.pageSize }));
+  }
+
   const users = await User.findAll({
     where,
-    include: [{ model: Role, ...(role ? { where: { key: role } } : {}) }, { model: Department }],
+    include,
     order: [["createdAt", "DESC"]],
   });
 

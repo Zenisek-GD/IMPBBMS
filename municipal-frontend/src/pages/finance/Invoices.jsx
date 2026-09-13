@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Receipt, Banknote, Plus, ShieldAlert } from 'lucide-react'
 import * as financeApi from '../../api/finance'
 import { INVOICE_STATUS_TONES } from '../../api/finance'
@@ -13,7 +13,9 @@ import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import { NextInline } from '../../components/ui/NextStep'
+import { invoiceNext } from '../../config/nextSteps'
+import { useServerTable } from '../../components/ui/useServerTable'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -153,27 +155,10 @@ function SubmitInvoiceModal({ onClose, onSubmitted }) {
 
 export default function Invoices() {
   const permissions = usePermissions()
-  const [invoices, setInvoices] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [returning, setReturning] = useState(null)
   const [remarks, setRemarks] = useState('')
   const [actionError, setActionError] = useState('')
-  const [refreshToken, setRefreshToken] = useState(0)
-
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
-  useEffect(() => {
-    let cancelled = false
-    financeApi
-      .fetchInvoices()
-      .then((data) => {
-        if (!cancelled) setInvoices(data)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
 
   const run = async (fn) => {
     setActionError('')
@@ -193,17 +178,14 @@ export default function Invoices() {
   const canProcess = canCertify || canRelease
   const isSupplier = permissions.has('delivery.submitInvoice')
 
-  const table = useTableControls(invoices, {
-    searchKeys: [
-      'invoiceNo',
-      'contractNo',
-      'vendorName',
-      'remarks',
-      (invoice) => invoice.payment?.disbursementNo,
-    ],
+  const table = useServerTable(financeApi.fetchInvoices, {
+    urlKey: 'invoices',
     filters: [
-      { key: 'status', label: 'All statuses' },
-      { key: 'vendorName', label: 'All suppliers' },
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: ['submitted', 'certified', 'returned', 'paid', 'cancelled'],
+      },
       {
         key: 'paymentStatus',
         label: 'Disbursement',
@@ -212,15 +194,10 @@ export default function Invoices() {
           { value: 'prepared', label: 'Voucher prepared' },
           { value: 'none', label: 'No voucher yet' },
         ],
-        accessor: (invoice) => invoice.payment?.status ?? 'none',
       },
     ],
-    accessors: {
-      amount: (invoice) => Number(invoice.amount ?? 0),
-      disbursementNo: (invoice) => invoice.payment?.disbursementNo ?? null,
-    },
   })
-  const { pageRows, paginationProps } = table
+  const { pageRows, paginationProps, refresh } = table
 
   return (
     <DashboardPage>
@@ -254,19 +231,22 @@ export default function Invoices() {
       )}
 
       <Card title="Invoices" icon={Receipt} bodyClassName="">
-        {invoices.length > 0 && (
-          <div className="border-b border-border-muted p-4">
-            <TableToolbar
-              {...table.toolbarProps}
-              searchPlaceholder="Search invoice, contract, supplier or voucher…"
-            />
+        <div className="border-b border-border-muted p-4">
+          <TableToolbar
+            {...table.toolbarProps}
+            searchPlaceholder="Search invoice, contract, supplier or voucher…"
+          />
+        </div>
+        {table.loading ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading invoices…</p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] text-danger">Could not load invoices.</p>
+            <Button className="mt-3" size="sm" variant="secondary" onClick={refresh}>Try again</Button>
           </div>
-        )}
-        {table.rows.length === 0 ? (
+        ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'No invoices yet.'
-              : 'No invoices match your search or filters.'}
+            {table.isDirty ? 'No invoices match your search or filters.' : 'No invoices yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -274,10 +254,10 @@ export default function Invoices() {
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('invoiceNo')}>Invoice</SortableTh>
-                  <SortableTh {...table.sortProps('contractNo')}>Contract</SortableTh>
-                  <SortableTh {...table.sortProps('vendorName')}>Supplier</SortableTh>
+                  <Th>Contract</Th>
+                  <Th>Supplier</Th>
                   <SortableTh {...table.sortProps('amount')}>Amount</SortableTh>
-                  <SortableTh {...table.sortProps('disbursementNo')}>Disbursement</SortableTh>
+                  <Th>Disbursement</Th>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
                   <Th>Actions</Th>
                 </tr>
@@ -310,9 +290,10 @@ export default function Invoices() {
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={INVOICE_STATUS_TONES[invoice.status]}>{invoice.status}</Badge>
+                      <NextInline next={invoiceNext(invoice)} />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex w-max items-center gap-2">
                         {canCertify && invoice.status === 'submitted' && (
                           <>
                             <button

@@ -12,6 +12,10 @@ import { Department } from "./departmentModel.js";
 // machines keeps theirs — neither of which is true of a localStorage-only
 // toggle. "system" defers to the operating system's own light/dark setting.
 export const THEME_PREFERENCES = ["system", "light", "dark"];
+// Reading comfort is a personal preference just like theme. Keeping the value
+// on the account means an officer does not inherit the previous user's choice
+// when workstations are shared.
+export const TEXT_SIZE_PREFERENCES = ["normal", "large", "extraLarge"];
 
 // ── Account lifecycle ────────────────────────────────────────────────────────
 // An account created by an official for an approved bidder does not start usable.
@@ -55,6 +59,14 @@ export const User = sequelize.define("User", {
     defaultValue: "light",
   },
   sidebarCollapsed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  textSizePreference: {
+    type: DataTypes.ENUM(...TEXT_SIZE_PREFERENCES),
+    allowNull: false,
+    defaultValue: "normal",
+  },
+}, {
+  // Server-side user search, filter and sort.
+  indexes: [{ fields: ["name"] }, { fields: ["status"] }, { fields: ["createdAt"] }],
 });
 
 User.belongsTo(Role, { foreignKey: "roleId", allowNull: false });

@@ -29,7 +29,7 @@ import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react'
 // at 10.5px, `text-text-faint` measures about 3.4:1 on the white surface, under
 // the WCAG AA minimum of 4.5:1 for body text.
 const BASE =
-  'text-left text-[10.5px] font-medium tracking-[0.04em] whitespace-nowrap text-navy uppercase'
+  'text-left text-[12px] font-medium tracking-[0.035em] whitespace-nowrap text-navy uppercase'
 
 const PADDING = 'px-4 py-2'
 

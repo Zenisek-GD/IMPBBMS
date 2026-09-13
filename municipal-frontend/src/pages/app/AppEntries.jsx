@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -22,11 +22,15 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import FormField from '../../components/ui/FormField'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import { NextInline } from '../../components/ui/NextStep'
+import { appNext } from '../../config/nextSteps'
+import { useServerTable } from '../../components/ui/useServerTable'
+import useDraftRecovery from '../../hooks/useDraftRecovery'
 import { CommitteeActionModal } from '../bidding/EvaluationForms'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
@@ -87,8 +91,15 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
     register,
     handleSubmit,
     control,
+    reset,
     formState: { errors, isSubmitting },
   } = useForm({ resolver: zodResolver(entrySchema), defaultValues, mode: 'onBlur' })
+  const currentValues = useWatch({ control })
+  const draft = useDraftRecovery({
+    key: defaultValues?.id ? `app-entry-${defaultValues.id}` : 'app-entry-new',
+    value: currentValues,
+    onRestore: (saved) => reset(saved),
+  })
 
   // Ask the server what mode the ABC implies, as it is typed. The thresholds
   // come from the RA 12009 IRR and depend on the LGU's classification, so this
@@ -147,6 +158,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
     setServerError('')
     try {
       await onSubmit(values)
+      draft.clearDraft()
       onClose()
     } catch (err) {
       setServerError(err.response?.data?.message ?? 'Something went wrong.')
@@ -154,203 +166,240 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   }
 
   return (
-    <Modal title={title} onClose={onClose}>
-      <form onSubmit={handleSubmit(submit)} noValidate className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
-        <FormField label="Project title" error={errors.projectTitle?.message} registration={register('projectTitle')} />
-
-        <div>
-          <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
-            Investment program project
-          </label>
-          <select
-            {...register('aipEntryId')}
-            className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
-          >
-            <option value="">— select an adopted investment program project —</option>
-            {aipEntries.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.title} ({entry.fiscalYear}) · {peso(entry.estimatedCost)} programmed
-              </option>
-            ))}
-          </select>
-          {errors.aipEntryId && <p className="mt-1 text-xs text-danger">{errors.aipEntryId.message}</p>}
-          {aipEntries.length === 0 && (
-            <p className="mt-1.5 text-xs text-warning">
-              No adopted investment program projects are available for this fiscal year. Create and adopt an AIP
-              project before filing this APP line.
-            </p>
-          )}
-        </div>
-
-        {/* The budget line first: everything below is constrained by it. */}
-        <div>
-          <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
-            Charged against (appropriation line)
-          </label>
-          <select
-            {...register('appropriationId')}
-            className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
-          >
-            <option value="">— select an enacted ordinance line —</option>
-            {appropriations.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.ordinanceNo} · {row.title} ({peso(row.unprogrammed)} unprogrammed)
-              </option>
-            ))}
-          </select>
-          {errors.appropriationId && (
-            <p className="mt-1 text-xs text-danger">{errors.appropriationId.message}</p>
-          )}
-          {selectedLine && (
-            <p className="mt-1.5 text-xs text-text-faint">
-              {selectedLine.fundLabel} · {selectedLine.expenseClassLabel} — {peso(selectedLine.amount)}{' '}
-              appropriated, {peso(selectedLine.programmed)} already planned,{' '}
-              <strong className="text-text-secondary">{peso(selectedLine.unprogrammed)} still unprogrammed</strong>.
-            </p>
-          )}
-          {appropriations.length === 0 && (
-            <p className="mt-1.5 text-xs text-warning">
-              No enacted appropriation lines are available. The Budget Officer must record the Appropriation
-              Ordinance before procurement can be planned.
-            </p>
-          )}
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Description</label>
-          <textarea
-            rows={2}
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-            {...register('description')}
-          />
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <FormField
-            label="ABC (₱)"
-            type="number"
-            step="0.01"
-            error={errors.abc?.message}
-            registration={register('abc')}
-          />
-          <FormField label="Unit" registration={register('unit')} placeholder="e.g. units" />
-          <FormField label="Quantity" type="number" registration={register('quantity')} />
-        </div>
-
-        {suggestion && (
-          <div className="flex items-start gap-2 rounded border border-navy/10 bg-chip/40 p-3">
-            <Info size={14} className="mt-0.5 shrink-0 text-navy" />
-            <div className="text-xs text-text-secondary">
-              <p>
-                Suggested mode: <strong className="text-navy">{modeLabel(suggestion.suggested)}</strong>
-              </p>
-              <p className="mt-0.5">{suggestion.rationale}</p>
-              <p className="mt-0.5 font-mono text-[11px] text-text-faint">
-                {suggestion.citation} · {suggestion.lgu.incomeClass}-class {suggestion.lgu.lguType}
-                {suggestion.requiresPosting ? ' · posting required' : ' · posting not required'}
-              </p>
-            </div>
+    // Item 12: fifteen fields across linked records, mode and schedule — a full
+    // page with logical sections, not a scroll-heavy modal.
+    <LargeFormPage
+      title={title}
+      purpose="An APP entry plans one procurement against an adopted investment program project and an enacted appropriation line."
+      onBack={onClose}
+      backLabel="Back to procurement plan"
+      error={serverError}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSubmitting} onClick={handleSubmit(submit)}>
+            {isSubmitting ? 'Saving…' : 'Save draft'}
+          </Button>
+        </>
+      }
+    >
+      {draft.pendingDraft && (
+        <div role="status" className="mb-4 rounded-lg border border-info/30 bg-info-soft p-3 text-sm text-text-secondary">
+          <p>An APP form recovery copy from {new Date(draft.pendingDraft.savedAt).toLocaleString('en-PH')} is available on this browser.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" onClick={draft.restoreDraft}>Restore draft</Button>
+            <Button size="sm" variant="secondary" onClick={draft.discardDraft}>Discard it</Button>
           </div>
-        )}
-
-        <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-            Procurement mode
-          </label>
-          <select
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-            {...register('procurementMode')}
-          >
-            {PROCUREMENT_MODES.map((mode) => (
-              <option key={mode.key} value={mode.key}>
-                {mode.label}
-              </option>
-            ))}
-          </select>
         </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-            Justification (required for alternative modes)
-          </label>
-          <textarea
-            rows={2}
-            className={`w-full rounded border px-4 py-2 text-sm text-navy focus:outline-none ${
-              errors.justification ? 'border-danger' : 'border-border-muted focus:border-navy'
-            }`}
-            {...register('justification')}
-          />
-          {errors.justification && <p className="mt-1 text-xs text-danger">{errors.justification.message}</p>}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
+      )}
+      {!draft.pendingDraft && draft.lastSavedAt && (
+        <p className="mb-3 text-xs text-text-faint">Draft recovery saved locally. Save this form to update the official procurement plan.</p>
+      )}
+      <LargeFormPage.Section
+        title="Linked records"
+        description="Everything below is constrained by these two lines: the project this procures and the ordinance line it is charged against."
+      >
+        <div className="flex flex-col gap-4">
           <div>
-            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-              Target start quarter
+            <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+              Investment program project
             </label>
             <select
-              className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:outline-none"
-              {...register('targetStartQuarter')}
+              {...register('aipEntryId')}
+              className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
             >
-              {QUARTERS.map((q) => (
-                <option key={q} value={q}>
-                  {q}
+              <option value="">— select an adopted investment program project —</option>
+              {aipEntries.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.title} ({entry.fiscalYear}) · {peso(entry.estimatedCost)} programmed
                 </option>
               ))}
             </select>
+            {errors.aipEntryId && <p className="mt-1 text-xs text-danger">{errors.aipEntryId.message}</p>}
+            {aipEntries.length === 0 && (
+              <p className="mt-1.5 text-xs text-warning">
+                No adopted investment program projects are available for this fiscal year. Create and adopt an AIP
+                project before filing this APP line.
+              </p>
+            )}
           </div>
+
+          {/* The budget line first: everything below is constrained by it. */}
           <div>
-            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-              Target completion quarter
+            <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+              Charged against (appropriation line)
             </label>
             <select
-              className={`w-full rounded border px-4 py-2 text-sm text-navy focus:outline-none ${
-                errors.targetCompletionQuarter ? 'border-danger' : 'border-border-muted'
-              }`}
-              {...register('targetCompletionQuarter')}
+              {...register('appropriationId')}
+              className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
             >
-              {QUARTERS.map((q) => (
-                <option key={q} value={q}>
-                  {q}
+              <option value="">— select an enacted ordinance line —</option>
+              {appropriations.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.ordinanceNo} · {row.title} ({peso(row.unprogrammed)} unprogrammed)
                 </option>
               ))}
             </select>
-            {errors.targetCompletionQuarter && (
-              <p className="mt-1 text-xs text-danger">{errors.targetCompletionQuarter.message}</p>
+            {errors.appropriationId && (
+              <p className="mt-1 text-xs text-danger">{errors.appropriationId.message}</p>
+            )}
+            {selectedLine && (
+              <p className="mt-1.5 text-xs text-text-faint">
+                {selectedLine.fundLabel} · {selectedLine.expenseClassLabel} — {peso(selectedLine.amount)}{' '}
+                appropriated, {peso(selectedLine.programmed)} already planned,{' '}
+                <strong className="text-text-secondary">{peso(selectedLine.unprogrammed)} still unprogrammed</strong>.
+              </p>
+            )}
+            {appropriations.length === 0 && (
+              <p className="mt-1.5 text-xs text-warning">
+                No enacted appropriation lines are available. The Budget Officer must record the Appropriation
+                Ordinance before procurement can be planned.
+              </p>
             )}
           </div>
         </div>
+      </LargeFormPage.Section>
 
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label="Fund source" registration={register('fundSource')} />
-          <FormField label="Account code" registration={register('accountCode')} />
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <FormField label="MFO ID" registration={register('mfoId')} />
-          <FormField label="PAP code" registration={register('papCode')} />
-          <FormField label="UACS code" registration={register('uacsCode')} />
-        </div>
+      <LargeFormPage.Section
+        title="Project"
+        description="What will be procured and for how much."
+      >
+        <div className="flex flex-col gap-4">
+          <FormField label="Project title" error={errors.projectTitle?.message} registration={register('projectTitle')} />
 
-        {serverError && (
-          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {serverError}
-          </p>
-        )}
+          <div>
+            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Description</label>
+            <textarea
+              rows={2}
+              className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+              {...register('description')}
+            />
+          </div>
 
-        <div className="mt-2 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            CANCEL
-          </Button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
-          >
-            {isSubmitting ? 'SAVING...' : 'SAVE DRAFT'}
-          </button>
+          <div className="grid grid-cols-3 gap-3">
+            <FormField
+              label="ABC (₱)"
+              type="number"
+              step="0.01"
+              error={errors.abc?.message}
+              registration={register('abc')}
+            />
+            <FormField label="Unit" registration={register('unit')} placeholder="e.g. units" />
+            <FormField label="Quantity" type="number" registration={register('quantity')} />
+          </div>
+
+          {suggestion && (
+            <div className="flex items-start gap-2 rounded border border-navy/10 bg-chip/40 p-3">
+              <Info size={14} className="mt-0.5 shrink-0 text-navy" />
+              <div className="text-xs text-text-secondary">
+                <p>
+                  Suggested mode: <strong className="text-navy">{modeLabel(suggestion.suggested)}</strong>
+                </p>
+                <p className="mt-0.5">{suggestion.rationale}</p>
+                <p className="mt-0.5 font-mono text-[11px] text-text-faint">
+                  {suggestion.citation} · {suggestion.lgu.incomeClass}-class {suggestion.lgu.lguType}
+                  {suggestion.requiresPosting ? ' · posting required' : ' · posting not required'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
-      </form>
-    </Modal>
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section
+        title="Procurement mode"
+        description="How this will be procured. Alternative modes need a written justification."
+      >
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+              Procurement mode
+            </label>
+            <select
+              className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+              {...register('procurementMode')}
+            >
+              {PROCUREMENT_MODES.map((mode) => (
+                <option key={mode.key} value={mode.key}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+              Justification (required for alternative modes)
+            </label>
+            <textarea
+              rows={2}
+              className={`w-full rounded border px-4 py-2 text-sm text-navy focus:outline-none ${
+                errors.justification ? 'border-danger' : 'border-border-muted focus:border-navy'
+              }`}
+              {...register('justification')}
+            />
+            {errors.justification && <p className="mt-1 text-xs text-danger">{errors.justification.message}</p>}
+          </div>
+        </div>
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section
+        title="Schedule and coding"
+        description="When it is needed and how it is tracked."
+      >
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                Target start quarter
+              </label>
+              <select
+                className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:outline-none"
+                {...register('targetStartQuarter')}
+              >
+                {QUARTERS.map((q) => (
+                  <option key={q} value={q}>
+                    {q}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+                Target completion quarter
+              </label>
+              <select
+                className={`w-full rounded border px-4 py-2 text-sm text-navy focus:outline-none ${
+                  errors.targetCompletionQuarter ? 'border-danger' : 'border-border-muted'
+                }`}
+                {...register('targetCompletionQuarter')}
+              >
+                {QUARTERS.map((q) => (
+                  <option key={q} value={q}>
+                    {q}
+                  </option>
+                ))}
+              </select>
+              {errors.targetCompletionQuarter && (
+                <p className="mt-1 text-xs text-danger">{errors.targetCompletionQuarter.message}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Fund source" registration={register('fundSource')} />
+            <FormField label="Account code" registration={register('accountCode')} />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <FormField label="MFO ID" registration={register('mfoId')} />
+            <FormField label="PAP code" registration={register('papCode')} />
+            <FormField label="UACS code" registration={register('uacsCode')} />
+          </div>
+        </div>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -397,8 +446,6 @@ function ReturnModal({ entry, onClose, onConfirm }) {
 export default function AppEntries() {
   const { user } = useAuth()
   const permissions = usePermissions()
-  const [entries, setEntries] = useState([])
-  const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
   const [returning, setReturning] = useState(null)
@@ -406,33 +453,12 @@ export default function AppEntries() {
   const [message, setMessage] = useState('')
   const [actionError, setActionError] = useState('')
 
-  const [refreshToken, setRefreshToken] = useState(0)
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
   // State is only set from the promise callbacks, never synchronously in the
   // effect body — that would cascade renders.
   // Fetched once and filtered in the browser. The status filter used to be a
   // query parameter, which meant every change of the dropdown was a round trip
   // and search could not be combined with it. The endpoint returns the whole
   // set unpaged, so there is nothing to gain by asking the server again.
-  useEffect(() => {
-    let cancelled = false
-    appApi
-      .fetchAppEntries()
-      .then((data) => {
-        if (!cancelled) {
-          setEntries(data)
-          setLoading(false)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
-
   const runTransition = async (entry, action, remarks, attendance) => {
     setActionError('')
     try {
@@ -451,7 +477,8 @@ export default function AppEntries() {
   // Search, filter, sort and paging over the loaded set. Sorting the money and
   // the mode by their *displayed* value would sort "₱1,200,000" as text and put
   // it below "₱900" — so ABC sorts on the raw number and Mode on its label.
-  const table = useTableControls(entries, {
+  const table = useServerTable(appApi.fetchAppEntries, {
+    urlKey: 'appEntries',
     searchKeys: ['projectTitle', 'implementingUnitCode', 'description', 'fundSource', 'accountCode'],
     filters: [
       {
@@ -472,7 +499,70 @@ export default function AppEntries() {
       status: (entry) => APP_STATUS_LABELS[entry.status] ?? entry.status,
     },
   })
-  const { pageRows, paginationProps } = table
+  const { pageRows, paginationProps, refresh, loading } = table
+
+  // Item 12: the fifteen-field entry form renders as a full page, not as a
+  // modal over the list. The short return-reason modal stays a modal.
+  if (creating) {
+    return (
+      <DashboardPage>
+        <EntryFormModal
+          title="New APP entry"
+          defaultValues={{
+            projectTitle: '',
+            description: '',
+            aipEntryId: '',
+            appropriationId: '',
+            abc: '',
+            unit: '',
+            quantity: '',
+            procurementMode: 'competitiveBidding',
+            targetStartQuarter: 'Q1',
+            targetCompletionQuarter: 'Q4',
+            fundSource: '',
+            accountCode: '',
+            mfoId: '',
+            papCode: '',
+            uacsCode: '',
+            justification: '',
+          }}
+          onClose={() => setCreating(false)}
+          onSubmit={async (values) => {
+            await appApi.createAppEntry(values)
+            refresh()
+          }}
+        />
+      </DashboardPage>
+    )
+  }
+
+  if (editing) {
+    return (
+      <DashboardPage>
+        <EntryFormModal
+          title={`Edit ${editing.projectTitle}`}
+          defaultValues={{
+            ...editing,
+            aipEntryId: editing.aipEntryId ?? '',
+            description: editing.description ?? '',
+            unit: editing.unit ?? '',
+            quantity: editing.quantity ?? '',
+            fundSource: editing.fundSource ?? '',
+            accountCode: editing.accountCode ?? '',
+            mfoId: editing.mfoId ?? '',
+            papCode: editing.papCode ?? '',
+            uacsCode: editing.uacsCode ?? '',
+            justification: editing.justification ?? '',
+          }}
+          onClose={() => setEditing(null)}
+          onSubmit={async (values) => {
+            await appApi.updateAppEntry(editing.id, values)
+            refresh()
+          }}
+        />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
@@ -489,7 +579,7 @@ export default function AppEntries() {
       />
 
       <Card bodyClassName="p-4">
-        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search project, unit or fund…" />
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search project, description, fund or account…" />
       </Card>
 
       {actionError && (
@@ -501,11 +591,14 @@ export default function AppEntries() {
       <Card title="APP Entries" icon={ClipboardList} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading entries...</p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] text-danger">Could not load APP entries.</p>
+            <Button className="mt-3" size="sm" variant="secondary" onClick={refresh}>Try again</Button>
+          </div>
         ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'No APP entries yet.'
-              : 'No entries match your search or filters.'}
+            {table.isDirty ? 'No entries match your search or filters.' : 'No APP entries yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -513,9 +606,9 @@ export default function AppEntries() {
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('projectTitle')}>Project</SortableTh>
-                  <SortableTh {...table.sortProps('implementingUnitCode')}>Unit</SortableTh>
+                  <Th>Unit</Th>
                   <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
-                  <SortableTh {...table.sortProps('procurementMode')}>Mode</SortableTh>
+                  <Th>Mode</Th>
                   <SortableTh {...table.sortProps('targetStartQuarter')}>Schedule</SortableTh>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
                   <Th>Actions</Th>
@@ -544,9 +637,10 @@ export default function AppEntries() {
                       </td>
                       <td className="px-4 py-3">
                         <Badge tone={APP_STATUS_TONES[entry.status]}>{APP_STATUS_LABELS[entry.status]}</Badge>
+                        <NextInline next={appNext(entry)} />
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex w-max items-center gap-2">
                           {entry.editable && canCreate && (
                             <button
                               type="button"
@@ -590,59 +684,6 @@ export default function AppEntries() {
         )}
         <Pagination {...paginationProps} label="entries" />
       </Card>
-
-      {creating && (
-        <EntryFormModal
-          title="New APP entry"
-          defaultValues={{
-            projectTitle: '',
-            description: '',
-            aipEntryId: '',
-            appropriationId: '',
-            abc: '',
-            unit: '',
-            quantity: '',
-            procurementMode: 'competitiveBidding',
-            targetStartQuarter: 'Q1',
-            targetCompletionQuarter: 'Q4',
-            fundSource: '',
-            accountCode: '',
-            mfoId: '',
-            papCode: '',
-            uacsCode: '',
-            justification: '',
-          }}
-          onClose={() => setCreating(false)}
-          onSubmit={async (values) => {
-            await appApi.createAppEntry(values)
-            refresh()
-          }}
-        />
-      )}
-
-      {editing && (
-        <EntryFormModal
-          title={`Edit ${editing.projectTitle}`}
-          defaultValues={{
-            ...editing,
-            aipEntryId: editing.aipEntryId ?? '',
-            description: editing.description ?? '',
-            unit: editing.unit ?? '',
-            quantity: editing.quantity ?? '',
-            fundSource: editing.fundSource ?? '',
-            accountCode: editing.accountCode ?? '',
-            mfoId: editing.mfoId ?? '',
-            papCode: editing.papCode ?? '',
-            uacsCode: editing.uacsCode ?? '',
-            justification: editing.justification ?? '',
-          }}
-          onClose={() => setEditing(null)}
-          onSubmit={async (values) => {
-            await appApi.updateAppEntry(editing.id, values)
-            refresh()
-          }}
-        />
-      )}
 
       {message && <p role="status" className="rounded border border-success/20 bg-success/5 p-3 text-sm text-success">{message}</p>}
       {committeeEntry && <CommitteeActionModal title="Record BAC plan recommendation" description={`Confirm the participating BAC members for ${committeeEntry.projectTitle}. The plan will proceed to funding certification.`} onClose={() => setCommitteeEntry(null)} onSubmit={(attendance) => runTransition(committeeEntry, 'consolidate', undefined, attendance)} />}

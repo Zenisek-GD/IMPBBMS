@@ -48,6 +48,7 @@ import mysql from "mysql2/promise";
 import { sequelize } from "./models/db.js";
 import "./models/index.js";
 import { migrateRoleSecurity } from "./services/migrateRoleSecurity.js";
+import { migrateUserTextSize } from "./services/migrateUserTextSize.js";
 
 const args = new Set(process.argv.slice(2));
 const mode = args.has("--force")
@@ -175,6 +176,13 @@ const run = async () => {
     await sequelize.sync();
     console.log("✅ schema synced (missing tables created; existing tables untouched)");
     console.log("   Use --alter to add new columns to existing tables.");
+  }
+
+  // This preference shipped after many existing databases.  It is an
+  // explicitly reviewed, additive migration, so the routine migration command
+  // must run it rather than relying on an operator to remember a second script.
+  if (await migrateUserTextSize(sequelize)) {
+    console.log("✅ user text-size preference column added");
   }
 
   await sequelize.close();

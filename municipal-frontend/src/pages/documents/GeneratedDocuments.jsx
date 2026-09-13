@@ -11,6 +11,13 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import ReasonModal from '../../components/ui/ReasonModal'
+import Pagination from '../../components/ui/Pagination'
+import TableToolbar from '../../components/ui/TableToolbar'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import { useServerTable } from '../../components/ui/useServerTable'
+import NextStep from '../../components/ui/NextStep'
+import { documentNext } from '../../config/nextSteps'
 import RichTextEditor from '../../components/ui/RichTextEditor'
 
 // The issuing workspace. A document moves draft → approved → (published), and
@@ -118,6 +125,7 @@ function DocumentViewer({ doc, onClose, onChanged }) {
   const [body, setBody] = useState(extractBody(doc.renderedHtml))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(null)
 
   const act = async (fn) => {
     setError('')
@@ -158,6 +166,8 @@ function DocumentViewer({ doc, onClose, onChanged }) {
             Voided: {doc.voidReason}
           </p>
         )}
+
+        <NextStep next={documentNext(doc)} tone={DOCUMENT_STATUS_TONES[doc.status]} />
 
         {error && <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
 
@@ -223,25 +233,19 @@ function DocumentViewer({ doc, onClose, onChanged }) {
               )}
 
               {doc.status === 'approved' && doc.publishable && !doc.isPublic && permissions.has('document.publish') && (
-                <Button icon={Globe} disabled={busy} onClick={() => act(() => api.publishDocument(doc.id))}>
+                <Button icon={Globe} disabled={busy} onClick={() => setConfirming('publish')}>
                   PUBLISH
                 </Button>
               )}
 
               {doc.isPublic && permissions.has('document.publish') && (
-                <Button variant="secondary" icon={Globe} disabled={busy} onClick={() => {
-                  const reason = window.prompt('Why is this being withdrawn from the public portal?')
-                  if (reason?.trim()) act(() => api.unpublishDocument(doc.id, reason))
-                }}>
+                <Button variant="secondary" icon={Globe} disabled={busy} onClick={() => setConfirming('withdraw')}>
                   WITHDRAW
                 </Button>
               )}
 
               {doc.status !== 'void' && permissions.has('document.void') && (
-                <Button variant="secondary" icon={Ban} disabled={busy} onClick={() => {
-                  const reason = window.prompt('Why is this document being voided?')
-                  if (reason?.trim()) act(() => api.voidDocument(doc.id, reason))
-                }}>
+                <Button variant="secondary" icon={Ban} disabled={busy} onClick={() => setConfirming('void')}>
                   VOID
                 </Button>
               )}
@@ -249,41 +253,102 @@ function DocumentViewer({ doc, onClose, onChanged }) {
           )}
         </div>
       </div>
+      {confirming && (
+        <ReasonModal
+          title={
+            confirming === 'withdraw'
+              ? `Withdraw "${doc.documentNo}" from the public portal?`
+              : confirming === 'void'
+                ? `Void "${doc.documentNo}"?`
+                : `Publish "${doc.documentNo}"?`
+          }
+          consequence={
+            confirming === 'withdraw'
+              ? 'The document leaves the transparency portal immediately. It can be published again later.'
+              : confirming === 'void'
+                ? 'Voiding is permanent. The document stays on record as voided and can no longer be issued.'
+                : 'The approved document becomes official and, where applicable, visible on the transparency portal.'
+          }
+          reasonLabel={confirming === 'withdraw' ? 'Why is it being withdrawn?' : 'Why is it being voided?'}
+          confirmLabel={
+            confirming === 'withdraw'
+              ? 'Withdraw document'
+              : confirming === 'void'
+                ? 'Void document'
+                : 'Publish document'
+          }
+          danger={confirming === 'void'}
+          requireReason={confirming !== 'publish'}
+          busy={busy}
+          onClose={() => setConfirming(null)}
+          onConfirm={(reason) => {
+            const action = confirming
+            setConfirming(null)
+            act(() =>
+              action === 'withdraw'
+                ? api.unpublishDocument(doc.id, reason)
+                : action === 'void'
+                  ? api.voidDocument(doc.id, reason)
+                  : api.publishDocument(doc.id)
+            )
+          }}
+        />
+      )}
     </Modal>
   )
 }
 
 export default function GeneratedDocuments() {
   const permissions = usePermissions()
-  const [documents, setDocuments] = useState([])
   const [templates, setTemplates] = useState([])
   const [options, setOptions] = useState({})
-  const [statusFilter, setStatusFilter] = useState('')
   const [viewing, setViewing] = useState(null)
   const [generating, setGenerating] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [resourcesLoading, setResourcesLoading] = useState(true)
+  const [resourcesFailed, setResourcesFailed] = useState(false)
   const [refreshToken, setRefreshToken] = useState(0)
   const [notice, setNotice] = useState('')
 
-  const refresh = useCallback(() => setRefreshToken((t) => t + 1), [])
+  const refreshResources = useCallback(() => {
+    setResourcesFailed(false)
+    setRefreshToken((t) => t + 1)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([
-      api.fetchDocuments(statusFilter ? { status: statusFilter } : {}),
-      api.fetchTemplates(),
-      api.fetchTemplateOptions(),
-    ])
-      .then(([docs, templateRows, optionRows]) => {
+    Promise.all([api.fetchTemplates(), api.fetchTemplateOptions()])
+      .then(([templateRows, optionRows]) => {
         if (cancelled) return
-        setDocuments(docs)
         setTemplates(templateRows)
         setOptions(optionRows)
-        setLoading(false)
+        setResourcesLoading(false)
       })
-      .catch(() => { if (!cancelled) setLoading(false) })
+      .catch(() => { if (!cancelled) { setResourcesFailed(true); setResourcesLoading(false) } })
     return () => { cancelled = true }
-  }, [statusFilter, refreshToken])
+  }, [refreshToken])
+
+  const table = useServerTable(api.fetchDocuments, {
+    urlKey: 'officialDocuments',
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: [
+          { value: 'draft', label: 'Draft' },
+          { value: 'pendingApproval', label: 'Pending approval' },
+          { value: 'approved', label: 'Approved and issued' },
+          { value: 'void', label: 'Void' },
+        ],
+      },
+    ],
+  })
+  const { pageRows, paginationProps } = table
+  const loading = resourcesLoading || table.loading
+  const failed = resourcesFailed || table.failed
+  const refresh = useCallback(() => {
+    refreshResources()
+    table.refresh()
+  }, [refreshResources, table])
 
   return (
     <DashboardPage>
@@ -305,39 +370,42 @@ export default function GeneratedDocuments() {
       )}
 
       <Card bodyClassName="p-4">
-        <select
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value)}
-          className="rounded border border-border-muted px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-        >
-          <option value="">All statuses</option>
-          <option value="draft">Draft</option>
-          <option value="approved">Approved and issued</option>
-          <option value="void">Void</option>
-        </select>
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search number, title or type…" />
       </Card>
 
       <Card title="Documents issued" icon={FileCheck2} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading documents…</p>
-        ) : documents.length === 0 ? (
+        ) : failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] font-medium text-navy">Documents could not be loaded</p>
+            <p className="mx-auto mt-1 max-w-md text-[13px] text-text-secondary">
+              Check your connection and try again.
+            </p>
+            <Button variant="secondary" size="sm" className="mt-3" onClick={refresh}>
+              Retry
+            </Button>
+          </div>
+        ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            No documents generated yet.
+            {table.totalBeforeFilters === 0
+              ? 'No documents generated yet.'
+              : 'No documents match your search or filters.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
-                  {['Number', 'Document', 'Source', 'Status', 'Actions'].map((head) => (
-                    <th key={head} className="px-4 py-2 text-[11px] font-medium tracking-[0.03em] whitespace-nowrap text-text-secondary uppercase">
-                      {head}
-                    </th>
-                  ))}
+                  <SortableTh {...table.sortProps('documentNo')}>Number</SortableTh>
+                  <SortableTh {...table.sortProps('title')}>Document</SortableTh>
+                  <Th>Source</Th>
+                  <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                  <Th>Actions</Th>
                 </tr>
               </thead>
               <tbody>
-                {documents.map((doc) => (
+                {pageRows.map((doc) => (
                   <tr key={doc.id} className="border-t border-border-muted">
                     <td className="px-4 py-3 font-mono text-xs text-navy">{doc.documentNo}</td>
                     <td className="px-4 py-3">
@@ -384,6 +452,9 @@ export default function GeneratedDocuments() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && !failed && table.rows.length > 0 && (
+          <Pagination {...paginationProps} label="documents" />
         )}
       </Card>
 

@@ -5,6 +5,8 @@ export const fetchAuditLog = (params = {}) =>
 
 export const verifyAuditChain = () => apiClient.get('/audit/verify').then((res) => res.data)
 
+export const fetchAuditFacets = () => apiClient.get('/audit/facets').then((res) => res.data)
+
 export const fetchEntityTimeline = (entityRef, entityId) =>
   apiClient.get(`/audit/timeline/${entityRef}/${entityId}`).then((res) => res.data)
 
@@ -12,6 +14,10 @@ export const fetchEntityTimeline = (entityRef, entityId) =>
 export const auditExportUrl = `${apiClient.defaults.baseURL}/audit/export`
 
 export const fetchDss = (params = {}) => apiClient.get('/dss', { params }).then((res) => res.data)
+
+// The server, rather than browser-side role heuristics, decides what may move
+// next in a workflow.  The dashboard only renders these safe display fields.
+export const fetchMyWork = (params = {}) => apiClient.get('/my-work', { params }).then((res) => res.data)
 
 // Transparency reads live in api/transparency.js — they are public and need no
 // session, unlike everything in this module.

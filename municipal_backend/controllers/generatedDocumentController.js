@@ -19,6 +19,7 @@ import { renderTemplate, assembleFromEditedBody } from "../services/templateRend
 import { renderPdf, BrowserUnavailableError } from "../services/pdfRenderer.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
 // Issuing documents. The module's promise is that the facts on an official
 // document are the ones already on file, so the two rules that matter are:
@@ -82,15 +83,46 @@ export const listDocuments = async (req, res) => {
   if (req.query.status) where.status = req.query.status;
   if (req.query.entityRef) where.entityRef = req.query.entityRef;
   if (Number.isFinite(Number(req.query.entityId))) where.entityId = Number(req.query.entityId);
-  if (req.query.search) where.documentNo = { [Op.like]: `%${req.query.search}%` };
+  const search = searchCondition(req.query.search, ["documentNo", "title", "documentType"]);
+  if (search) where[Op.and] = [search];
 
-  const documents = await GeneratedDocument.findAll({
+  // Record-detail and legacy callers still expect a plain array. The table
+  // screen opts into this bounded envelope explicitly with page/pageSize.
+  const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
+  if (!wantsPaging) {
+    const documents = await GeneratedDocument.findAll({
+      where,
+      ...withIncludes,
+      order: [["createdAt", "DESC"]],
+    });
+    return res.json(documents.map((doc) => serialize(doc)));
+  }
+
+  const paging = parseListParams(req.query, {
+    sorts: {
+      documentNo: "documentNo",
+      title: "title",
+      status: "status",
+      documentType: "documentType",
+      createdAt: "createdAt",
+    },
+    defaultSort: { field: "createdAt", direction: "desc" },
+  });
+  const { rows, count } = await GeneratedDocument.findAndCountAll({
     where,
     ...withIncludes,
-    order: [["createdAt", "DESC"]],
+    order: paging.order,
+    limit: paging.limit,
+    offset: paging.offset,
+    distinct: true,
   });
 
-  res.json(documents.map((doc) => serialize(doc)));
+  return res.json(pageEnvelope({
+    rows: rows.map((doc) => serialize(doc)),
+    total: count,
+    page: paging.page,
+    pageSize: paging.pageSize,
+  }));
 };
 
 export const getDocument = async (req, res) => {

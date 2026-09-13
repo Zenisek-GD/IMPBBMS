@@ -134,7 +134,7 @@ function DepartmentFormModal({ title, defaultValues, members = [], onSubmit, onC
             disabled={isSubmitting}
             className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            {isSubmitting ? 'SAVING...' : 'SAVE'}
+            {isSubmitting ? 'SAVING...' : 'SAVE DEPARTMENT'}
           </button>
         </div>
       </form>

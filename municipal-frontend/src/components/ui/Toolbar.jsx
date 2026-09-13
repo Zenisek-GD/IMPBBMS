@@ -11,7 +11,7 @@ import { Search, XCircle, List, LayoutGrid } from 'lucide-react'
 
 // Matched to the medium Button height so a toolbar row lines up with the action
 // beside it rather than sitting a pixel or two proud of it.
-const CONTROL = 'h-9.5 rounded-md border border-border-muted bg-surface text-[13px] transition-colors'
+const CONTROL = 'h-10 rounded-md border border-border-muted bg-surface text-sm transition-colors'
 
 export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }) {
   return (
@@ -62,7 +62,7 @@ export function ResetFilters({ onReset, disabled }) {
       type="button"
       onClick={onReset}
       disabled={disabled}
-      className="flex h-9.5 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-text-secondary transition-colors hover:text-navy disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex h-10 items-center gap-1.5 rounded-md px-2.5 text-sm text-text-secondary transition-colors hover:text-navy disabled:cursor-not-allowed disabled:opacity-40"
     >
       <XCircle size={15} />
       Reset filters

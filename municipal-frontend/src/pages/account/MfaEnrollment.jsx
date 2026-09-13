@@ -116,14 +116,13 @@ export function RecoveryCodeList({ codes, onAcknowledge, busy = false }) {
         )}
       </div>
       {copyError && <p role="alert" className="text-[13px] text-danger">{copyError}</p>}
-      {onAcknowledge && (
-        <label className="flex items-center gap-2 text-[13px] text-text-secondary">
-          <input type="checkbox" checked={saved} onChange={(event) => setSaved(event.target.checked)} />
-          I have saved a copy of these recovery codes in a safe place.
-        </label>
+      {onAcknowledge && !saved && (
+        <p className="text-[11px] text-text-faint">Copy or download the codes before continuing. If you write them down instead, choose “I wrote them down” below.</p>
       )}
       {onAcknowledge && !saved && (
-        <p className="text-[11px] text-text-faint">Copy, download, or write down the codes before continuing.</p>
+        <Button size="sm" variant="secondary" onClick={() => setSaved(true)}>
+          I wrote them down
+        </Button>
       )}
     </div>
   )

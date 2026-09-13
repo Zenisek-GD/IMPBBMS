@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { Fragment, useEffect, useState, useCallback } from 'react'
 import ResolutionNumberInput from '../../components/ui/ResolutionNumberInput'
 import { Plus, Target, Star, ListTree, Route, Check } from 'lucide-react'
 import * as planningApi from '../../api/planning'
@@ -19,9 +19,13 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
-import SortableTh from '../../components/ui/SortableTh'
+import SortableTh, { Th } from '../../components/ui/SortableTh'
+import NextStep, { NextInline } from '../../components/ui/NextStep'
+import ReasonModal from '../../components/ui/ReasonModal'
+import { planNext, aipNext } from '../../config/nextSteps'
 import { useTableControls } from '../../components/ui/useTableControls'
 
 // Steps 1 to 3 of the municipal process on one screen, because they are one
@@ -35,74 +39,51 @@ const peso = (value) => `₱${Number(value ?? 0).toLocaleString('en-PH', { maxim
 const inputClass =
   'w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none'
 
-function PlanForm({ onClose, onSaved }) {
+function PlanForm({ sectors, onClose, onSaved }) {
   const thisYear = new Date().getFullYear()
   const [title, setTitle] = useState(`Comprehensive Development Plan ${thisYear}–${thisYear + 2}`)
   const [startYear, setStartYear] = useState(thisYear)
   const [endYear, setEndYear] = useState(thisYear + 2)
   const [vision, setVision] = useState('')
+  const emptyGoal = () => ({ sector: sectors[0]?.key ?? 'social', subsector: '', title: '', description: '' })
+  const [goals, setGoals] = useState([emptyGoal])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const updateGoal = (index, key, value) => {
+    setGoals((current) => current.map((goal, goalIndex) =>
+      goalIndex === index ? { ...goal, [key]: value } : goal
+    ))
+  }
 
+  // Item 12: a plan with its goals is a long workflow form, so it lives on a
+  // full page with logical sections — not inside a scroll-heavy modal.
   return (
-    <Modal
+    <LargeFormPage
       title="New development plan"
-      subtitle="Record the plan details and vision. After saving, use the clearly marked Add Goal button on the draft plan before recording adoption."
-      size="xl"
-      onClose={onClose}
-    >
-      <div className="flex flex-col gap-3">
-        <label className="text-xs text-text-secondary">
-          Title
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className={`mt-1 ${inputClass}`} />
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="text-xs text-text-secondary">
-            Start year
-            <input
-              type="number"
-              value={startYear}
-              onChange={(e) => setStartYear(e.target.value)}
-              className={`mt-1 ${inputClass}`}
-            />
-          </label>
-          <label className="text-xs text-text-secondary">
-            End year
-            <input
-              type="number"
-              value={endYear}
-              onChange={(e) => setEndYear(e.target.value)}
-              className={`mt-1 ${inputClass}`}
-            />
-          </label>
-        </div>
-        <label className="text-xs text-text-secondary">
-          Vision
-          <textarea
-            rows={8}
-            value={vision}
-            onChange={(e) => setVision(e.target.value)}
-            className={`mt-1 min-h-40 resize-y leading-relaxed ${inputClass}`}
-          />
-        </label>
-        {error && <p className="text-xs text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
+      purpose="Start with the plan and its first goal in one place. You can add more goals now or later while the plan is still a draft."
+      onBack={onClose}
+      backLabel="Back to plans"
+      error={error}
+      actions={
+        <>
           <Button variant="secondary" onClick={onClose}>
-            CANCEL
+            Cancel
           </Button>
-          <button
-            type="button"
+          <Button
             disabled={saving}
             onClick={async () => {
               setError('')
-              if (!vision.trim()) {
-                setError('Enter the plan’s primary goal before creating the plan.')
-                setError('Enter the plan vision before creating the plan.')
+              if (!title.trim()) {
+                setError('Enter a title for the development plan.')
+                return
+              }
+              if (goals.some((goal) => !goal.title.trim())) {
+                setError('Enter a goal title for every goal you added, or remove the empty goal.')
                 return
               }
               setSaving(true)
               try {
-                await planningApi.createPlan({ title, startYear, endYear, vision })
+                await planningApi.createPlan({ title, startYear, endYear, vision, goals })
                 onSaved()
                 onClose()
               } catch (err) {
@@ -111,13 +92,108 @@ function PlanForm({ onClose, onSaved }) {
                 setSaving(false)
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            {saving ? 'SAVING...' : 'CREATE'}
-          </button>
+            {saving ? 'Creating plan…' : 'Create plan'}
+          </Button>
+        </>
+      }
+    >
+      <LargeFormPage.Section
+        title="Plan details"
+        description="What this plan is called and which years it covers."
+      >
+        <div className="flex flex-col gap-3">
+          <label className="text-xs text-text-secondary">
+            Title
+            <input value={title} onChange={(e) => setTitle(e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-text-secondary">
+              Start year
+              <input
+                type="number"
+                value={startYear}
+                onChange={(e) => setStartYear(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              />
+            </label>
+            <label className="text-xs text-text-secondary">
+              End year
+              <input
+                type="number"
+                value={endYear}
+                onChange={(e) => setEndYear(e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              />
+            </label>
+          </div>
         </div>
-      </div>
-    </Modal>
+      </LargeFormPage.Section>
+      {/* Optional and tucked away: a vision is a broad aspiration, not the
+          concrete result the plan must open with. Forcing it inline made it
+          look required and confused it with the first goal. */}
+      <details className="rounded-lg border border-border-muted bg-surface px-4 py-3 shadow-sm">
+        <summary className="cursor-pointer text-[13px] font-medium text-navy">
+          More details (optional)
+        </summary>
+        <label className="mt-2 block text-xs text-text-secondary">
+          Long-term direction (optional)
+          <textarea
+            rows={3}
+            value={vision}
+            onChange={(e) => setVision(e.target.value)}
+            placeholder="Example: A safe, healthy, and resilient municipality where every barangay can access essential services."
+            className={`mt-1 resize-y leading-relaxed ${inputClass}`}
+          />
+          <span className="mt-1 block text-[11px] leading-relaxed text-text-faint">
+            The municipality&apos;s broad long-term aspiration. Optional, and different from the
+            practical goals below.
+          </span>
+        </label>
+      </details>
+      <LargeFormPage.Section
+        title="Goals of this plan"
+        description="Add at least one practical result the municipality wants to achieve."
+      >
+        <div className="flex flex-col gap-4">
+          {goals.map((goal, index) => (
+            <fieldset key={index} className="rounded-md border border-border-muted bg-surface p-3">
+              <legend className="px-1 text-[12px] font-medium text-navy">
+                {index === 0 ? 'First goal of this plan' : `Goal ${index + 1}`}
+              </legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs text-text-secondary">
+                  Area
+                  <select value={goal.sector} onChange={(event) => updateGoal(index, 'sector', event.target.value)} className={`mt-1 ${inputClass}`}>
+                    {sectors.map((sector) => <option key={sector.key} value={sector.key}>{sector.label}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs text-text-secondary">
+                  Programme (optional)
+                  <input value={goal.subsector} onChange={(event) => updateGoal(index, 'subsector', event.target.value)} placeholder="Example: Health or disaster preparedness" className={`mt-1 ${inputClass}`} />
+                </label>
+              </div>
+              <label className="mt-3 block text-xs text-text-secondary">
+                Goal
+                <input value={goal.title} onChange={(event) => updateGoal(index, 'title', event.target.value)} placeholder="Example: Improve access to primary health services" className={`mt-1 ${inputClass}`} />
+              </label>
+              <label className="mt-3 block text-xs text-text-secondary">
+                Short description (optional)
+                <textarea rows={2} value={goal.description} onChange={(event) => updateGoal(index, 'description', event.target.value)} placeholder="What does success look like?" className={`mt-1 resize-y ${inputClass}`} />
+              </label>
+              {goals.length > 1 && (
+                <Button className="mt-3" size="sm" variant="ghost" onClick={() => setGoals((current) => current.filter((_, goalIndex) => goalIndex !== index))}>
+                  Remove this goal
+                </Button>
+              )}
+            </fieldset>
+          ))}
+        </div>
+        <Button className="mt-4" size="sm" variant="secondary" icon={Plus} onClick={() => setGoals((current) => [...current, emptyGoal()])}>
+          Add another goal
+        </Button>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -381,108 +457,22 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
 
   const set = (field, value) => setValues((current) => ({ ...current, [field]: value }))
 
+  // Item 12: project entry carries nine fields across budget, schedule and
+  // coding dimensions — a full page with sections, not a scroll-heavy modal.
   return (
-    <Modal title={`Add a project to AIP ${program.fiscalYear}`} onClose={onClose}>
-      <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto pr-1">
-        <label className="text-xs text-text-secondary">
-          Project
-          <input value={values.title} onChange={(e) => set('title', e.target.value)} className={`mt-1 ${inputClass}`} />
-        </label>
-
-        <label className="text-xs text-text-secondary">
-          Development goal it pursues
-          <select
-            value={values.developmentGoalId}
-            onChange={(e) => set('developmentGoalId', e.target.value)}
-            className={`mt-1 ${inputClass}`}
-          >
-            {goals.map((goal) => (
-              <option key={goal.id} value={goal.id}>
-                {goal.isMayorPriority ? `★ #${goal.priorityRank} — ` : ''}
-                {goal.title}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="text-xs text-text-secondary">
-          Implementing office
-          <select
-            value={values.implementingUnitId}
-            onChange={(e) => set('implementingUnitId', e.target.value)}
-            className={`mt-1 ${inputClass}`}
-          >
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="grid grid-cols-2 gap-3">
-          <label className="text-xs text-text-secondary">
-            Expense class
-            <select value={values.expenseClass} onChange={(e) => set('expenseClass', e.target.value)} className={`mt-1 ${inputClass}`}>
-              {(options.expenseClasses ?? []).map((c) => (
-                <option key={c.key} value={c.key}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-text-secondary">
-            Fund
-            <select value={values.fund} onChange={(e) => set('fund', e.target.value)} className={`mt-1 ${inputClass}`}>
-              {(options.funds ?? []).map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <label className="text-xs text-text-secondary">
-            Estimated cost
-            <input
-              type="number"
-              value={values.estimatedCost}
-              onChange={(e) => set('estimatedCost', e.target.value)}
-              className={`mt-1 ${inputClass}`}
-            />
-          </label>
-          <label className="text-xs text-text-secondary">
-            Start
-            <select value={values.startQuarter} onChange={(e) => set('startQuarter', e.target.value)} className={`mt-1 ${inputClass}`}>
-              {['Q1', 'Q2', 'Q3', 'Q4'].map((q) => (
-                <option key={q}>{q}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-text-secondary">
-            End
-            <select value={values.endQuarter} onChange={(e) => set('endQuarter', e.target.value)} className={`mt-1 ${inputClass}`}>
-              {['Q1', 'Q2', 'Q3', 'Q4'].map((q) => (
-                <option key={q}>{q}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <label className="text-xs text-text-secondary">
-          PAP code
-          <input value={values.papCode} onChange={(e) => set('papCode', e.target.value)} className={`mt-1 ${inputClass}`} />
-        </label>
-
-        {error && <p className="text-xs text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
+    <LargeFormPage
+      title={`Add a project to AIP ${program.fiscalYear}`}
+      purpose="Record one costed project under this year's investment program. It must pursue one of the plan's goals."
+      onBack={onClose}
+      backLabel="Back to investment program"
+      error={error}
+      actions={
+        <>
           <Button variant="secondary" onClick={onClose}>
-            CANCEL
+            Cancel
           </Button>
-          <button
-            type="button"
+          <Button
+            disabled={!values.title.trim()}
             onClick={async () => {
               setError('')
               try {
@@ -493,13 +483,118 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
                 setError(err.response?.data?.message ?? 'Could not add the project.')
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg"
           >
-            ADD PROJECT
-          </button>
+            Add project
+          </Button>
+        </>
+      }
+    >
+      <LargeFormPage.Section
+        title="Project"
+        description="What will be delivered, which goal it pursues, and which office implements it."
+      >
+        <div className="flex flex-col gap-3">
+          <label className="text-xs text-text-secondary">
+            Project
+            <input value={values.title} onChange={(e) => set('title', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+
+          <label className="text-xs text-text-secondary">
+            Development goal it pursues
+            <select
+              value={values.developmentGoalId}
+              onChange={(e) => set('developmentGoalId', e.target.value)}
+              className={`mt-1 ${inputClass}`}
+            >
+              {goals.map((goal) => (
+                <option key={goal.id} value={goal.id}>
+                  {goal.isMayorPriority ? `★ #${goal.priorityRank} — ` : ''}
+                  {goal.title}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-xs text-text-secondary">
+            Implementing office
+            <select
+              value={values.implementingUnitId}
+              onChange={(e) => set('implementingUnitId', e.target.value)}
+              className={`mt-1 ${inputClass}`}
+            >
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-      </div>
-    </Modal>
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section
+        title="Budget and schedule"
+        description="How much it costs, when it runs, and how it is coded."
+      >
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-text-secondary">
+              Expense class
+              <select value={values.expenseClass} onChange={(e) => set('expenseClass', e.target.value)} className={`mt-1 ${inputClass}`}>
+                {(options.expenseClasses ?? []).map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-text-secondary">
+              Fund
+              <select value={values.fund} onChange={(e) => set('fund', e.target.value)} className={`mt-1 ${inputClass}`}>
+                {(options.funds ?? []).map((f) => (
+                  <option key={f.key} value={f.key}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <label className="text-xs text-text-secondary">
+              Estimated cost
+              <input
+                type="number"
+                value={values.estimatedCost}
+                onChange={(e) => set('estimatedCost', e.target.value)}
+                className={`mt-1 ${inputClass}`}
+              />
+            </label>
+            <label className="text-xs text-text-secondary">
+              Start
+              <select value={values.startQuarter} onChange={(e) => set('startQuarter', e.target.value)} className={`mt-1 ${inputClass}`}>
+                {['Q1', 'Q2', 'Q3', 'Q4'].map((q) => (
+                  <option key={q}>{q}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-text-secondary">
+              End
+              <select value={values.endQuarter} onChange={(e) => set('endQuarter', e.target.value)} className={`mt-1 ${inputClass}`}>
+                {['Q1', 'Q2', 'Q3', 'Q4'].map((q) => (
+                  <option key={q}>{q}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="text-xs text-text-secondary">
+            PAP code
+            <input value={values.papCode} onChange={(e) => set('papCode', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+        </div>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -741,6 +836,7 @@ export default function DevelopmentPlanning() {
   const [adoptingPlan, setAdoptingPlan] = useState(null)
   const [adoptingProgram, setAdoptingProgram] = useState(null)
   const [addingEntryTo, setAddingEntryTo] = useState(null)
+  const [returningProgram, setReturningProgram] = useState(null)
 
   // Which half of the chain is on screen. The two used to be stacked, so a
   // reader scrolled past every development goal to reach the projects — and the
@@ -800,10 +896,41 @@ export default function DevelopmentPlanning() {
   const adoptedPlan = plans.find((p) => p.status === 'adopted')
   const programYears = availableAipYears(plans, programs)
 
+  // Item 12: long workflow forms render as full pages, not as modals over the
+  // list. Early returns keep every hook above them unconditional.
+  if (creatingPlan) {
+    return (
+      <DashboardPage>
+        <PlanForm
+          sectors={options.sectors ?? []}
+          onClose={() => setCreatingPlan(false)}
+          onSaved={refresh}
+        />
+      </DashboardPage>
+    )
+  }
+
+  if (addingEntryTo) {
+    return (
+      <DashboardPage>
+        <AipEntryForm
+          program={addingEntryTo}
+          goals={(plans.find((p) => p.id === addingEntryTo.developmentPlanId)?.goals ?? []).filter(
+            (g) => g.status === 'active'
+          )}
+          departments={departments}
+          options={options}
+          onClose={() => setAddingEntryTo(null)}
+          onSaved={refresh}
+        />
+      </DashboardPage>
+    )
+  }
+
   return (
     <DashboardPage>
       <PageHeader
-        title="Development Plan &amp; AIP"
+        title="Development Plan & Annual Investment Program (AIP)"
         subtitle="The development plan, the Mayor's priorities for the year, and the investment program derived from them. Everything the LGU budgets for and procures traces back to a line on this page."
         actions={
           canManageCdp && (
@@ -860,89 +987,17 @@ export default function DevelopmentPlanning() {
           </div>
 
           {/* ── Step 1 & 2: the plan and the priorities ── */}
-          {tab === 'plan' && (plans.length === 0 ? (
-            <Card title="Comprehensive Development Plan" icon={Target} bodyClassName="p-8">
-              <p className="text-center text-[13px] text-text-faint">
-                No development plan recorded yet. Everything downstream — the investment program, the budget, the
-                procurement plan — is checked against one, so this is the first thing to capture.
-              </p>
-            </Card>
-          ) : (
-            plans.map((plan) => (
-              <Card
-                key={plan.id}
-                title={plan.title}
-                icon={Target}
-                bodyClassName="p-4"
-                action={
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Badge tone={PLAN_STATUS_TONES[plan.status]}>{PLAN_STATUS_LABELS[plan.status]}</Badge>
-                    {plan.status === 'draft' && canManageCdp && (
-                      <Button
-                        size="sm"
-                        icon={Plus}
-                        onClick={() => setAddingGoalTo(plan)}
-                      >
-                        ADD GOAL
-                      </Button>
-                    )}
-                    {plan.status === 'draft' && canAdopt && (
-                      <Button
-                        size="sm"
-                        icon={Check}
-                        onClick={() => setAdoptingPlan(plan)}
-                      >
-                        RECORD ADOPTION
-                      </Button>
-                    )}
-                    {plan.status === 'adopted' && canPrioritise && (
-                      <button
-                        type="button"
-                        onClick={() => setPrioritising(plan)}
-                        className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
-                      >
-                        SET PRIORITIES
-                      </button>
-                    )}
-                  </div>
-                }
-              >
-                <p className="mb-3 text-xs text-text-faint">
-                  {plan.startYear}–{plan.endYear} ({plan.horizonYears} years)
-                  {plan.resolutionNo ? ` · adopted under ${plan.resolutionNo}` : ''}
-                </p>
-                {plan.vision && <p className="mb-3 text-[13px] text-text-secondary">{plan.vision}</p>}
-
-                <div className="flex flex-col gap-1">
-                  {plan.goals.length === 0 ? (
-                    <p className="text-[13px] text-text-faint">
-                      No goals recorded yet. A Planning Officer must use ADD GOAL before adoption can be recorded.
-                    </p>
-                  ) : (
-                    plan.goals.map((goal) => (
-                      <div
-                        key={goal.id}
-                        className="flex flex-wrap items-center gap-2 border-t border-border-muted py-2 text-[13px] first:border-t-0"
-                      >
-                        {goal.isMayorPriority && (
-                          <span className="inline-flex items-center gap-1 text-warning">
-                            <Star size={12} fill="currentColor" />
-                            <span className="text-[11px] font-medium">#{goal.priorityRank}</span>
-                          </span>
-                        )}
-                        <span className="flex-1 text-navy">{goal.title}</span>
-                        {goal.subsector && <span className="text-[11px] text-text-faint">{goal.subsector}</span>}
-                        <Badge tone="neutral">{goal.sectorLabel ?? goal.sector}</Badge>
-                        {goal.isMayorPriority && (
-                          <Badge tone="warning">MAYOR&apos;S PRIORITY FY {goal.priorityFiscalYear}</Badge>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </Card>
-            ))
-          ))}
+          {tab === 'plan' && (
+            <DevelopmentPlansTable
+              plans={plans}
+              canManageCdp={canManageCdp}
+              canPrioritise={canPrioritise}
+              canAdopt={canAdopt}
+              onAddGoal={setAddingGoalTo}
+              onPrioritise={setPrioritising}
+              onAdopt={setAdoptingPlan}
+            />
+          )}
 
           {/* ── Step 3: the investment program ── */}
           {tab === 'aip' && (
@@ -1016,14 +1071,7 @@ export default function DevelopmentPlanning() {
                         {returnPermission && permissions.has(returnPermission) && (
                           <button
                             type="button"
-                            onClick={() => {
-                              const remarks = window.prompt('Why is it being returned?')
-                              if (remarks?.trim()) {
-                                run(() =>
-                                  planningApi.transitionProgram(program.id, 'return', { remarks })
-                                ).catch(() => {})
-                              }
-                            }}
+                            onClick={() => setReturningProgram(program)}
                             className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                           >
                             RETURN
@@ -1036,6 +1084,10 @@ export default function DevelopmentPlanning() {
                       <p className="mb-2 text-xs text-danger">Returned: {program.returnRemarks}</p>
                     )}
 
+                    <div className="mb-2">
+                      <NextStep next={aipNext(program)} tone={AIP_STATUS_TONES[program.status]} />
+                    </div>
+
                     <AipEntriesTable entries={program.entries} />
                   </div>
                 )
@@ -1046,9 +1098,11 @@ export default function DevelopmentPlanning() {
         </>
       )}
 
-      {creatingPlan && (
-        <PlanForm
-          onClose={() => setCreatingPlan(false)}
+      {creatingProgram && (
+        <AipProgramForm
+          years={programYears}
+          plans={plans}
+          onClose={() => setCreatingProgram(false)}
           onSaved={refresh}
         />
       )}
@@ -1081,26 +1135,204 @@ export default function DevelopmentPlanning() {
           }
         />
       )}
-      {creatingProgram && (
-        <AipProgramForm
-          years={programYears}
-          plans={plans}
-          onClose={() => setCreatingProgram(false)}
-          onSaved={refresh}
-        />
-      )}
-      {addingEntryTo && (
-        <AipEntryForm
-          program={addingEntryTo}
-          goals={(plans.find((p) => p.id === addingEntryTo.developmentPlanId)?.goals ?? []).filter(
-            (g) => g.status === 'active'
-          )}
-          departments={departments}
-          options={options}
-          onClose={() => setAddingEntryTo(null)}
-          onSaved={refresh}
+      {returningProgram && (
+        <ReasonModal
+          title={`Return "${returningProgram.title}"`}
+          consequence="The program goes back to draft. The Planning Office will need to correct it and submit it again."
+          reasonLabel="Why is it being returned?"
+          reasonPlaceholder="State what must be corrected"
+          confirmLabel="Return program"
+          danger
+          onClose={() => setReturningProgram(null)}
+          onConfirm={(remarks) => {
+            const program = returningProgram
+            setReturningProgram(null)
+            run(() => planningApi.transitionProgram(program.id, 'return', { remarks })).catch(() => {})
+          }}
         />
       )}
     </DashboardPage>
+  )
+}
+
+// Development plans can accumulate across planning cycles. Keeping every goal
+// in every plan expanded turns a simple "find the right plan" task into a long
+// page of scrolling, so this is a record table first and a detail view only on
+// request. One open row at a time keeps the overview compact without hiding
+// goals, priorities, or the legal workflow actions that belong to the record.
+function DevelopmentPlansTable({
+  plans,
+  canManageCdp,
+  canPrioritise,
+  canAdopt,
+  onAddGoal,
+  onPrioritise,
+  onAdopt,
+}) {
+  const [expandedId, setExpandedId] = useState(null)
+  const table = useTableControls(plans, {
+    searchKeys: ['title', 'vision', 'resolutionNo', (plan) => `${plan.startYear} ${plan.endYear}`],
+    filters: [
+      {
+        key: 'status',
+        label: 'All statuses',
+        options: Object.entries(PLAN_STATUS_LABELS).map(([value, label]) => ({ value, label })),
+      },
+    ],
+    accessors: {
+      goalCount: (plan) => plan.goals?.length ?? 0,
+      startYear: (plan) => Number(plan.startYear ?? 0),
+    },
+    initialSort: { key: 'startYear', direction: 'desc' },
+  })
+
+  const goalCount = (plan) => plan.goals?.length ?? 0
+
+  return (
+    <Card title="Development Plans" icon={Target} bodyClassName="">
+      <div className="border-b border-border-muted p-4">
+        <TableToolbar {...table.toolbarProps} searchPlaceholder="Search plan, year, direction or resolution…" />
+      </div>
+
+      {table.rows.length === 0 ? (
+        <p className="px-4 py-8 text-center text-[13px] text-text-faint">
+          {table.totalBeforeFilters === 0
+            ? 'No development plan recorded yet. Create the first plan to begin the planning chain.'
+            : 'No development plans match your search or filters.'}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-left">
+            <thead className="bg-sidebar">
+              <tr>
+                <SortableTh {...table.sortProps('title')}>Plan</SortableTh>
+                <SortableTh {...table.sortProps('startYear')}>Period</SortableTh>
+                <SortableTh {...table.sortProps('goalCount')}>Goals</SortableTh>
+                <SortableTh {...table.sortProps('status')}>Status</SortableTh>
+                <Th>Next step</Th>
+                <Th>Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {table.pageRows.map((plan) => {
+                const open = expandedId === plan.id
+                const priorities = (plan.goals ?? []).filter((goal) => goal.isMayorPriority)
+                return (
+                  <Fragment key={plan.id}>
+                    <tr key={plan.id} className="border-t border-border-muted align-top">
+                      <td className="px-4 py-3">
+                        <p className="max-w-md text-[13px] font-medium text-navy">{plan.title}</p>
+                        {plan.resolutionNo && (
+                          <p className="mt-0.5 text-[11.5px] text-text-secondary">Resolution {plan.resolutionNo}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-[13px] tabular-nums text-text-secondary">
+                        {plan.startYear}–{plan.endYear}
+                        <p className="mt-0.5 text-[11.5px] text-text-faint">{plan.horizonYears} years</p>
+                      </td>
+                      <td className="px-4 py-3 text-[13px] text-navy">
+                        {goalCount(plan)}
+                        {priorities.length > 0 && (
+                          <p className="mt-0.5 flex items-center gap-1 text-[11.5px] text-warning">
+                            <Star size={11} fill="currentColor" aria-hidden="true" />
+                            {priorities.length} priority {priorities.length === 1 ? 'goal' : 'goals'}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge tone={PLAN_STATUS_TONES[plan.status]}>{PLAN_STATUS_LABELS[plan.status] ?? plan.status}</Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <NextInline next={planNext(plan)} />
+                        {plan.status === 'adopted' && <span className="text-[11.5px] text-success">Ready for priorities and AIP</span>}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex w-max items-center gap-2">
+                          <Button
+                            size="table"
+                            variant="secondary"
+                            aria-expanded={open}
+                            aria-controls={`plan-details-${plan.id}`}
+                            onClick={() => setExpandedId((current) => (current === plan.id ? null : plan.id))}
+                          >
+                            {open ? 'Hide' : 'Details'}
+                          </Button>
+                          {plan.status === 'draft' && canManageCdp && (
+                            <Button size="table" icon={Plus} onClick={() => onAddGoal(plan)}>Add goal</Button>
+                          )}
+                          {plan.status === 'draft' && canAdopt && (
+                            <Button size="table" icon={Check} onClick={() => onAdopt(plan)}>Adopt</Button>
+                          )}
+                          {plan.status === 'adopted' && canPrioritise && (
+                            <Button size="table" variant="secondary" onClick={() => onPrioritise(plan)}>Priorities</Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr key={`${plan.id}-details`} id={`plan-details-${plan.id}`} className="border-t border-border-muted bg-sidebar/40">
+                        <td colSpan={6} className="px-4 py-4">
+                          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+                            <div>
+                              <h3 className="text-[13px] font-semibold text-navy">Plan details</h3>
+                              {plan.vision ? (
+                                <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-text-secondary">
+                                  <span className="font-medium text-navy">Long-term direction: </span>
+                                  {plan.vision}
+                                </p>
+                              ) : (
+                                <p className="mt-2 text-[13px] text-text-faint">No long-term direction was recorded for this plan.</p>
+                              )}
+                              <div className="mt-3 max-w-2xl">
+                                <NextStep next={planNext(plan)} tone={PLAN_STATUS_TONES[plan.status]} />
+                              </div>
+                            </div>
+
+                            <div>
+                              <h3 className="text-[13px] font-semibold text-navy">Goals in this plan</h3>
+                              {goalCount(plan) === 0 ? (
+                                <p className="mt-2 text-[13px] text-text-faint">No goals recorded yet. Add the first goal before recording adoption.</p>
+                              ) : (
+                                <div className="mt-2 max-h-[30rem] overflow-y-auto rounded-lg border border-border-muted bg-surface">
+                                  <table className="w-full text-left">
+                                    <thead className="sticky top-0 bg-sidebar">
+                                      <tr>
+                                        <Th>Goal</Th>
+                                        <Th>Sector</Th>
+                                        <Th>Priority</Th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {(plan.goals ?? []).map((goal) => (
+                                        <tr key={goal.id} className="border-t border-border-muted">
+                                          <td className="px-4 py-2.5 text-[13px] text-navy">
+                                            {goal.title}
+                                            {goal.subsector && <p className="mt-0.5 text-[11.5px] text-text-faint">{goal.subsector}</p>}
+                                          </td>
+                                          <td className="px-4 py-2.5"><Badge tone="neutral">{goal.sectorLabel ?? goal.sector}</Badge></td>
+                                          <td className="px-4 py-2.5 text-[12px] text-text-secondary">
+                                            {goal.isMayorPriority ? `Mayor’s priority FY ${goal.priorityFiscalYear}` : '—'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {table.rows.length > 0 && <Pagination {...table.paginationProps} label="development plans" />}
+    </Card>
   )
 }

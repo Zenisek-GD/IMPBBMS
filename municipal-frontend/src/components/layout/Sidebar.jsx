@@ -1,6 +1,18 @@
 import { NavLink } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen, User, LogOut, UserCircle } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
+import { GLOSSARY } from '../../config/glossary'
+
+// Plain-language tooltips: a nav label keeps its short form for space, but
+// hovering always reveals the expanded term ("Annual Procurement Plan (APP)
+// Approvals"), so staff meet the full name where the work happens.
+const expandedLabel = (label) => {
+  let result = label
+  for (const entry of Object.values(GLOSSARY)) {
+    result = result.replace(new RegExp(`\\b${entry.short}\\b`, 'g'), `${entry.full} (${entry.short})`)
+  }
+  return result
+}
 
 // Shared sidebar shell used by every role. Content (title, nav sections) is
 // passed in per role from src/config/navigation.js so the chrome stays
@@ -55,7 +67,7 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
         {!collapsed && (
           <div className="min-w-0">
             <h1 className="truncate text-[14px] font-semibold text-navy">{brandTitle}</h1>
-            <p className="truncate text-[11.5px] text-text-faint">{brandSubtitle}</p>
+            <p className="truncate text-[12px] text-text-faint">{brandSubtitle}</p>
           </div>
         )}
         <button
@@ -77,7 +89,7 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
             className={index > 0 ? 'border-t border-border-muted pt-3' : undefined}
           >
             {section.heading && !collapsed && (
-              <p className="px-2 pb-1.5 text-[10px] font-medium tracking-[0.05em] text-text-faint uppercase">
+              <p className="px-2 pb-1.5 text-[12px] font-medium tracking-[0.04em] text-text-faint uppercase">
                 {section.heading}
               </p>
             )}
@@ -88,12 +100,12 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
                   to={item.href}
                   onClick={onNavigate}
                   aria-label={item.pendingCount ? `${item.label}, ${item.pendingCount} pending items` : item.label}
-                  title={collapsed ? `${item.label}${item.pendingCount ? ` (${item.pendingCount} pending)` : ''}` : undefined}
+                  title={`${expandedLabel(item.label)}${item.pendingCount ? ` (${item.pendingCount} pending)` : ''}`}
                   className={({ isActive }) => itemClass(collapsed, isActive)}
                 >
                   <item.icon size={15} strokeWidth={2} className="shrink-0" />
                   {!collapsed && <span className="truncate">{item.label}</span>}
-                  {item.pendingCount > 0 && <span aria-hidden="true" className={`${collapsed ? 'absolute right-0 top-0 min-w-4 px-1 text-[9px]' : 'ml-auto min-w-5 px-1.5 text-[10px]'} rounded-full bg-danger/10 py-0.5 text-center font-semibold text-danger`}>{item.pendingCount > 99 ? '99+' : item.pendingCount}</span>}
+                  {item.pendingCount > 0 && <span aria-hidden="true" className={`${collapsed ? 'absolute right-0 top-0 min-w-4 px-1 text-[10px]' : 'ml-auto min-w-5 px-1.5 text-[11px]'} rounded-full bg-danger/10 py-0.5 text-center font-semibold text-danger`}>{item.pendingCount > 99 ? '99+' : item.pendingCount}</span>}
                 </NavLink>
               ))}
             </div>
@@ -113,7 +125,7 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
               </span>
               <div className="min-w-0">
                 <p className="truncate text-[12px] font-semibold text-navy">{user?.name}</p>
-                <p className="truncate text-[11px] text-text-faint">{user?.roleName}</p>
+                <p className="truncate text-[12px] text-text-faint">{user?.roleName}</p>
               </div>
             </div>
           )}

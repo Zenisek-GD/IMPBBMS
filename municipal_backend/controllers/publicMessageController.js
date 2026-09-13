@@ -1,6 +1,7 @@
 import { PublicMessage, MESSAGE_ROUTING, MESSAGE_CATEGORIES } from "../models/publicMessageModel.js";
 import { User } from "../models/userModel.js";
 import { notifyByPermission } from "../services/notifier.js";
+import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
 // ── Inbound public correspondence ────────────────────────────────────────────
 // The only write endpoint on the public surface. Everything here is written
@@ -105,33 +106,57 @@ export const listPublicMessages = async (req, res) => {
     .map((route) => route.permission)
     .filter((permission) => held.has(permission));
 
-  if (mine.length === 0) return res.json([]);
+  const paged = ['page', 'pageSize', 'sort'].some((key) => req.query[key] !== undefined);
+  if (mine.length === 0) {
+    if (!paged) return res.json([]);
+    const page = parseListParams(req.query);
+    return res.json({
+      ...pageEnvelope({ rows: [], total: 0, page: page.page, pageSize: page.pageSize }),
+      summary: { unread: 0 },
+    });
+  }
 
-  const messages = await PublicMessage.findAll({
-    where: { routedToPermission: [...new Set(mine)] },
-    include: [{ model: User, as: "handledBy", attributes: ["id", "name"] }],
-    order: [["createdAt", "DESC"]],
+  const routingWhere = { routedToPermission: [...new Set(mine)] };
+  const where = { ...routingWhere };
+  if (['new', 'acknowledged', 'closed'].includes(req.query.status)) where.status = req.query.status;
+  if (MESSAGE_CATEGORIES.includes(req.query.category)) where.category = req.query.category;
+  const searched = searchCondition(req.query.search, ['subject', 'body', 'senderName', 'senderEmail', 'referenceHint']);
+  if (searched) Object.assign(where, searched);
+  const include = [{ model: User, as: 'handledBy', attributes: ['id', 'name'] }];
+  const serialize = (message) => ({
+    id: message.id,
+    category: message.category,
+    categoryLabel: MESSAGE_ROUTING[message.category]?.label ?? message.category,
+    subject: message.subject,
+    body: message.body,
+    senderName: message.senderName,
+    senderEmail: message.senderEmail,
+    referenceHint: message.referenceHint,
+    status: message.status,
+    handledAt: message.handledAt,
+    handledByName: message.handledBy?.name ?? null,
+    handlingNotes: message.handlingNotes,
+    receivedAt: message.createdAt,
   });
 
-  res.json(
-    messages.map((message) => ({
-      id: message.id,
-      category: message.category,
-      categoryLabel: MESSAGE_ROUTING[message.category]?.label ?? message.category,
-      subject: message.subject,
-      body: message.body,
-      senderName: message.senderName,
-      senderEmail: message.senderEmail,
-      referenceHint: message.referenceHint,
-      status: message.status,
-      handledAt: message.handledAt,
-      handledByName: message.handledBy?.name ?? null,
-      handlingNotes: message.handlingNotes,
-      receivedAt: message.createdAt,
-      // `ipAddress` is deliberately absent — it exists for abuse handling, not
-      // for the officer reading the message.
-    }))
-  );
+  if (!paged) {
+    const messages = await PublicMessage.findAll({ where, include, order: [['createdAt', 'DESC']] });
+    return res.json(messages.map(serialize));
+  }
+
+  const page = parseListParams(req.query, {
+    sorts: { subject: 'subject', status: 'status', receivedAt: 'createdAt', createdAt: 'createdAt' },
+    defaultSort: { field: 'createdAt', direction: 'desc' },
+  });
+  const [{ count, rows }, unread] = await Promise.all([
+    PublicMessage.findAndCountAll({ where, include, ...page, distinct: true }),
+    PublicMessage.count({ where: { ...routingWhere, status: 'new' } }),
+  ]);
+  return res.json({
+    ...pageEnvelope({ rows: rows.map(serialize), total: count, page: page.page, pageSize: page.pageSize }),
+    // Header count deliberately remains whole-queue, not current-page.
+    summary: { unread },
+  });
 };
 
 export const updatePublicMessage = async (req, res) => {

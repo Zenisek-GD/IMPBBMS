@@ -1,3 +1,14 @@
+// ── Modal — small focused work only (System_Simplification Item 12) ────────────
+// Use a modal ONLY for: confirming an action, entering a short reason, adding
+// one simple item (a handful of fields), viewing brief information, or editing
+// a short status detail.
+//
+// Do NOT place a long workflow form inside this component: development plans,
+// AIP creation and project entry, procurement setup, bid evaluation, contract
+// preparation, large document creation, multi-field user management, financial
+// forms, and complex approval or review screens belong on a full page built
+// with LargeFormPage.jsx instead. A scroll-heavy modal forces users to move up
+// and down to understand the form and is unusable at larger text sizes.
 import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 

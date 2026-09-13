@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Inbox, Mail, MailX, Check } from 'lucide-react'
 import * as messagesApi from '../../api/messages'
 import { MESSAGE_STATUS_TONES } from '../../api/messages'
@@ -11,7 +11,7 @@ import Modal from '../../components/ui/Modal'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import { useServerTable } from '../../components/ui/useServerTable'
 
 // ── MESSAGES FROM THE PUBLIC ─────────────────────────────────────────────────
 // You see the messages routed to a permission you hold, and nothing else. There
@@ -146,33 +146,9 @@ function MessageModal({ message, onClose, onSaved }) {
 }
 
 export default function PublicMessages() {
-  const [messages, setMessages] = useState([])
-  const [loading, setLoading] = useState(true)
   const [reading, setReading] = useState(null)
-  const [refreshToken, setRefreshToken] = useState(0)
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
-  useEffect(() => {
-    let cancelled = false
-    messagesApi
-      .fetchMessages()
-      .then((data) => {
-        if (cancelled) return
-        setMessages(data)
-        setLoading(false)
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
-
-  const unread = messages.filter((message) => message.status === 'new').length
-
-  const table = useTableControls(messages, {
-    searchKeys: ['subject', 'body', 'senderName', 'senderEmail', 'referenceHint', 'categoryLabel'],
+  const table = useServerTable(messagesApi.fetchMessages, {
+    urlKey: 'publicMessages',
     filters: [
       {
         key: 'status',
@@ -183,10 +159,15 @@ export default function PublicMessages() {
           { value: 'closed', label: 'Closed' },
         ],
       },
-      { key: 'categoryLabel', label: 'All subjects' },
+      {
+        key: 'category',
+        label: 'All subjects',
+        options: messagesApi.MESSAGE_CATEGORIES.map((category) => ({ value: category.key, label: category.label })),
+      },
     ],
-    initialSort: { key: 'receivedAt', direction: 'desc' },
   })
+  const { refresh } = table
+  const unread = Number(table.meta?.unread ?? 0)
 
   return (
     <DashboardPage>
@@ -197,19 +178,20 @@ export default function PublicMessages() {
       />
 
       <Card title="Inbox" icon={Inbox} bodyClassName="">
-        {messages.length > 0 && (
-          <div className="border-b border-border-muted p-5">
-            <TableToolbar {...table.toolbarProps} searchPlaceholder="Search subject, sender or text…" />
-          </div>
-        )}
+        <div className="border-b border-border-muted p-5">
+          <TableToolbar {...table.toolbarProps} searchPlaceholder="Search subject, sender or text…" />
+        </div>
 
-        {loading ? (
+        {table.loading ? (
           <p className="px-5 py-10 text-center text-[13px] text-text-faint">Loading messages…</p>
+        ) : table.failed ? (
+          <div className="px-5 py-10 text-center">
+            <p className="text-[13px] text-danger">Could not load messages.</p>
+            <Button className="mt-3" size="sm" variant="secondary" onClick={refresh}>Try again</Button>
+          </div>
         ) : table.rows.length === 0 ? (
           <p className="px-5 py-10 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'Nothing has been sent to this office yet.'
-              : 'No messages match your search or filters.'}
+            {table.isDirty ? 'No messages match your search or filters.' : 'Nothing has been sent to this office yet.'}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -217,8 +199,8 @@ export default function PublicMessages() {
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('subject')}>Subject</SortableTh>
-                  <SortableTh {...table.sortProps('categoryLabel')}>About</SortableTh>
-                  <SortableTh {...table.sortProps('senderName')}>From</SortableTh>
+                  <Th>About</Th>
+                  <Th>From</Th>
                   <SortableTh {...table.sortProps('receivedAt')}>Received</SortableTh>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
                   <Th>Actions</Th>

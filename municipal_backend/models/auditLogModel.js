@@ -50,7 +50,16 @@ export const AuditLog = sequelize.define(
   {
     // Append-only: no updatedAt, because a row must never be updated.
     timestamps: false,
-    indexes: [{ fields: ["entityRef", "entityId"] }, { fields: ["actionType"] }],
+    indexes: [
+      { fields: ["entityRef", "entityId"] },
+      { fields: ["actionType"] },
+      // Server-side list queries sort and filter on these.
+      { fields: ["sequence"] },
+      { fields: ["recordedAt"] },
+      { fields: ["outcome"] },
+      { fields: ["actorName"] },
+      { fields: ["actorRole"] },
+    ],
   }
 );
 

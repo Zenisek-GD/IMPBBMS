@@ -16,9 +16,12 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
+import NextStep from '../../components/ui/NextStep'
+import { budgetNext } from '../../config/nextSteps'
 import { useTableControls } from '../../components/ui/useTableControls'
 
 // Steps 6 to 14: from an office asking for money to the Sanggunian granting it.
@@ -101,27 +104,75 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
   const updateLine = (index, field, value) =>
     setLines((current) => current.map((line, i) => (i === index ? { ...line, [field]: value } : line)))
 
+  // Item 12: a proposal with dynamic lines is a financial form — a full page
+  // with sections, not a scroll-heavy modal.
   return (
-    <Modal title={existing ? `Edit proposal — ${existing.departmentName}` : 'New budget proposal'} onClose={onClose}>
-      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto pr-1">
-        {overCeiling && (
-          <div className="flex items-start gap-2 rounded border border-warning/30 bg-warning/10 p-3">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" />
-            <p className="text-xs text-text-secondary">
-              {peso(total)} exceeds the {existing.ceilingGrowthPct}% growth ceiling of {peso(ceiling)} over last
-              year&apos;s {peso(existing.previousYearAppropriation)}. This is allowed, but a justification is required
-              before it can be submitted — the hearing will ask.
-            </p>
-          </div>
-        )}
+    <LargeFormPage
+      title={existing ? `Edit proposal — ${existing.departmentName}` : 'New budget proposal'}
+      purpose={`Office request for FY ${budget.fiscalYear}. Link capital lines to the investment program so the consolidation check passes.`}
+      onBack={onClose}
+      backLabel="Back to budget"
+      error={error}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={saving}
+            onClick={async () => {
+              setError('')
+              setSaving(true)
+              try {
+                const payload = {
+                  executiveBudgetId: budget.id,
+                  justification,
+                  lines: lines.map((line) => ({
+                    title: line.title,
+                    expenseClass: line.expenseClass,
+                    fund: line.fund ?? 'generalFund',
+                    proposedAmount: Number(line.proposedAmount),
+                    aipEntryId: line.aipEntryId ? Number(line.aipEntryId) : null,
+                  })),
+                }
+                if (existing) await budgetApi.updateProposal(existing.id, payload)
+                else await budgetApi.createProposal(payload)
+                onSaved()
+                onClose()
+              } catch (err) {
+                setError(err.response?.data?.message ?? 'Could not save the proposal.')
+              } finally {
+                setSaving(false)
+              }
+            }}
+          >
+            {saving ? 'Saving…' : 'Save draft'}
+          </Button>
+        </>
+      }
+    >
+      {overCeiling && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-4">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" />
+          <p className="text-xs text-text-secondary">
+            {peso(total)} exceeds the {existing.ceilingGrowthPct}% growth ceiling of {peso(ceiling)} over last
+            year&apos;s {peso(existing.previousYearAppropriation)}. This is allowed, but a justification is required
+            before it can be submitted — the hearing will ask.
+          </p>
+        </div>
+      )}
 
+      <LargeFormPage.Section
+        title="Proposal lines"
+        description="What the office is asking for. Capital lines should cite the investment programme project behind them."
+      >
         <div>
           <div className="mb-2 flex items-center justify-between">
-            <label className="text-xs font-medium tracking-[0.02em] text-text-secondary">Proposal lines</label>
+            <span className="text-xs font-medium tracking-[0.02em] text-text-secondary">Lines</span>
             <button
               type="button"
               onClick={() => setLines((current) => [...current, emptyLine()])}
-              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+              className="min-h-[44px] text-[12px] font-medium tracking-[0.03em] text-navy hover:underline"
             >
               + ADD LINE
             </button>
@@ -158,7 +209,7 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
                     onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                     disabled={lines.length === 1}
                     aria-label="Remove line"
-                    className="col-span-1 text-text-faint hover:text-danger disabled:opacity-30"
+                    className="col-span-1 flex min-h-[44px] min-w-[44px] items-center justify-center text-text-faint hover:text-danger disabled:opacity-30"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -191,7 +242,12 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
 
           <p className="mt-3 text-right text-sm font-bold text-navy">Total: {peso(total)}</p>
         </div>
+      </LargeFormPage.Section>
 
+      <LargeFormPage.Section
+        title="Justification"
+        description="Why the office needs this. Required when the request exceeds its growth ceiling."
+      >
         <label className="text-xs text-text-secondary">
           Justification
           <textarea
@@ -201,52 +257,8 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
             className={`mt-1 ${inputClass}`}
           />
         </label>
-
-        {error && (
-          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            CANCEL
-          </Button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={async () => {
-              setError('')
-              setSaving(true)
-              try {
-                const payload = {
-                  executiveBudgetId: budget.id,
-                  justification,
-                  lines: lines.map((line) => ({
-                    title: line.title,
-                    expenseClass: line.expenseClass,
-                    fund: line.fund ?? 'generalFund',
-                    proposedAmount: Number(line.proposedAmount),
-                    aipEntryId: line.aipEntryId ? Number(line.aipEntryId) : null,
-                  })),
-                }
-                if (existing) await budgetApi.updateProposal(existing.id, payload)
-                else await budgetApi.createProposal(payload)
-                onSaved()
-                onClose()
-              } catch (err) {
-                setError(err.response?.data?.message ?? 'Could not save the proposal.')
-              } finally {
-                setSaving(false)
-              }
-            }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
-          >
-            {saving ? 'SAVING...' : 'SAVE DRAFT'}
-          </button>
-        </div>
-      </div>
-    </Modal>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -262,47 +274,21 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
 
   const total = Object.values(amounts).reduce((sum, value) => sum + (Number(value) || 0), 0)
 
+  // Item 12: reviewing every line's figure is a complex review screen — a full
+  // page, not a modal.
   return (
-    <Modal title={`${title} — ${proposal.departmentName}`} onClose={onClose}>
-      <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto pr-1">
-        <p className="text-xs text-text-faint">
-          Enter a figure against every line. Zero is how a line is refused — it stays on the proposal as the record of
-          what was asked.
-        </p>
-
-        {proposal.lines.map((line) => (
-          <div key={line.id} className="grid grid-cols-12 items-center gap-2">
-            <span className="col-span-6 text-[13px] text-navy">{line.title}</span>
-            <span className="col-span-3 text-right text-xs text-text-faint">
-              asked {peso(line.proposedAmount)}
-            </span>
-            <input
-              type="number"
-              value={amounts[line.id]}
-              onChange={(event) =>
-                setAmounts((current) => ({ ...current, [line.id]: event.target.value }))
-              }
-              className="col-span-3 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
-            />
-          </div>
-        ))}
-
-        <p className="text-right text-sm font-bold text-navy">
-          {peso(total)} of {peso(proposal.proposedTotal)} requested
-        </p>
-
-        <label className="text-xs text-text-secondary">
-          Notes
-          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={`mt-1 ${inputClass}`} />
-        </label>
-
-        {error && <p className="text-xs text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
+    <LargeFormPage
+      title={`${title} — ${proposal.departmentName}`}
+      purpose="Enter a figure against every line. Zero is how a line is refused — it stays on the proposal as the record of what was asked."
+      onBack={onClose}
+      backLabel="Back to budget"
+      error={error}
+      actions={
+        <>
           <Button variant="secondary" onClick={onClose}>
-            CANCEL
+            Cancel
           </Button>
-          <button
-            type="button"
+          <Button
             onClick={async () => {
               setError('')
               try {
@@ -318,13 +304,44 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
                 setError(err.response?.data?.message ?? 'Could not record those figures.')
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg"
           >
-            RECORD
-          </button>
+            Record
+          </Button>
+        </>
+      }
+    >
+      <LargeFormPage.Section title="Figures">
+        <div className="flex flex-col gap-3">
+          {proposal.lines.map((line) => (
+            <div key={line.id} className="grid grid-cols-12 items-center gap-2">
+              <span className="col-span-6 text-[13px] text-navy">{line.title}</span>
+              <span className="col-span-3 text-right text-xs text-text-faint">
+                asked {peso(line.proposedAmount)}
+              </span>
+              <input
+                type="number"
+                value={amounts[line.id]}
+                onChange={(event) =>
+                  setAmounts((current) => ({ ...current, [line.id]: event.target.value }))
+                }
+                className="col-span-3 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+              />
+            </div>
+          ))}
+
+          <p className="text-right text-sm font-bold text-navy">
+            {peso(total)} of {peso(proposal.proposedTotal)} requested
+          </p>
         </div>
-      </div>
-    </Modal>
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section title="Notes" description="Optional remarks recorded with these figures.">
+        <label className="text-xs text-text-secondary">
+          Notes
+          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={`mt-1 ${inputClass}`} />
+        </label>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -638,7 +655,7 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                             onClick={() => run(() => budgetApi.submitProposal(proposal.id)).catch(() => {})}
                             className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            SUBMIT
+                            SUBMIT PROPOSAL
                           </button>
                         </>
                       )}
@@ -738,6 +755,43 @@ export default function BudgetPreparation() {
 
   const canOpen = permissions.has('budget.prepareExecutive')
   const canPropose = permissions.has('budget.proposeBudget') || canOpen
+
+  // Item 12: proposal and figure-review forms render as full pages, not as
+  // modals over the budget. Short stage and proceeding forms stay modals.
+  if (proposing) {
+    return (
+      <DashboardPage>
+        <ProposalForm budget={proposing} onClose={() => setProposing(null)} onSaved={refresh} />
+      </DashboardPage>
+    )
+  }
+
+  if (editingProposal) {
+    return (
+      <DashboardPage>
+        <ProposalForm
+          budget={editingProposal.budget}
+          existing={editingProposal.proposal}
+          onClose={() => setEditingProposal(null)}
+          onSaved={refresh}
+        />
+      </DashboardPage>
+    )
+  }
+
+  if (amountsFor) {
+    return (
+      <DashboardPage>
+        <AmountsForm
+          proposal={amountsFor.proposal}
+          field={amountsFor.field}
+          title={amountsFor.title}
+          onClose={() => setAmountsFor(null)}
+          onConfirm={(payload) => run(() => amountsFor.submit(payload))}
+        />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
@@ -841,6 +895,10 @@ export default function BudgetPreparation() {
                 </p>
               )}
 
+              <div className="mb-3">
+                <NextStep next={budgetNext(budget)} tone={BUDGET_STATUS_TONES[budget.status]} />
+              </div>
+
               <div className="mb-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
                 <div>
                   <p className="text-text-faint">Estimated income</p>
@@ -910,26 +968,6 @@ export default function BudgetPreparation() {
         })
       )}
 
-      {proposing && (
-        <ProposalForm budget={proposing} onClose={() => setProposing(null)} onSaved={refresh} />
-      )}
-      {editingProposal && (
-        <ProposalForm
-          budget={editingProposal.budget}
-          existing={editingProposal.proposal}
-          onClose={() => setEditingProposal(null)}
-          onSaved={refresh}
-        />
-      )}
-      {amountsFor && (
-        <AmountsForm
-          proposal={amountsFor.proposal}
-          field={amountsFor.field}
-          title={amountsFor.title}
-          onClose={() => setAmountsFor(null)}
-          onConfirm={(payload) => run(() => amountsFor.submit(payload))}
-        />
-      )}
       {stageFormFor && (
         <StageForm
           budget={stageFormFor.budget}

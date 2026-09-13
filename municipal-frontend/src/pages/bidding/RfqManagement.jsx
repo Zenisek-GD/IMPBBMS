@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { Megaphone, Plus, Inbox, Info, Table2 } from 'lucide-react'
 import * as biddingApi from '../../api/bidding'
 import { RFQ_STATUS_LABELS, RFQ_STATUS_TONES } from '../../api/bidding'
@@ -13,10 +13,13 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import LargeFormPage from '../../components/ui/LargeFormPage'
 import Pagination from '../../components/ui/Pagination'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
-import { useTableControls } from '../../components/ui/useTableControls'
+import { NextInline } from '../../components/ui/NextStep'
+import { rfqNext } from '../../config/nextSteps'
+import { useServerTable } from '../../components/ui/useServerTable'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -39,8 +42,44 @@ function CreateRfqModal({ onClose, onCreated }) {
   }, [])
 
   return (
-    <Modal title="New RFQ / ITB" onClose={onClose}>
-      <div className="flex flex-col gap-4">
+    // Item 12: procurement setup carries the requisition link, particulars and
+    // a full schedule — a full page with sections, not a scroll-heavy modal.
+    <LargeFormPage
+      title="New Request for Quotation (RFQ) / Invitation to Bid (ITB)"
+      purpose="Advertise an approved requisition. The ABC and procurement mode come from the requisition — review the schedule before publication."
+      onBack={onClose}
+      backLabel="Back to procurements"
+      error={error}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={saving || !form.prHeaderId || !form.closingDate || !form.openingDate}
+            onClick={async () => {
+              setError('')
+              setSaving(true)
+              try {
+                await biddingApi.createRfq({ prHeaderId: Number(form.prHeaderId), title: form.title, category: form.category, ...schedulePayload(form) })
+                onCreated()
+                onClose()
+              } catch (err) {
+                setError(err.response?.data?.message ?? err.message ?? 'Could not create the RFQ.')
+              } finally {
+                setSaving(false)
+              }
+            }}
+          >
+            {saving ? 'Creating…' : 'Create draft'}
+          </Button>
+        </>
+      }
+    >
+      <LargeFormPage.Section
+        title="Linked requisition"
+        description="Which approved requisition this solicitation advertises."
+      >
         <div>
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
             Approved requisition
@@ -61,18 +100,23 @@ function CreateRfqModal({ onClose, onCreated }) {
             The ABC and procurement mode are derived from the requisition and the LGU&apos;s IRR thresholds.
           </p>
         </div>
+      </LargeFormPage.Section>
 
-        <div>
-          <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Title</label>
-          <input
-            type="text"
-            value={form.title}
-            onChange={(event) => setForm({ ...form, title: event.target.value })}
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-          />
-        </div>
+      <LargeFormPage.Section
+        title="Solicitation"
+        description="What bidders will see on the advertisement."
+      >
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Title</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(event) => setForm({ ...form, title: event.target.value })}
+              className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+            />
+          </div>
 
-        <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Category
@@ -88,41 +132,15 @@ function CreateRfqModal({ onClose, onCreated }) {
             </select>
           </div>
         </div>
+      </LargeFormPage.Section>
+
+      <LargeFormPage.Section
+        title="Schedule"
+        description="Submission deadline, opening date and related milestones."
+      >
         <ScheduleFields form={form} setForm={setForm} />
-
-        {error && (
-          <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            CANCEL
-          </Button>
-          <button
-            type="button"
-            disabled={saving || !form.prHeaderId || !form.closingDate || !form.openingDate}
-            onClick={async () => {
-              setError('')
-              setSaving(true)
-              try {
-                await biddingApi.createRfq({ prHeaderId: Number(form.prHeaderId), title: form.title, category: form.category, ...schedulePayload(form) })
-                onCreated()
-                onClose()
-              } catch (err) {
-                setError(err.response?.data?.message ?? err.message ?? 'Could not create the RFQ.')
-              } finally {
-                setSaving(false)
-              }
-            }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
-          >
-            {saving ? 'CREATING...' : 'CREATE DRAFT'}
-          </button>
-        </div>
-      </div>
-    </Modal>
+      </LargeFormPage.Section>
+    </LargeFormPage>
   )
 }
 
@@ -280,7 +298,6 @@ function AbstractOfBidsModal({ rfq, onClose }) {
 export default function RfqManagement() {
   const permissions = usePermissions()
   const canPublish = permissions.has('bidding.publish')
-  const [rfqs, setRfqs] = useState([])
   const [creating, setCreating] = useState(false)
   const [opening, setOpening] = useState(null)
   const [abstractFor, setAbstractFor] = useState(null)
@@ -288,23 +305,6 @@ export default function RfqManagement() {
   const [witnesses, setWitnesses] = useState('')
   const [actionError, setActionError] = useState('')
   const [message, setMessage] = useState('')
-  const [refreshToken, setRefreshToken] = useState(0)
-
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
-  useEffect(() => {
-    let cancelled = false
-    biddingApi
-      .fetchRfqs()
-      .then((data) => {
-        if (!cancelled) setRfqs(data)
-      })
-      .catch((err) => { if (!cancelled) setActionError(err.response?.data?.message ?? 'Could not load procurement records.') })
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
-
   const run = async (fn, success) => {
     setActionError('')
     setMessage('')
@@ -321,15 +321,14 @@ export default function RfqManagement() {
 
   // Sorting by closing date is the one this office needs most: it is the order
   // in which the work becomes urgent.
-  const table = useTableControls(rfqs, {
-    searchKeys: ['referenceNo', 'title', 'modeName'],
+  const table = useServerTable(biddingApi.fetchRfqs, {
+    urlKey: 'rfqs',
     filters: [
       {
         key: 'status',
         label: 'All statuses',
         options: Object.entries(RFQ_STATUS_LABELS).map(([value, label]) => ({ value, label })),
       },
-      { key: 'modeName', label: 'All modes' },
       {
         key: 'prebidRequired',
         label: 'Pre-bid conference',
@@ -337,7 +336,6 @@ export default function RfqManagement() {
           { value: 'true', label: 'Pre-bid required' },
           { value: 'false', label: 'No pre-bid' },
         ],
-        accessor: (rfq) => String(Boolean(rfq.prebidRequired)),
       },
     ],
     accessors: {
@@ -345,12 +343,23 @@ export default function RfqManagement() {
       status: (rfq) => RFQ_STATUS_LABELS[rfq.status] ?? rfq.status,
     },
   })
-  const { pageRows, paginationProps } = table
+  const { pageRows, paginationProps, refresh } = table
+
+  // Item 12: procurement setup renders as a full page, not as a modal over
+  // the list. The abstract, history and bid-opening dialogs stay modals —
+  // brief views and short confirmations are what modals are for.
+  if (creating) {
+    return (
+      <DashboardPage>
+        <CreateRfqModal onClose={() => setCreating(false)} onCreated={() => { refresh(); setMessage('RFQ / ITB draft created. Review the schedule and procurement details before publication.') }} />
+      </DashboardPage>
+    )
+  }
 
   return (
     <DashboardPage>
       <PageHeader
-        title="RFQ / ITB Management"
+        title="Request for Quotation (RFQ) / Invitation to Bid (ITB) Management"
         subtitle="Advertise approved requisitions, close submission, and open bids."
         actions={
           canPublish && <Button icon={Plus} onClick={() => setCreating(true)}>
@@ -367,14 +376,21 @@ export default function RfqManagement() {
       )}
 
       <Card title="Procurements" icon={Megaphone} bodyClassName="">
-        {rfqs.length > 0 && (
+        {(
           <div className="border-b border-border-muted p-4">
-            <TableToolbar {...table.toolbarProps} searchPlaceholder="Search reference, title or mode…" />
+            <TableToolbar {...table.toolbarProps} searchPlaceholder="Search reference or title…" />
           </div>
         )}
-        {table.rows.length === 0 ? (
+        {table.loading ? (
+          <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading procurements…</p>
+        ) : table.failed ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-[13px] text-danger">Could not load procurements.</p>
+            <Button className="mt-3" size="sm" variant="secondary" onClick={refresh}>Try again</Button>
+          </div>
+        ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
+            {!table.isDirty
               ? 'Nothing advertised yet. Create one from an approved requisition.'
               : 'No procurements match your search or filters.'}
           </p>
@@ -385,7 +401,7 @@ export default function RfqManagement() {
                 <tr>
                   <SortableTh {...table.sortProps('referenceNo')}>Reference</SortableTh>
                   <SortableTh {...table.sortProps('title')}>Title</SortableTh>
-                  <SortableTh {...table.sortProps('modeName')}>Mode</SortableTh>
+                  <Th>Mode</Th>
                   <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
                   <SortableTh {...table.sortProps('closingDate')}>Closing</SortableTh>
                   <SortableTh {...table.sortProps('openingDate')}>Bid opening</SortableTh>
@@ -419,9 +435,10 @@ export default function RfqManagement() {
                     <td className="px-4 py-3 text-xs text-text-secondary">{rfq.openingDate ? new Date(rfq.openingDate).toLocaleString() : 'Schedule required before publication'}</td>
                     <td className="px-4 py-3">
                       <Badge tone={RFQ_STATUS_TONES[rfq.status]}>{rfq.statusLabel ?? (rfq.status === 'failed' ? `Failed — Attempt #${rfq.attemptNumber ?? 1}` : RFQ_STATUS_LABELS[rfq.status])}</Badge>
+                      <NextInline next={rfqNext(rfq)} />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex w-max items-center gap-2">
                         <button type="button" onClick={() => setHistoryFor(rfq)} className="text-[11px] font-medium text-navy hover:underline">HISTORY / NEXT ACTION</button>
                         {canPublish && rfq.status === 'draft' && (
                           <button
@@ -474,7 +491,6 @@ export default function RfqManagement() {
         <Pagination {...paginationProps} label="solicitations" />
       </Card>
 
-      {creating && <CreateRfqModal onClose={() => setCreating(false)} onCreated={() => { refresh(); setMessage('RFQ / ITB draft created. Review the schedule and procurement details before publication.') }} />}
       {historyFor && <AttemptHistoryModal rfq={historyFor} onClose={() => setHistoryFor(null)} onChanged={(result) => { refresh(); setMessage(result?.message ?? 'Procurement history updated. Review the next action for the current attempt.') }} />}
 
       {abstractFor && (
