@@ -28,7 +28,7 @@ export function FormSection({ title, description, children }) {
     <section className="rounded-lg border border-border-muted bg-surface p-5 shadow-sm">
       {title && <h2 className="text-[15px] font-semibold text-navy">{title}</h2>}
       {description && (
-          <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-text-secondary">
+          <p className="ui-body mt-1 max-w-[75ch] text-text-secondary">
           {description}
         </p>
       )}
@@ -93,11 +93,11 @@ export default function LargeFormPage({
             <ArrowLeft size={14} /> {backLabel}
           </button>
         )}
-        <h1 className="text-[24px] leading-[1.12] font-semibold tracking-[-0.025em] text-navy">
+        <h1 className="text-navy">
           {title}
         </h1>
         {purpose && (
-          <p className="mt-2 max-w-3xl text-[14px] leading-relaxed text-text-secondary">
+          <p className="ui-body mt-2 max-w-[75ch] text-text-secondary">
             {purpose}
           </p>
         )}

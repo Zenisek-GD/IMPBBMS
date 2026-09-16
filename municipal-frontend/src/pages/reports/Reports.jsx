@@ -7,6 +7,7 @@ import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Button from '../../components/ui/Button'
 import Pagination from '../../components/ui/Pagination'
+import fontFaces from '../../styles/fonts.css?inline'
 
 const fieldClass = 'w-full rounded-md border border-border-muted bg-surface px-3 py-2 text-[13px] text-text-primary focus:border-accent focus:outline-none'
 const FILTER_LABELS = { year: 'Year', category: 'Procurement category', method: 'Procurement method', status: 'Status', department: 'Office / department', bidder: 'Bidder', action: 'BAC action', attempt: 'Procurement attempt', outcome: 'Outcome' }
@@ -24,12 +25,22 @@ const errorMessage = async (error) => {
   return error.response?.data?.message || 'The report could not be loaded. Please try again.'
 }
 
-function buildPrintDocument(printWindow, report, user, filters) {
+async function buildPrintDocument(printWindow, report, user, filters) {
   const doc = printWindow.document
   doc.title = report.title
   doc.body.replaceChildren()
   const style = doc.createElement('style')
-  style.textContent = '@page{size:landscape;margin:12mm}body{font-family:Arial,sans-serif;color:#172b4d;font-size:10px}h1{font-size:19px}p{line-height:1.5}table{width:100%;border-collapse:collapse}th,td{border:1px solid #bcc6d1;padding:6px;text-align:left;overflow-wrap:anywhere}th{background:#eef2f6}thead{display:table-header-group}tr{break-inside:avoid}button{margin:12px 0;padding:9px 16px}@media print{button{display:none}}'
+  style.textContent = `${fontFaces}
+    @page{size:landscape;margin:12mm}
+    body{font-family:Inter,"Segoe UI",sans-serif;color:#172b4d;font-size:0.9rem;font-weight:450;line-height:1.55;letter-spacing:-0.011em;font-optical-sizing:auto}
+    h1{font-size:clamp(2rem,5vw,2.5rem);font-weight:700;line-height:1.08;letter-spacing:-0.025em}
+    table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+    th,td{border:1px solid #bcc6d1;padding:6px;text-align:left;overflow-wrap:anywhere}
+    th{background:#eef2f6;font-size:0.72rem;font-weight:600;letter-spacing:0.05em}
+    thead{display:table-header-group}tr{break-inside:avoid}
+    button{font:550 0.8rem/1.35 Inter,"Segoe UI",sans-serif;letter-spacing:-0.011em;margin:12px 0;padding:9px 16px}
+    @media print{body{font-size:9pt}h1{font-size:18pt}th{font-size:8pt}button{display:none}}
+  `
   doc.head.append(style)
   const addText = (tag, text, parent = doc.body) => { const node = doc.createElement(tag); node.textContent = text; parent.append(node); return node }
   addText('p', 'Municipal Procurement and Bidding Management System')
@@ -38,7 +49,7 @@ function buildPrintDocument(printWindow, report, user, filters) {
   const active = Object.entries(filters).filter(([key, value]) => value && !['sort', 'direction', 'page', 'pageSize'].includes(key))
   addText('p', active.length ? `Filters: ${active.map(([key, value]) => `${FILTER_LABELS[key] || label(key)}: ${value}`).join(' · ')}` : 'Filters: All authorized records')
   const print = addText('button', 'Print / Save as PDF')
-  print.onclick = () => printWindow.print()
+  print.onclick = async () => { await doc.fonts.ready; if (!printWindow.closed) printWindow.print() }
   const table = doc.createElement('table')
   const head = doc.createElement('thead')
   const header = doc.createElement('tr')
@@ -53,6 +64,11 @@ function buildPrintDocument(printWindow, report, user, filters) {
   })
   table.append(body)
   doc.body.append(table)
+  // The popup has its own document/font lifecycle. Wait before printing so
+  // the initial PDF uses Inter instead of capturing the fallback face.
+  await Promise.all([doc.fonts.load('450 14px Inter'), doc.fonts.load('700 32px Inter')])
+  await doc.fonts.ready
+  if (printWindow.closed) return
   printWindow.focus()
   printWindow.print()
 }
@@ -98,7 +114,7 @@ export default function Reports() {
         if (!printWindow) throw new Error('Allow popups to open the print-friendly report.')
         printWindow.document.body.textContent = 'Preparing all filtered records for printing…'
         const report = await fetchReport(selected.key, { ...query, format: 'print' })
-        buildPrintDocument(printWindow, report, user, query)
+        await buildPrintDocument(printWindow, report, user, query)
       } else {
         const blob = await exportReportCsv(selected.key, query)
         const url = URL.createObjectURL(blob)

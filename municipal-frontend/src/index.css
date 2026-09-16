@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
-/* The deployed CSP permits local fonts only. Use the existing system-font
-   fallbacks without issuing a remote stylesheet request that browsers block. */
+/* Local font assets respect the production CSP and are shared with reports. */
+@import "./styles/fonts.css";
 
 /* Dark mode is driven by a class on <html>, not by the OS query alone — the
    theme belongs to the signed-in account, so the app has to be able to force it
@@ -116,10 +116,13 @@
    Token *names* are unchanged, so the several hundred existing utility classes
    are untouched — `text-navy` still means "the strong foreground colour". */
 @theme {
-  /* Production CSP allows local fonts only. This keeps one crisp, neutral UI
-     face on Windows while retaining compatible system fallbacks elsewhere. */
-  --font-sans: "Segoe UI", "Helvetica Neue", "Noto Sans", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  /* Every UI font utility uses the same self-hosted Inter family. */
+  --font-sans: "Inter", "Segoe UI", "Helvetica Neue", "Noto Sans", system-ui, sans-serif;
+  --font-mono: var(--font-sans);
+  --font-serif: var(--font-sans);
+  --text-body: 0.9rem;
+  --text-control: 0.8rem;
+  --text-caption: 0.72rem;
 
   /* ── A TINTED PAGE, WHITE CARDS ─────────────────────────────────────────
      The page and the cards used to share one white, separated only by a
@@ -264,40 +267,89 @@ html {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  /* 14px base. This was 13px on the argument that an officer scanning tables
-     all day wants density — which is true of the tables and was applied to the
-     whole application, including the headings, the cards and the dialogs. The
-     result read as cramped rather than efficient.
-     Tables keep their own smaller sizes; everything else breathes. */
-  /* This is the readable default for prose, notices, and unclassed controls.
-     Dense data grids retain their intentional compact text utilities. */
-  font-size: 15px;
-  font-weight: 400;
-  line-height: 1.6;
-  letter-spacing: -0.006em;
+  font-size: var(--text-body);
+  font-weight: 450;
+  line-height: 1.55;
+  letter-spacing: -0.011em;
+  font-optical-sizing: auto;
   color: inherit;
   background: transparent;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Stable typographic roles make the interface consistent across public pages,
-   operational workspaces, dialogs and reports. Utilities remain available for
-   intentional local adjustments. */
+/* One typography system for every route and overlay. These unlayered roles
+   take precedence over legacy Tailwind heading/control sizes. Body utilities
+   still distinguish compact metadata, table cells and numeric summaries.
+   Authored document content keeps its own formatting. */
 :where(h1, h2, h3, h4, h5, h6) {
   color: var(--color-text-primary);
   font-family: var(--font-sans);
-  font-weight: 650;
-  line-height: 1.16;
-  letter-spacing: -0.024em;
+}
+h1:not([contenteditable] *) {
+  font-size: clamp(2rem, 5vw, 2.5rem);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+h2:not([contenteditable] *) {
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+:where(h3, h4, h5, h6):not([contenteditable] *) {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.016em;
+}
+:where(button, input, select, textarea, label, summary, [role="button"]):not([contenteditable] *) {
+  font-family: var(--font-sans);
+  font-size: var(--text-control);
+  font-weight: 550;
+  line-height: 1.35;
+  letter-spacing: -0.011em;
+}
+:where(nav a, nav button, a.inline-flex):not([contenteditable] *) {
+  font-family: var(--font-sans);
+  font-size: var(--text-control);
+  font-weight: 550;
+  letter-spacing: -0.011em;
+}
+:where(.uppercase, dt, th):not([contenteditable] *) {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+:where(code, kbd, pre, samp, .font-mono) {
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+:where(input, textarea)::placeholder {
+  font-weight: 400;
+}
+:where(p, td, dd):not([contenteditable] *) {
+  line-height: 1.55;
+}
+.ui-body {
+  font-size: var(--text-body);
+  font-weight: 450;
+  line-height: 1.55;
+  letter-spacing: -0.011em;
+}
+h2.ui-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.016em;
 }
 
-:where(button, input, select, textarea) {
-  font: inherit;
-}
-
-:where(th, td, input, select, textarea) {
-  letter-spacing: -0.004em;
+/* Public-page colours remain local; typography now comes from the system. */
+:root:not(.dark) .public-portal {
+  --color-text-secondary: #27312c;
+  --color-text-faint: #46524c;
 }
 
 #root {

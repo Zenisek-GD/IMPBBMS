@@ -59,11 +59,11 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
         </Link>
 
         <div className="text-center">
-          <h2 className="text-[21px] leading-tight font-semibold tracking-[-0.02em] text-navy">
+          <h1 className="text-navy">
             {title}
-          </h2>
+          </h1>
           {subtitle && (
-            <p className="mt-2 text-[13px] leading-relaxed text-text-secondary">{subtitle}</p>
+            <p className="ui-body mt-2 text-text-secondary">{subtitle}</p>
           )}
         </div>
 

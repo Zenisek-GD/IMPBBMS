@@ -66,7 +66,7 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
       >
         {!collapsed && (
           <div className="min-w-0">
-            <h1 className="truncate text-[14px] font-semibold text-navy">{brandTitle}</h1>
+            <p className="truncate text-body font-semibold text-navy">{brandTitle}</p>
             <p className="truncate text-[12px] text-text-faint">{brandSubtitle}</p>
           </div>
         )}

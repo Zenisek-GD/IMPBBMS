@@ -230,7 +230,7 @@ export default function PublicProjectDetail() {
 
   if (status === 'loading') {
     return (
-      <div className="flex min-h-screen flex-col bg-canvas">
+      <div className="public-portal flex min-h-screen flex-col bg-canvas">
         <PublicHeader systemName={branding?.systemName} />
         <main id="main-content" className="flex-1 px-8 py-16 text-center text-[13px] text-navy">Loading project…</main>
         <PublicFooter transparencyFooter={branding?.transparencyFooter} systemName={branding?.systemName} />
@@ -240,7 +240,7 @@ export default function PublicProjectDetail() {
 
   if (status !== 'ready') {
     return (
-      <div className="flex min-h-screen flex-col bg-canvas">
+      <div className="public-portal flex min-h-screen flex-col bg-canvas">
         <PublicHeader systemName={branding?.systemName} />
         <main id="main-content" className="mx-auto w-full max-w-3xl flex-1 px-6 py-16 text-center">
           <FileWarning size={26} className="mx-auto text-navy" />
@@ -268,7 +268,7 @@ export default function PublicProjectDetail() {
   const { financials, records } = project
 
   return (
-    <div className="flex min-h-screen flex-col bg-canvas">
+    <div className="public-portal flex min-h-screen flex-col bg-canvas">
       <PublicHeader systemName={branding?.systemName} />
 
       <main id="main-content" className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">

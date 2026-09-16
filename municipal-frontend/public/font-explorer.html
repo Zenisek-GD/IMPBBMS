@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>ProcureNance type exploration</title>
+    <!--
+      This file is intentionally a decision preview, not a production font loader.
+      The live portal's CSP permits local font assets only. Once a family is approved,
+      download only its selected WOFF2 weights, add them under public/fonts, and load
+      them with local @font-face declarations in the application stylesheet.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Figtree:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Noto+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Work+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ink: #102019;
+        --muted: #52625a;
+        --line: #d5dfd8;
+        --paper: #f5f7f5;
+        --surface: #ffffff;
+        --forest: #155d33;
+        --moss: #e7f2e9;
+        --warm: #fff8e9;
+        --radius: 18px;
+      }
+
+      * { box-sizing: border-box; }
+
+      html { scroll-behavior: smooth; }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: "Public Sans", "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      ::selection { background: #b9dfc2; color: #092e18; }
+
+      .page-shell { width: min(1440px, calc(100% - 40px)); margin: 0 auto; }
+
+      .top {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 32px;
+        padding: 54px 0 28px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .top h1 {
+        max-width: 18ch;
+        margin: 0;
+        font-size: clamp(2.25rem, 5vw, 4.75rem);
+        letter-spacing: -0.055em;
+        line-height: 0.98;
+      }
+
+      .top p {
+        max-width: 62ch;
+        margin: 18px 0 0;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.65;
+      }
+
+      .legend {
+        align-self: end;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: end;
+        gap: 8px;
+        max-width: 350px;
+      }
+
+      .legend span, .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 27px;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: .025em;
+      }
+
+      .legend span { border: 1px solid var(--line); color: var(--muted); background: var(--surface); }
+      .tag { background: var(--moss); color: #125a30; }
+      .tag.alt { background: var(--warm); color: #76520d; }
+      .tag.neutral { background: #eaf0ed; color: #3e4e45; }
+
+      .recommendation {
+        display: grid;
+        grid-template-columns: 1.05fr 1fr;
+        gap: 20px;
+        margin: 28px 0 36px;
+      }
+
+      .recommendation > div {
+        padding: 24px;
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 10px 28px -22px rgba(10, 45, 24, .46);
+      }
+
+      .recommendation h2 { margin: 0; font-size: 1rem; letter-spacing: -.02em; }
+      .recommendation p { margin: 8px 0 0; color: var(--muted); font-size: .9rem; line-height: 1.55; }
+      .recommendation strong { color: var(--ink); }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 20px;
+        padding-bottom: 52px;
+      }
+
+      .option {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        min-height: 480px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 14px 34px -28px rgba(10, 45, 24, .58);
+        transition: transform 180ms ease, box-shadow 180ms ease;
+      }
+
+      .option:hover { transform: translateY(-3px); box-shadow: 0 20px 36px -24px rgba(10, 45, 24, .45); }
+      .option:focus-within { outline: 3px solid #77bb8c; outline-offset: 3px; }
+
+      .option-meta {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 17px 18px 13px;
+      }
+
+      .option-number { color: #638070; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+      .font-name { margin: 4px 0 0; font-size: 18px; font-weight: 750; letter-spacing: -.035em; }
+      .family-note { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.35; }
+
+      .sample {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        margin: 0 12px;
+        padding: 15px;
+        border-radius: 12px;
+        background: #143f28;
+        color: #f8fcf8;
+      }
+
+      .sample-nav { display: flex; justify-content: space-between; align-items: center; font-size: 8px; font-weight: 700; letter-spacing: .02em; }
+      .sample-nav span:last-child { color: #bad5c2; font-weight: 500; }
+      .sample h3 { max-width: 13ch; margin: auto 0 0; font-size: clamp(24px, 2vw, 31px); font-weight: 750; letter-spacing: -.048em; line-height: .99; }
+      .sample p { max-width: 35ch; margin: 12px 0 0; color: #d2e4d7; font-size: 10px; line-height: 1.55; }
+      .search { display: flex; align-items: center; min-height: 33px; margin-top: 16px; border-radius: 7px; padding: 0 10px; background: #ffffff; color: #506559; font-size: 9px; }
+      .search b { margin-right: 7px; color: #1e6c3e; }
+
+      .data-line {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        margin-top: 12px;
+        padding: 11px 13px;
+        border: 1px solid #dae4dd;
+        border-radius: 9px;
+        background: #fff;
+        color: #1a2d21;
+      }
+
+      .data-line b { font-size: 10px; line-height: 1.35; }
+      .data-line span { color: #496154; font-size: 9px; line-height: 1.35; }
+      .data-line strong { align-self: center; color: #17643a; font-size: 10px; }
+
+      .option-copy { padding: 16px 18px 18px; }
+      .option-copy p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+      .option-copy p + p { margin-top: 10px; color: #304137; }
+
+      /* Actual font pairings. The body always keeps a highly legible sans role. */
+      .public-sans .sample, .public-sans .option-copy { font-family: "Public Sans", "Segoe UI", sans-serif; }
+      .source-sans .sample, .source-sans .option-copy { font-family: "Source Sans 3", "Segoe UI", sans-serif; }
+      .noto-sans .sample, .noto-sans .option-copy { font-family: "Noto Sans", "Segoe UI", sans-serif; }
+      .ibm-plex .sample, .ibm-plex .option-copy { font-family: "IBM Plex Sans", "Segoe UI", sans-serif; }
+      .inter .sample, .inter .option-copy { font-family: "Inter", "Segoe UI", sans-serif; }
+      .manrope .sample, .manrope .option-copy { font-family: "Manrope", "Segoe UI", sans-serif; }
+      .jakarta .sample, .jakarta .option-copy { font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif; }
+      .figtree .sample, .figtree .option-copy { font-family: "Figtree", "Segoe UI", sans-serif; }
+      .dm-sans .sample, .dm-sans .option-copy { font-family: "DM Sans", "Segoe UI", sans-serif; }
+      .work-sans .sample, .work-sans .option-copy { font-family: "Work Sans", "Segoe UI", sans-serif; }
+      .newsreader .sample h3 { font-family: "Newsreader", Georgia, serif; font-weight: 600; letter-spacing: -.05em; }
+      .newsreader .sample, .newsreader .option-copy { font-family: "Source Sans 3", "Segoe UI", sans-serif; }
+      .baskerville .sample h3 { font-family: "Libre Baskerville", Georgia, serif; font-weight: 700; letter-spacing: -.055em; }
+      .baskerville .sample, .baskerville .option-copy { font-family: "Public Sans", "Segoe UI", sans-serif; }
+
+      .footer {
+        margin: 0 0 44px;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .footer code { border-radius: 4px; padding: 1px 4px; background: #e7ede9; color: #243a2d; }
+
+      @media (max-width: 980px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 680px) {
+        .page-shell { width: min(100% - 24px, 1440px); }
+        .top, .recommendation { grid-template-columns: 1fr; gap: 18px; }
+        .top { padding-top: 34px; }
+        .legend { justify-content: start; max-width: none; }
+        .grid { grid-template-columns: 1fr; gap: 14px; }
+        .option { min-height: 440px; }
+      }
+      @media (prefers-reduced-motion: reduce) { .option { transition: none; } }
+    </style>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="top">
+        <div>
+          <h1>Which voice should welcome the public?</h1>
+          <p>Every option below uses the same municipal-transparency content. Compare the way the type handles a public promise, a search task, and a procurement record—not just how its alphabet looks in isolation.</p>
+        </div>
+        <div class="legend" aria-label="How to read this comparison">
+          <span>12 visual options</span>
+          <span>same content</span>
+          <span>desktop + mobile ready</span>
+        </div>
+      </header>
+
+      <section class="recommendation" aria-label="Recommended directions">
+        <div>
+          <span class="tag">Best overall: Public Sans</span>
+          <h2>Clear, public-minded, and unusually good in dense records.</h2>
+          <p>Use one family for the whole public portal. It feels official without becoming cold, its larger x-height keeps labels readable, and it keeps headings, search, and long project names in one coherent voice.</p>
+        </div>
+        <div>
+          <span class="tag alt">Strong alternate: Noto Sans</span>
+          <h2>The safest choice for a multilingual municipal service.</h2>
+          <p>Choose this if Filipino, local-language, or future multilingual coverage is central. It is less distinctive, but it is a dependable, calm workhorse with broad language support.</p>
+        </div>
+      </section>
+
+      <section class="grid" aria-label="Font pairing options">
+        <article class="option public-sans">
+          <div class="option-meta"><div><div class="option-number">OPTION 01</div><h2 class="font-name">Public Sans</h2><p class="family-note">One-family system · 400 / 600 / 700</p></div><span class="tag">Recommended</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> a trustworthy, human public service that must also handle data-heavy records.</p><p>Practical, confident, and the strongest all-rounder.</p></div>
+        </article>
+
+        <article class="option source-sans">
+          <div class="option-meta"><div><div class="option-number">OPTION 02</div><h2 class="font-name">Source Sans 3</h2><p class="family-note">One-family system · 400 / 600 / 700</p></div><span class="tag">Recommended</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> maximum reading comfort on practical, text-forward pages.</p><p>Open and friendly; slightly more conversational than Public Sans.</p></div>
+        </article>
+
+        <article class="option noto-sans">
+          <div class="option-meta"><div><div class="option-number">OPTION 03</div><h2 class="font-name">Noto Sans</h2><p class="family-note">One-family system · 400 / 600 / 700</p></div><span class="tag alt">Language-safe</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> a public service with a serious multilingual or accessibility remit.</p><p>Neutral, accessible, and reliable rather than brand-forward.</p></div>
+        </article>
+
+        <article class="option ibm-plex">
+          <div class="option-meta"><div><div class="option-number">OPTION 04</div><h2 class="font-name">IBM Plex Sans</h2><p class="family-note">One-family system · 400 / 500 / 600</p></div><span class="tag neutral">Technical</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> an audit-conscious product where forms, reference numbers, and data carry authority.</p><p>Precise and mature; slightly more institutional.</p></div>
+        </article>
+
+        <article class="option inter">
+          <div class="option-meta"><div><div class="option-number">OPTION 05</div><h2 class="font-name">Inter</h2><p class="family-note">One-family system · 400 / 600 / 700</p></div><span class="tag neutral">Familiar</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> a compact, familiar product interface with minimal design risk.</p><p>Very capable, though less ownable than the top three.</p></div>
+        </article>
+
+        <article class="option manrope">
+          <div class="option-meta"><div><div class="option-number">OPTION 06</div><h2 class="font-name">Manrope</h2><p class="family-note">One-family system · 400 / 600 / 700</p></div><span class="tag neutral">Modern</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> a more polished, contemporary portal with short hero copy.</p><p>Warm geometry; avoid overly light weights in dense tables.</p></div>
+        </article>
+
+        <article class="option jakarta">
+          <div class="option-meta"><div><div class="option-number">OPTION 07</div><h2 class="font-name">Plus Jakarta Sans</h2><p class="family-note">One-family system · 400 / 600 / 700</p></div><span class="tag neutral">Approachable</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> a citizen-first presentation that should feel inviting at first glance.</p><p>Friendly and composed; a little more expressive than necessary for long records.</p></div>
+        </article>
+
+        <article class="option figtree">
+          <div class="option-meta"><div><div class="option-number">OPTION 08</div><h2 class="font-name">Figtree</h2><p class="family-note">One-family system · 400 / 600 / 700</p></div><span class="tag neutral">Friendly</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> a simple, modern public front door that avoids corporate stiffness.</p><p>Excellent digital texture; pair with restrained hierarchy.</p></div>
+        </article>
+
+        <article class="option dm-sans">
+          <div class="option-meta"><div><div class="option-number">OPTION 09</div><h2 class="font-name">DM Sans</h2><p class="family-note">One-family system · 400 / 500 / 700</p></div><span class="tag neutral">Balanced</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> an editorially clean front page that still feels comfortable in UI controls.</p><p>Quietly polished; less explicitly civic than Public Sans.</p></div>
+        </article>
+
+        <article class="option work-sans">
+          <div class="option-meta"><div><div class="option-number">OPTION 10</div><h2 class="font-name">Work Sans</h2><p class="family-note">One-family system · 400 / 500 / 600</p></div><span class="tag neutral">Civic</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> an honest, no-nonsense service that values clarity over decoration.</p><p>Highly functional; its personality is deliberately understated.</p></div>
+        </article>
+
+        <article class="option newsreader">
+          <div class="option-meta"><div><div class="option-number">OPTION 11</div><h2 class="font-name">Newsreader + Source Sans 3</h2><p class="family-note">Serif display · sans-serif UI</p></div><span class="tag alt">Editorial</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> a more formal public-information portal with a strong transparency-story section.</p><p>Use serif only for short large statements—not tables, labels, or forms.</p></div>
+        </article>
+
+        <article class="option baskerville">
+          <div class="option-meta"><div><div class="option-number">OPTION 12</div><h2 class="font-name">Libre Baskerville + Public Sans</h2><p class="family-note">Serif display · sans-serif UI</p></div><span class="tag alt">Formal</span></div>
+          <div class="sample"><div class="sample-nav"><span>PROCURENANCE</span><span>Projects &nbsp; Notices &nbsp; Sign in</span></div><h3>See where public funds are going.</h3><p>Published procurement records, from plan to payment.</p><div class="search"><b>⌕</b> Search a project, reference, office, or barangay</div><div class="data-line"><div><b>Road repair — Barangay San Roque</b><br /><span>Public works · PR-2026-018</span></div><strong>Ongoing</strong></div></div>
+          <div class="option-copy"><p><strong>Best fit:</strong> an official, archival visual voice with a degree of ceremony.</p><p>Most distinctive option, but use only if the landing page becomes more editorial.</p></div>
+        </article>
+      </section>
+
+      <footer class="footer">
+        This is a visual comparison only. The production portal currently permits <strong>local fonts only</strong>; do not copy this preview’s Google Fonts link into the app. After choosing a family, self-host the exact WOFF2 files and define the new <code>--font-sans</code> token with a robust fallback stack.
+      </footer>
+    </main>
+  </body>
+</html>

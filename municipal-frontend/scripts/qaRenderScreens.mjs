@@ -15,15 +15,24 @@ async function screens(folder) {
 try {
   const { AuthContext } = await server.ssrLoadModule('/src/context/auth-context.js');
   const { ThemeProvider } = await server.ssrLoadModule('/src/context/ThemeContext.jsx');
+  const { TextSizeProvider } = await server.ssrLoadModule('/src/context/TextSizeContext.jsx');
   const { ROLE_NAV } = await server.ssrLoadModule('/src/config/navigation.js');
   const user = { id: 0, name: 'QA fixture', role: 'systemAdministrator', roleName: 'System Administrator', permissions: [], mfaEnrollmentRequired: true };
   const auth = { user, setUser() {}, logout: async () => true, isLoading: false };
+  // Page-folder helpers need the same props their parent screens supply.
+  // These fixtures render only: effects never run or access real accounts.
+  const fixtures = {
+    'MfaChallenge.jsx': { challenge: { name: 'QA fixture', recoveryAvailable: true }, onVerified() {}, onCancel() {} },
+    'AttemptHistoryModal.jsx': { rfq: { id: 0, status: 'draft', referenceNo: 'QA-2026-018', category: 'goods' }, onClose() {}, onChanged() {} },
+    'BacAttendance.jsx': { value: { attendingMemberIds: [] }, onChange() {} },
+    'ProcurementTimeline.jsx': { rfq: { status: 'draft' } },
+    'ScheduleFields.jsx': { form: { category: 'goods', closingDate: '', openingDate: '' }, setForm() {} },
+  };
   for (const file of await screens('src/pages')) {
-    if (file.endsWith('/MfaChallenge.jsx')) continue; // Requires a challenge from login.
     try {
       const { default: Screen } = await server.ssrLoadModule('/' + file);
       if (typeof Screen !== 'function') continue;
-      renderToString(React.createElement(MemoryRouter, { initialEntries: ['/'] }, React.createElement(AuthContext.Provider, { value: auth }, React.createElement(ThemeProvider, null, React.createElement(Screen)))));
+      renderToString(React.createElement(MemoryRouter, { initialEntries: ['/'] }, React.createElement(AuthContext.Provider, { value: auth }, React.createElement(ThemeProvider, null, React.createElement(TextSizeProvider, null, React.createElement(Screen, fixtures[file.split('/').at(-1)] ?? {}))))));
       checked++;
     } catch (error) {
       failures++;

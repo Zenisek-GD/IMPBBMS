@@ -7,11 +7,11 @@ export default function PageHeader({ title, subtitle, actions, meta = [] }) {
   return (
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border-muted pb-4">
       <div className="min-w-0">
-        <h1 className="text-[24px] leading-[1.12] font-semibold tracking-[-0.025em] text-navy">
+        <h1 className="text-navy">
           {title}
         </h1>
         {subtitle && (
-          <p className="mt-2 max-w-3xl text-[14px] leading-relaxed text-text-secondary">
+          <p className="ui-body mt-2 max-w-[75ch] text-text-secondary">
             {subtitle}
           </p>
         )}

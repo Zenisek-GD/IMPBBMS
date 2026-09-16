@@ -14,7 +14,7 @@ export default function Card({ title, icon: Icon, action, children, className = 
     >
       {title && (
         <header className="flex items-center justify-between gap-3 border-b border-border-muted px-5 py-4">
-          <h2 className="flex items-center gap-2.5 text-[14px] font-semibold text-navy">
+          <h2 className="ui-card-title flex items-center gap-2.5 text-navy">
             {Icon && <Icon size={15} className="shrink-0 text-text-faint" />}
             {title}
           </h2>

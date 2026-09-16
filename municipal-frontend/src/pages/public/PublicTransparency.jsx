@@ -1163,7 +1163,7 @@ export default function PublicTransparency() {
   // more, so neither helper has a caller.
 
   return (
-    <div className="flex min-h-screen flex-col bg-canvas">
+    <div className="public-portal flex min-h-screen flex-col bg-canvas">
       <PublicHeader lguName={overview?.lgu?.name} systemName={branding?.systemName} />
 
       <main id="main-content" className="flex-1">
