@@ -17,6 +17,14 @@ export const fetchNavShortcuts = () =>
 export const updateNavShortcuts = (shortcuts) =>
   apiClient.patch('/settings/shortcuts', { shortcuts }).then((res) => res.data)
 
+// Landing-page FAQs are an admin-only content setting. The public read helper
+// lives in api/publicProjects.js to keep anonymous requests clearly separated.
+export const fetchLandingFaqs = () =>
+  apiClient.get('/settings/landing-faqs').then((res) => res.data)
+
+export const updateLandingFaqs = (faqs) =>
+  apiClient.patch('/settings/landing-faqs', { faqs }).then((res) => res.data)
+
 // ── Public branding (no auth) ───────────────────────────────────────────────
 export const fetchPublicBranding = () =>
   apiClient.get('/public/branding').then((res) => res.data)

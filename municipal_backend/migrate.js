@@ -50,6 +50,7 @@ import "./models/index.js";
 import { migrateRoleSecurity } from "./services/migrateRoleSecurity.js";
 import { migrateUserTextSize } from "./services/migrateUserTextSize.js";
 import { migrateAuditVisibility } from "./services/migrateAuditVisibility.js";
+import { migratePublicMessageProjectContext } from "./services/migratePublicMessageProjectContext.js";
 
 const args = new Set(process.argv.slice(2));
 const mode = args.has("--force")
@@ -189,6 +190,11 @@ const run = async () => {
   const auditVisibility = await migrateAuditVisibility();
   if (auditVisibility.granted) {
     console.log("✅ System Administrator granted official audit activity visibility");
+  }
+
+  const projectContext = await migratePublicMessageProjectContext();
+  if (projectContext.added) {
+    console.log("✅ public-message project context column added");
   }
 
   await sequelize.close();

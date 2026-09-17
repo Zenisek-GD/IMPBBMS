@@ -2,6 +2,8 @@ import { PublicMessage, MESSAGE_ROUTING, MESSAGE_CATEGORIES } from "../models/pu
 import { User } from "../models/userModel.js";
 import { notifyByPermission } from "../services/notifier.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
+import { getPublicProject } from "../services/projectLifecycle.js";
+import { buildProjectReportContext, projectReferenceHint } from "../services/projectReportContext.js";
 
 // ── Inbound public correspondence ────────────────────────────────────────────
 // The only write endpoint on the public surface. Everything here is written
@@ -31,7 +33,7 @@ const clean = (value, max) => {
 const looksAutomated = (body) => Boolean(clean(body?.website, 200));
 
 export const submitPublicMessage = async (req, res) => {
-  const { category, subject, body, senderName, senderEmail, referenceHint } = req.body ?? {};
+  const { category, subject, body, senderName, senderEmail, referenceHint, projectId } = req.body ?? {};
 
   if (looksAutomated(req.body)) {
     // Answered as though accepted. Telling a bot which check it failed only
@@ -39,7 +41,13 @@ export const submitPublicMessage = async (req, res) => {
     return res.status(202).json({ message: "Thank you — your message has been received." });
   }
 
-  const chosenCategory = MESSAGE_CATEGORIES.includes(category) ? category : "other";
+  const hasProjectContext = projectId !== undefined && projectId !== null && projectId !== "";
+  // Contextual project reports are always data-correction reports. This keeps
+  // a browser caller from changing their responsible-office route by sending a
+  // different category with an otherwise valid project id.
+  const chosenCategory = hasProjectContext
+    ? "dataCorrection"
+    : (MESSAGE_CATEGORIES.includes(category) ? category : "other");
   const route = MESSAGE_ROUTING[chosenCategory];
 
   const cleanSubject = clean(subject, 200);
@@ -64,13 +72,29 @@ export const submitPublicMessage = async (req, res) => {
     });
   }
 
+  // A contextual project report names only an id at the browser boundary. The
+  // record and every metadata field are re-derived from the published project
+  // here, which prevents a sender from making correspondence look linked to a
+  // different project or from leaking an unpublished one into the inbox.
+  let projectContext = null;
+  let storedReferenceHint = clean(referenceHint, 190);
+  if (hasProjectContext) {
+    const project = await getPublicProject(projectId);
+    if (!project) {
+      return res.status(404).json({ message: "That project is not published or is no longer available for reporting." });
+    }
+    projectContext = buildProjectReportContext(project);
+    storedReferenceHint = projectReferenceHint(projectContext);
+  }
+
   const record = await PublicMessage.create({
     senderName: clean(senderName, 190),
     senderEmail: email,
     category: chosenCategory,
     subject: cleanSubject,
     body: cleanBody,
-    referenceHint: clean(referenceHint, 190),
+    referenceHint: storedReferenceHint,
+    projectContext,
     routedToPermission: route.permission,
     ipAddress: req.ip?.slice(0, 64) ?? null,
   });
@@ -132,6 +156,7 @@ export const listPublicMessages = async (req, res) => {
     senderName: message.senderName,
     senderEmail: message.senderEmail,
     referenceHint: message.referenceHint,
+    projectContext: message.projectContext,
     status: message.status,
     handledAt: message.handledAt,
     handledByName: message.handledBy?.name ?? null,

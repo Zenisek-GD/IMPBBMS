@@ -4,6 +4,8 @@ import {
   updateSettings,
   getShortcuts,
   updateShortcuts,
+  listLandingFaqs,
+  updateLandingFaqs,
   getProcurementSettings,
   updateProcurementSettings,
   listProcurementLimits,
@@ -29,5 +31,10 @@ router.patch("/thresholds/:id", requirePermission("settings.manage"), updateProc
 // needs them on every page); only the admin writes them.
 router.get("/shortcuts", requireAnyPermission("settings.manage", "app.view", "app.create", "pr.view"), getShortcuts);
 router.patch("/shortcuts", requirePermission("settings.manage"), updateShortcuts);
+
+// Public-facing content remains an Administrator responsibility. The public
+// read route is separate under /api/public and never exposes drafts.
+router.get("/landing-faqs", requirePermission("settings.manage"), listLandingFaqs);
+router.patch("/landing-faqs", requirePermission("settings.manage"), updateLandingFaqs);
 
 export default router;

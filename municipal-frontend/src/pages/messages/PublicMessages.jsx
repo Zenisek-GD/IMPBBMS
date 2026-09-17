@@ -24,6 +24,67 @@ import { useServerTable } from '../../components/ui/useServerTable'
 
 const dateTime = (value) => (value ? new Date(value).toLocaleString('en-PH') : '—')
 
+function ProjectReportContext({ context, receivedAt }) {
+  if (!context?.projectId) return null
+
+  return (
+    <section aria-labelledby="linked-project-context" className="rounded-md border border-danger/25 bg-danger/[0.04] px-3.5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 id="linked-project-context" className="text-[11.5px] font-semibold tracking-[0.04em] text-navy uppercase">
+          Linked project context
+        </h3>
+        {context.currentPage && (
+          <a href={context.currentPage} className="text-[12px] font-medium text-info hover:underline">
+            Open public record
+          </a>
+        )}
+      </div>
+      <dl className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div>
+          <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Project</dt>
+          <dd className="mt-0.5 text-[13px] font-medium text-navy">{context.projectTitle ?? 'Published project'}</dd>
+        </div>
+        <div>
+          <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Project ID</dt>
+          <dd className="mt-0.5 font-mono text-[13px] text-navy">#{context.projectId}</dd>
+        </div>
+        {context.referenceNo && (
+          <div>
+            <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Reference</dt>
+            <dd className="mt-0.5 font-mono text-[13px] text-navy">{context.referenceNo}</dd>
+          </div>
+        )}
+        {context.currentStatus && (
+          <div>
+            <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Status</dt>
+            <dd className="mt-0.5 text-[13px] text-navy">{context.currentStatus}</dd>
+          </div>
+        )}
+        {context.currentPhaseLabel && (
+          <div>
+            <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Phase</dt>
+            <dd className="mt-0.5 text-[13px] text-navy">{context.currentPhaseLabel}</dd>
+          </div>
+        )}
+        {context.implementingUnit && (
+          <div>
+            <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Office</dt>
+            <dd className="mt-0.5 text-[13px] text-navy">{context.implementingUnit}</dd>
+          </div>
+        )}
+        <div>
+          <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Page</dt>
+          <dd className="mt-0.5 text-[13px] text-navy">Public project detail</dd>
+        </div>
+        <div>
+          <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Reported</dt>
+          <dd className="mt-0.5 text-[13px] text-navy">{dateTime(context.reportedAt ?? receivedAt)}</dd>
+        </div>
+      </dl>
+    </section>
+  )
+}
+
 function MessageModal({ message, onClose, onSaved }) {
   const [status, setStatus] = useState(message.status)
   const [notes, setNotes] = useState(message.handlingNotes ?? '')
@@ -75,10 +136,12 @@ function MessageModal({ message, onClose, onSaved }) {
           </div>
         </div>
 
+        <ProjectReportContext context={message.projectContext} receivedAt={message.receivedAt} />
+
         {message.referenceHint && (
           <div className="rounded-md border border-border-muted bg-sidebar px-3.5 py-2.5">
             <p className="text-[11.5px] tracking-[0.04em] text-text-faint uppercase">
-              Reference given by the sender
+              {message.projectContext?.projectId ? 'Project reference' : 'Reference given by the sender'}
             </p>
             <p className="mt-0.5 font-mono text-[13px] text-navy">{message.referenceHint}</p>
           </div>

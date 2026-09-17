@@ -1,26 +1,36 @@
 import { useState } from 'react'
-import { CheckCircle2, Flag, Loader2, Send } from 'lucide-react'
+import { CheckCircle2, Loader2, Send, TriangleAlert } from 'lucide-react'
 import { sendPublicMessage } from '../../api/messages'
 import Modal from '../ui/Modal'
 import { fieldClass, labelClass } from '../ui/FormField'
 
-const emptyForm = (context) => ({
-  subject: context?.label ? `Possible error in published record: ${context.label}` : '',
+const emptyForm = (project) => ({
+  // The subject identifies the record in the staff inbox. The project itself is
+  // never trusted from this value: the API derives all context from projectId.
+  subject: `Issue reported for: ${project?.projectTitle ?? 'published project'}`,
   body: '',
   senderName: '',
   senderEmail: '',
 })
 
-// The public portal deliberately has one correspondence route rather than a
-// new report table per screen. This small, contextual entry point makes it
-// available where the reader noticed the problem while retaining the existing
-// server-side rate limit, validation, routing, and privacy boundary.
-export default function ReportIssueButton({ context = null }) {
+const ContextItem = ({ label, children }) => (
+  <div>
+    <dt className="text-[10px] font-semibold tracking-[0.05em] text-text-faint uppercase">{label}</dt>
+    <dd className="mt-0.5 break-words text-xs font-medium text-navy">{children}</dd>
+  </div>
+)
+
+// This deliberately belongs only on a published record page. The browser sends
+// the public project id; the API reloads that project and stores the resulting
+// context so staff can trust the link in the inbox.
+export default function ReportIssueButton({ project }) {
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState(() => emptyForm(context))
+  const [form, setForm] = useState(() => emptyForm(project))
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState('')
   const [error, setError] = useState('')
+
+  if (!project?.id) return null
 
   const close = () => {
     if (sending) return
@@ -29,7 +39,7 @@ export default function ReportIssueButton({ context = null }) {
   }
 
   const openReport = () => {
-    setForm(emptyForm(context))
+    setForm(emptyForm(project))
     setSent('')
     setError('')
     setOpen(true)
@@ -45,7 +55,9 @@ export default function ReportIssueButton({ context = null }) {
       const result = await sendPublicMessage({
         ...form,
         category: 'dataCorrection',
-        referenceHint: context?.referenceHint ?? '',
+        projectId: project.id,
+        // Project context and the reference hint are derived on the server.
+        referenceHint: '',
         website: '',
       })
       setSent(result.message)
@@ -64,18 +76,17 @@ export default function ReportIssueButton({ context = null }) {
       <button
         type="button"
         onClick={openReport}
-        title="Report a possible issue with a published record"
-        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-warning/40 bg-surface px-2.5 text-[12px] font-medium text-navy transition-colors hover:border-warning hover:bg-warning/10 focus:ring-2 focus:ring-warning/30 focus:outline-none"
+        title={`Report an issue with ${project.projectTitle}`}
+        aria-label={`Report an issue with ${project.projectTitle}`}
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-danger/40 bg-danger/10 text-danger transition-colors hover:border-danger hover:bg-danger/15 focus:ring-2 focus:ring-danger/30 focus:outline-none"
       >
-        <Flag size={15} aria-hidden="true" />
-        <span className="hidden xl:inline">Report issue</span>
-        <span className="sr-only xl:hidden">Report an issue with a published record</span>
+        <TriangleAlert size={17} aria-hidden="true" />
       </button>
 
       {open && (
         <Modal
-          title="Report something wrong"
-          subtitle="Reports are sent to the Internal Auditor for review. This is not a formal procurement protest."
+          title="Report an issue with this project"
+          subtitle="This report is linked to the project below and routed to the Internal Auditor. It is not a formal procurement protest."
           onClose={close}
         >
           {sent ? (
@@ -93,27 +104,25 @@ export default function ReportIssueButton({ context = null }) {
             </div>
           ) : (
             <form className="space-y-4" onSubmit={submit}>
-              {context?.referenceHint && (
-                <p className="rounded-md border border-border-muted bg-sidebar px-3 py-2 text-xs leading-relaxed text-text-secondary">
-                  This report will be linked to: <span className="font-medium text-navy">{context.referenceHint}</span>
+              <section aria-labelledby="report-project-context" className="rounded-md border border-border-muted bg-sidebar p-3">
+                <h3 id="report-project-context" className="text-xs font-semibold text-navy">Report context</h3>
+                <p className="mt-1 text-xs leading-relaxed text-text-secondary">
+                  These details are attached automatically when you send the report.
                 </p>
-              )}
+                <dl className="mt-3 grid gap-x-4 gap-y-3 sm:grid-cols-2">
+                  <ContextItem label="Project">{project.projectTitle}</ContextItem>
+                  <ContextItem label="Project ID">#{project.id}</ContextItem>
+                  {project.referenceNo && <ContextItem label="Reference">{project.referenceNo}</ContextItem>}
+                  <ContextItem label="Current status">{project.category ?? 'Not specified'}</ContextItem>
+                  {project.phaseLabel && <ContextItem label="Current phase">{project.phaseLabel}</ContextItem>}
+                  {project.implementingUnit && <ContextItem label="Office">{project.implementingUnit}</ContextItem>}
+                  <ContextItem label="Page">Public project detail</ContextItem>
+                  <ContextItem label="Report time">Recorded by the server when sent</ContextItem>
+                </dl>
+              </section>
 
               <div>
-                <label className={labelClass} htmlFor="report-issue-subject">What looks wrong?</label>
-                <input
-                  id="report-issue-subject"
-                  required
-                  maxLength={200}
-                  value={form.subject}
-                  onChange={set('subject')}
-                  placeholder="A short summary of the possible issue"
-                  className={fieldClass}
-                />
-              </div>
-
-              <div>
-                <label className={labelClass} htmlFor="report-issue-details">Details</label>
+                <label className={labelClass} htmlFor="report-issue-details">What should be reviewed?</label>
                 <textarea
                   id="report-issue-details"
                   required
@@ -149,9 +158,9 @@ export default function ReportIssueButton({ context = null }) {
                 <button type="button" onClick={close} disabled={sending} className="rounded-md px-3 py-2 text-sm font-medium text-text-secondary hover:bg-sidebar hover:text-navy disabled:opacity-60">
                   Cancel
                 </button>
-                <button type="submit" disabled={sending} className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-2 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-60">
+                <button type="submit" disabled={sending} className="inline-flex items-center gap-1.5 rounded-md bg-danger px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60">
                   {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-                  {sending ? 'Sending…' : 'Send report'}
+                  {sending ? 'Sending...' : 'Send report'}
                 </button>
               </div>
             </form>

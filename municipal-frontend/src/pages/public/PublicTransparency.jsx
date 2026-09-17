@@ -517,9 +517,11 @@ function RecordViewSwitch({ view, onChange }) {
 // to search records, read the full portal guide, or visit the BAC Secretariat.
 // Native <details> keeps this compact on a phone and fully usable by keyboard
 // without adding a second state machine to a public page.
-function LandingFaq() {
+function LandingFaq({ managedItems }) {
   const [openQuestion, setOpenQuestion] = useState(0)
-  const items = [
+  // Keep the established copy visible while the public FAQ endpoint loads. It
+  // also provides a safe, readable fallback if a transient public request fails.
+  const defaultItems = [
     {
       question: 'What records can I find here?',
       answer: 'Search approved procurement plans, advertised opportunities, awarded contracts, deliveries and payments. Use Projects for the full public record and Announcements for current notices.',
@@ -537,6 +539,7 @@ function LandingFaq() {
       answer: 'Use the report form in About this portal. Your message is routed to the office responsible for the record so it can be reviewed through the official process.',
     },
   ]
+  const items = Array.isArray(managedItems) ? managedItems : defaultItems
 
   return (
     <section aria-labelledby="landing-faq-title" className="mt-6 overflow-hidden rounded-xl border border-border-strong bg-surface shadow-sm">
@@ -565,7 +568,17 @@ function LandingFaq() {
           </div>
         </div>
 
-        <div className="px-5 py-3 sm:px-7 sm:py-5">
+        <div
+          className="max-h-[32rem] overflow-y-auto overscroll-contain px-5 py-3 sm:px-7 sm:py-5"
+          role="region"
+          aria-label="Frequently asked questions"
+          tabIndex={0}
+        >
+          {items.length === 0 && (
+            <p className="px-1 py-4 text-[13px] leading-relaxed text-text-secondary">
+              No frequently asked questions have been published yet. You can still report a concern using the link on this page.
+            </p>
+          )}
           {items.map((item, index) => {
             const open = openQuestion === index
             const Icon = open ? Minus : Plus
@@ -939,6 +952,7 @@ export default function PublicTransparency() {
   const [branding, setBranding] = useState(null)
   const [officials, setOfficials] = useState(null)
   const [officialsFailed, setOfficialsFailed] = useState(false)
+  const [faqs, setFaqs] = useState(null)
 
   const [result, setResult] = useState({ key: null, projects: [], failed: false })
 
@@ -1056,6 +1070,23 @@ export default function PublicTransparency() {
       cancelled = true
     }
   }, [view, officials])
+
+  // FAQ content is managed by the System Administrator. It is fetched only for
+  // the home view; LandingFaq retains the established local copy while loading
+  // or during a recoverable public-request failure.
+  useEffect(() => {
+    if (view !== 'home' || faqs !== null) return
+    let cancelled = false
+    publicApi
+      .fetchPublicLandingFaqs()
+      .then((data) => {
+        if (!cancelled) setFaqs(Array.isArray(data?.faqs) ? data.faqs : [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [view, faqs])
 
   // Spotlight source for the home highlights. One lightweight fetch; failure is
   // silent because the highlights are progressive enhancement, not the record.
@@ -1534,7 +1565,7 @@ export default function PublicTransparency() {
 
           {showsIntro && (
             <div className="pb-16">
-              <LandingFaq />
+              <LandingFaq managedItems={faqs} />
             </div>
           )}
         </div>

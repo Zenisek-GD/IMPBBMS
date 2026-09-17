@@ -16,6 +16,7 @@ import {
 import * as publicApi from '../../api/publicProjects'
 import { fetchPublicBranding } from '../../api/settings'
 import PublicHeader from '../../components/public/PublicHeader'
+import ReportIssueButton from '../../components/public/ReportIssueButton'
 import PublicFooter from '../../components/public/PublicFooter'
 import ProjectTimeline from '../../components/public/ProjectTimeline'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
@@ -269,13 +270,7 @@ export default function PublicProjectDetail() {
 
   return (
     <div className="public-portal flex min-h-screen flex-col bg-canvas">
-      <PublicHeader
-        systemName={branding?.systemName}
-        reportContext={{
-          referenceHint: project.referenceNo ?? project.projectTitle,
-          label: project.projectTitle,
-        }}
-      />
+      <PublicHeader systemName={branding?.systemName} />
 
       <main id="main-content" className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
         <Link
@@ -286,20 +281,23 @@ export default function PublicProjectDetail() {
         </Link>
 
         <header className="mt-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] uppercase ${style.className}`}
-            >
-              <style.icon size={12} /> {style.label}
-            </span>
-            <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] text-navy">
-              FY {project.fiscalYear}
-            </span>
-            {project.referenceNo && (
-              <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 font-mono text-[11px] text-navy">
-                {project.referenceNo}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] uppercase ${style.className}`}
+              >
+                <style.icon size={12} /> {style.label}
               </span>
-            )}
+              <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] text-navy">
+                FY {project.fiscalYear}
+              </span>
+              {project.referenceNo && (
+                <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 font-mono text-[11px] text-navy">
+                  {project.referenceNo}
+                </span>
+              )}
+            </div>
+            <ReportIssueButton project={project} />
           </div>
 
           <h1 className="mt-3 max-w-4xl text-lg leading-tight font-bold tracking-[-0.02em] text-navy sm:text-[22px]">

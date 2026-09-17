@@ -5,7 +5,7 @@ import {
   listPublishedProcurements,
   listPublishedAwards,
 } from "../controllers/transparencyController.js";
-import { getPublicBranding } from "../controllers/settingsController.js";
+import { getPublicBranding, listPublicLandingFaqs } from "../controllers/settingsController.js";
 import {
   getPublicFilters,
   getPublicOverview,
@@ -71,6 +71,9 @@ router.use(rateLimit({ bucket: "public", max: 600 }));
 // System branding — the login screen, the public header and the transparency
 // footer all need the admin-configured system name. No auth required.
 router.get("/branding", getPublicBranding);
+// FAQ content is curated by the System Administrator. Only published question
+// and answer text leaves the server; drafts and admin metadata stay private.
+router.get("/faqs", listPublicLandingFaqs);
 
 router.get("/transparency/overview", getTransparencyOverview);
 router.get("/transparency/app", listPublishedApp);

@@ -28,6 +28,10 @@ export const fetchProjectDocuments = (id) =>
 export const fetchPublicOfficials = () =>
   apiClient.get(`${PUBLIC}/officials`).then((res) => res.data)
 
+// Curated public help content. The endpoint returns published entries only.
+export const fetchPublicLandingFaqs = () =>
+  apiClient.get(`${PUBLIC}/faqs`).then((res) => res.data)
+
 // Written notices and currently-open solicitations, merged. Each entry carries
 // a `source` of 'announcement' or 'solicitation'.
 export const fetchAnnouncements = () =>

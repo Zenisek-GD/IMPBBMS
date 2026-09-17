@@ -93,6 +93,11 @@ export const PublicMessage = sequelize.define(
     // they are reading a reference off a page and should not have to match an id.
     referenceHint: { type: DataTypes.STRING(190), allowNull: true },
 
+    // A contextual issue report carries a server-derived snapshot of the public
+    // project it was opened from. It is null for ordinary correspondence and is
+    // deliberately separate from the reporter's optional identity fields.
+    projectContext: { type: DataTypes.JSON, allowNull: true },
+
     status: {
       type: DataTypes.ENUM("new", "acknowledged", "closed"),
       allowNull: false,

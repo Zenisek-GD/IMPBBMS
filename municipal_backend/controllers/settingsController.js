@@ -24,6 +24,11 @@ import {
   SVP_POSTING_EXEMPTION_CEILING,
   MANDATORY_PREBID_CONFERENCE_FLOOR,
 } from "../services/procurementThresholds.js";
+import {
+  auditFaqSummary,
+  readLandingFaqs,
+  validateLandingFaqs,
+} from "../services/landingFaqs.js";
 
 // Returns the LGU profile together with the thresholds it implies, so the
 // admin screen can show the consequence of a change rather than just the input.
@@ -166,6 +171,47 @@ export const updateShortcuts = async (req, res) => {
 
   await setNavShortcuts(shortcuts);
   res.json(shortcuts);
+};
+
+// â”€â”€ Landing-page FAQs â”€â”€
+// Stored with the existing LGU-wide settings rather than in a duplicate content
+// subsystem. Public reads intentionally strip unpublished entries at the server.
+export const listLandingFaqs = async (_req, res) => {
+  const row = await SystemSetting.findOne({ where: { key: SETTING_KEYS.LANDING_FAQS } });
+  res.json({ faqs: readLandingFaqs(row?.value) });
+};
+
+export const listPublicLandingFaqs = async (_req, res) => {
+  const row = await SystemSetting.findOne({ where: { key: SETTING_KEYS.LANDING_FAQS } });
+  const faqs = readLandingFaqs(row?.value)
+    .filter((faq) => faq.isPublished)
+    .map(({ id, question, answer }) => ({ id, question, answer }));
+  res.json({ faqs });
+};
+
+export const updateLandingFaqs = async (req, res) => {
+  const faqs = validateLandingFaqs(req.body?.faqs);
+  await withAuditTransaction(async (transaction, audit) => {
+    const [row, created] = await SystemSetting.findOrCreate({
+      where: { key: SETTING_KEYS.LANDING_FAQS },
+      defaults: {
+        key: SETTING_KEYS.LANDING_FAQS,
+        value: JSON.stringify(faqs),
+        description: "Ordered landing-page FAQ content managed by the System Administrator",
+      },
+      transaction,
+    });
+    const beforeFaqs = created ? readLandingFaqs(null) : readLandingFaqs(row.value);
+    await row.update({ value: JSON.stringify(faqs) }, { transaction });
+    await audit(actorAudit(req, {
+      actionType: "settings.landingFaqs.updated",
+      entityRef: "landingFaqs",
+      summary: `${faqs.length} landing-page FAQ${faqs.length === 1 ? "" : "s"} updated`,
+      beforeState: { faqs: auditFaqSummary(beforeFaqs) },
+      afterState: { faqs: auditFaqSummary(faqs) },
+    }));
+  });
+  res.json({ faqs, message: "Landing-page FAQs saved. Published questions are now visible on the public portal." });
 };
 
 // ── Public branding endpoint (no auth required) ────────────────────────────

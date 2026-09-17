@@ -19,6 +19,7 @@ import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import ProcurementSettingsPanel from './ProcurementSettingsPanel'
+import LandingFaqSettings from './LandingFaqSettings'
 
 // ── SYSTEM SETTINGS ──────────────────────────────────────────────────────────
 // This page and /admin/thresholds used to be the same component behind two
@@ -506,6 +507,7 @@ export default function AdminSettings() {
           </div>
         </div>
       </Card>
+      <LandingFaqSettings />
       <ProcurementSettingsPanel />
     </DashboardPage>
   )

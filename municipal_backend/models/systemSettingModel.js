@@ -43,6 +43,11 @@ export const SETTING_KEYS = {
   TRANSPARENCY_TITLE: "branding.transparencyTitle",
   TRANSPARENCY_FOOTER: "branding.transparencyFooter",
 
+  // Ordered, administrator-managed public questions for the landing page.
+  // A JSON value is appropriate here: this is one small LGU-wide content
+  // setting, not a workflow record that needs independent relationships.
+  LANDING_FAQS: "public.landingFaqs",
+
   // ── Navigation shortcuts ─────────────────────────────────────────────────
   // A single JSON blob keyed by role name → array of { href, shortcut } pairs.
   // The frontend merges these on top of the hardcoded defaults.
