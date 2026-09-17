@@ -9,6 +9,7 @@ import { hashToken, PENDING_MFA_TTL_MS } from "./authPolicy.js";
 const expiredMarker = (data) => ({
   cookie: data.cookie,
   sessionExpired: Boolean(data.userId || data.sessionExpired),
+  loginSessionDurationMinutes: data.loginSessionDurationMinutes,
   pendingMfaExpired: Boolean(data.pendingMfaUserId || data.pendingMfaExpired),
 });
 
@@ -25,7 +26,10 @@ export const expireStoredSession = async (row) => {
       ...actor, entityRef: "auth", entityId: row.data.userId,
       afterState: { sessionExpiresAt: new Date(row.data.loginSessionExpiresAt), device: "Current Browser" },
     };
-    await recordAudit({ ...details, actionType: AUDIT_ACTIONS.SESSION_EXPIRED, summary: "Authenticated session expired after 30 minutes" });
+    await recordAudit({
+      ...details, actionType: AUDIT_ACTIONS.SESSION_EXPIRED,
+      summary: `Authenticated session expired after ${row.data.loginSessionDurationMinutes ?? 30} minutes`,
+    });
     await recordAudit({ ...details, actionType: AUDIT_ACTIONS.AUTOMATIC_LOGOUT, summary: "Automatic logout" });
   }
 };

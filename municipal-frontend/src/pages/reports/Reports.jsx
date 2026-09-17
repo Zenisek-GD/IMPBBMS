@@ -80,7 +80,7 @@ export default function Reports() {
   const [catalog, setCatalog] = useState(null)
   const [data, setData] = useState(null)
   const [draft, setDraft] = useState({})
-  const [query, setQuery] = useState({ page: 1, pageSize: 25, direction: 'desc' })
+  const [query, setQuery] = useState({ page: 1, pageSize: 10, direction: 'desc' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -103,7 +103,7 @@ export default function Reports() {
   }, [selected, query, refresh])
 
   const updateQuery = (next) => { setLoading(true); setError(''); setQuery(next) }
-  const changeReport = (key) => { setDraft({}); setData(null); updateQuery({ page: 1, pageSize: 25, direction: 'desc' }); navigate(`/reports/${key}`) }
+  const changeReport = (key) => { setDraft({}); setData(null); updateQuery({ page: 1, pageSize: 10, direction: 'desc' }); navigate(`/reports/${key}`) }
   const sortBy = (key) => updateQuery({ ...query, page: 1, sort: key, direction: query.sort === key && query.direction === 'asc' ? 'desc' : 'asc' })
   const doExport = async (format) => {
     if (!selected) return
@@ -159,7 +159,7 @@ export default function Reports() {
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button type="submit" disabled={!selected}>Apply filters</Button>
-            <Button variant="ghost" onClick={() => { setDraft({}); updateQuery({ page: 1, pageSize: 25, direction: 'desc' }) }}>Reset</Button>
+            <Button variant="ghost" onClick={() => { setDraft({}); updateQuery({ page: 1, pageSize: 10, direction: 'desc' }) }}>Reset</Button>
             <p className="text-xs text-text-faint">Dates use Philippine time (UTC+8). Exports include every filtered row, up to 10,000 records.</p>
           </div>
         </form>

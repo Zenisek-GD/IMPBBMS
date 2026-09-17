@@ -4,6 +4,7 @@ import { MoreVertical, Menu, X, ArrowLeft, LogIn, LayoutDashboard, LogOut, FileC
 import { useAuth } from '../../context/useAuth'
 import { landingRouteForRole } from '../../config/roleLanding'
 import ThemeToggle from '../ui/ThemeToggle'
+import ReportIssueButton from './ReportIssueButton'
 
 // ── Header for the public portal ─────────────────────────────────────────────
 // A solid bar with the masthead left, sections in a pill on the true centre
@@ -25,7 +26,7 @@ const SECTIONS = [
 // runs it, so the form now sits at the foot of About rather than competing with
 // it in the nav. `?view=contact` still resolves — it redirects into About.
 
-export default function PublicHeader({ lguName, systemName }) {
+export default function PublicHeader({ lguName, systemName, reportContext = null }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -169,6 +170,7 @@ export default function PublicHeader({ lguName, systemName }) {
             there is no account to hang it on. Sign-in lives in the menu (desktop)
             / drawer (mobile) only. */}
         <div className="col-start-3 flex shrink-0 items-center justify-end gap-1">
+          <ReportIssueButton context={reportContext} />
           <ThemeToggle />
 
           <div className="relative">

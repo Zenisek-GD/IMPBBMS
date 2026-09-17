@@ -39,7 +39,10 @@ export default function AppShell() {
     const overrides = shortcutOverrides?.[roleKey]
     let sections = applyShortcutOverrides(nav.sections, overrides)
     if (canViewReports) sections = [...sections, { heading: 'Reports', items: [{ label: 'Reports', href: '/reports', icon: FileText }] }]
-    const counts = pending.userId === user?.id ? pending.counts : {}
+    // A failed or incomplete queue response must not take down every protected
+    // screen. The request effect treats it as an empty count set as well.
+    const counts = pending.userId === user?.id && pending.counts && typeof pending.counts === 'object'
+      ? pending.counts : {}
     sections = sections.map((section) => ({ ...section, items: section.items.map((item) => ({ ...item, pendingCount: counts[item.href] || 0 })) }))
     if (!canManageTwoFactor || sections.some((section) => section.items.some((item) => item.href === '/admin/security-settings'))) return sections
     return [...sections, { heading: 'Security', items: [
@@ -221,8 +224,8 @@ export default function AppShell() {
         >
           <div className="flex flex-col gap-4">
             <p className="text-sm leading-relaxed text-text-secondary">
-              For your security, this session ends after 30 minutes. Save any unfinished work now.
-              Continuing checks the server session but cannot extend its fixed deadline.
+              For your security, this session ends after {user?.sessionDurationMinutes ?? 30} minutes. Save any unfinished work now.
+              Continuing checks the server session but cannot extend its issued deadline.
             </p>
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="secondary" disabled={checkingSession} onClick={() => setConfirmingLogout(true)}>

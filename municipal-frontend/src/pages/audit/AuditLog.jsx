@@ -25,15 +25,10 @@ export default function AuditLog() {
   useEffect(() => {
     let cancelled = false
     Promise.all([
-      insightsApi.fetchAuditFacets().catch(() => ({ actions: [], roles: [] })),
       insightsApi.verifyAuditChain().catch(() => null),
       usersApi.fetchRoles().catch(() => []),
-    ]).then(([facetRows, verify, roleRows]) => {
+    ]).then(([verify, roleRows]) => {
       if (cancelled) return
-      setFacets({
-        actions: facetRows.actions ?? [],
-        roles: facetRows.roles ?? [],
-      })
       setVerification(verify)
       setRoleNames(Object.fromEntries((roleRows ?? []).map((role) => [role.key, role.name])))
     })
@@ -43,6 +38,7 @@ export default function AuditLog() {
   }, [])
 
   const canExport = permissions.has('audit.export')
+  const canViewSystemActivity = permissions.has('audit.viewLogs')
 
   // Facet options name only values that actually occur in the log, ordered the
   // way a reader looks for them — a dropdown full of raw keys for actions that
@@ -81,6 +77,40 @@ export default function AuditLog() {
     ],
   })
   const { pageRows, paginationProps } = table
+  const activityScope = canViewSystemActivity && table.toolbarProps.filterValues.scope === 'system'
+    ? 'system'
+    : 'official'
+
+  // Filter choices must match the selected activity stream. Showing a list of
+  // technical actions in the official stream would create needless no-result
+  // states and imply visibility that the server correctly does not grant.
+  useEffect(() => {
+    let cancelled = false
+    insightsApi.fetchAuditFacets({ scope: activityScope })
+      .then((facetRows) => {
+        if (cancelled) return
+        setFacets({
+          actions: facetRows.actions ?? [],
+          roles: facetRows.roles ?? [],
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setFacets({ actions: [], roles: [] })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activityScope])
+
+  const selectActivityScope = (scope) => {
+    // Action and role facets are scoped by the server. Clear values from the
+    // previous stream so a technical-only action cannot make the official
+    // stream look empty (or vice versa).
+    table.toolbarProps.onFilterChange('actionType', '')
+    table.toolbarProps.onFilterChange('actorRole', '')
+    table.toolbarProps.onFilterChange('scope', scope === 'system' ? 'system' : '')
+    setInspecting(null)
+  }
 
   return (
     <DashboardPage>
@@ -132,13 +162,47 @@ export default function AuditLog() {
       )}
 
       <Card bodyClassName="p-4">
+        <div className="mb-4 flex flex-col gap-2 border-b border-border-muted pb-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[13px] font-medium text-navy">Activity stream</p>
+            <p className="mt-0.5 text-[12px] text-text-secondary">
+              {activityScope === 'system'
+                ? 'Technical and security events without an accountable user actor.'
+                : 'Actions performed by officials and authenticated users.'}
+            </p>
+          </div>
+          <div role="tablist" aria-label="Audit activity stream" className="flex w-full gap-2 sm:w-auto">
+            <Button
+              role="tab"
+              aria-selected={activityScope === 'official'}
+              variant={activityScope === 'official' ? 'primary' : 'secondary'}
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => selectActivityScope('official')}
+            >
+              Official activity
+            </Button>
+            {canViewSystemActivity && (
+              <Button
+                role="tab"
+                aria-selected={activityScope === 'system'}
+                variant={activityScope === 'system' ? 'primary' : 'secondary'}
+                size="sm"
+                className="flex-1 sm:flex-none"
+                onClick={() => selectActivityScope('system')}
+              >
+                System activity
+              </Button>
+            )}
+          </div>
+        </div>
         <TableToolbar
           {...table.toolbarProps}
           searchPlaceholder="Search action, record, actor or summary…"
         />
       </Card>
 
-      <Card title="Events" icon={ScrollText} bodyClassName="">
+      <Card title={activityScope === 'system' ? 'System activity' : 'Official activity'} icon={ScrollText} bodyClassName="">
         {table.loading ? (
           <p role="status" className="px-4 py-8 text-center text-[13px] text-text-faint">
             Loading audit entries…
@@ -256,10 +320,12 @@ export default function AuditLog() {
                 <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">Actor</p>
                 <p className="text-text-secondary">{inspecting.actorName ?? '—'}</p>
               </div>
-              <div>
-                <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">IP</p>
-                <p className="font-mono text-text-secondary">{inspecting.ipAddress ?? '—'}</p>
-              </div>
+              {inspecting.ipAddress && (
+                <div>
+                  <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">Network address</p>
+                  <p className="font-mono text-text-secondary">{inspecting.ipAddress}</p>
+                </div>
+              )}
             </div>
 
             {(inspecting.beforeState || inspecting.afterState) && (

@@ -15,7 +15,7 @@ import { Op } from "sequelize";
 //   · The response always carries the total, so the UI can print
 //     "Showing 1–25 of 1,248 records" instead of bare page numbers.
 const PAGE_SIZES = [10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 100;
 const MAX_SEARCH_LENGTH = 120;
 

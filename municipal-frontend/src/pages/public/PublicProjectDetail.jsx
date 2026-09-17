@@ -269,7 +269,13 @@ export default function PublicProjectDetail() {
 
   return (
     <div className="public-portal flex min-h-screen flex-col bg-canvas">
-      <PublicHeader systemName={branding?.systemName} />
+      <PublicHeader
+        systemName={branding?.systemName}
+        reportContext={{
+          referenceHint: project.referenceNo ?? project.projectTitle,
+          label: project.projectTitle,
+        }}
+      />
 
       <main id="main-content" className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
         <Link

@@ -8,11 +8,16 @@ import {
 } from "../controllers/securityController.js";
 import { requirePermission } from "../middleware/permissionMiddleware.js";
 
-import { requireTwoFactorManagement } from "../middleware/securityPermissionMiddleware.js";
-import { getAuthenticationSecurity, updateAuthenticationSecurity } from "../controllers/authSecurityController.js";
+import { requireTwoFactorManagement, requireSystemAdministrator } from "../middleware/securityPermissionMiddleware.js";
+import {
+  getAuthenticationSecurity, updateAuthenticationSecurity,
+  getSessionSecurityPolicy, updateSessionSecurityPolicy,
+} from "../controllers/authSecurityController.js";
 const router = express.Router();
 router.get("/authentication", requireTwoFactorManagement, getAuthenticationSecurity);
 router.patch("/authentication", requireTwoFactorManagement, updateAuthenticationSecurity);
+router.get("/session-policy", requireSystemAdministrator, getSessionSecurityPolicy);
+router.patch("/session-policy", requireSystemAdministrator, updateSessionSecurityPolicy);
 
 router.get("/overview", requirePermission("security.view"), getSecurityOverview);
 router.get("/alerts", requirePermission("security.view"), listAlerts);

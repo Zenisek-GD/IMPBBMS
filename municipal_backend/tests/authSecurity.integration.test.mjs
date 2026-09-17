@@ -193,6 +193,53 @@ test("HTTP authentication security against isolated MySQL", { timeout: 600_000 }
     assert.equal(await models.TrustedDevice.count({ where: { userId: person.user.id } }), 0);
   });
 
+  await t.test("only the System Administrator can configure new session deadlines without changing active sessions", async () => {
+    const admin = await fixture("sessionPolicyAdmin");
+    const adminJar = browser();
+    const current = await signIn(adminJar, admin);
+    const existingDeadline = current.body.loginSessionExpiresAt;
+    const initial = await request(adminJar, "GET", "/security/session-policy");
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.sessionDurationMinutes, 30);
+    assert.deepEqual(initial.body.allowedSessionDurationMinutes, [15, 30, 45, 60, 120]);
+
+    const vendor = await fixture("sessionPolicyVendor", true, externalRole.id);
+    const vendorJar = browser();
+    await signIn(vendorJar, vendor);
+    assert.equal((await request(vendorJar, "GET", "/security/session-policy")).status, 403);
+    assert.equal((await request(adminJar, "PATCH", "/security/session-policy", {
+      sessionDurationMinutes: 20, expectedSessionDurationMinutes: 30,
+    })).status, 400);
+    assert.equal((await request(adminJar, "PATCH", "/security/session-policy", {
+      sessionDurationMinutes: 45, expectedSessionDurationMinutes: 30,
+    }, { origin: "https://attacker.example" })).status, 403);
+
+    const changed = await request(adminJar, "PATCH", "/security/session-policy", {
+      sessionDurationMinutes: 45, expectedSessionDurationMinutes: 30,
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.equal(changed.body.sessionDurationMinutes, 45);
+    assert.equal((await request(adminJar, "GET", "/auth/me")).body.loginSessionExpiresAt, existingDeadline);
+
+    const newUser = await fixture("sessionPolicyNew");
+    const newJar = browser();
+    const newSession = await signIn(newJar, newUser);
+    assert.equal(newSession.body.loginSessionExpiresAt, Date.now() + 45 * MINUTE);
+    assert.equal(newSession.body.sessionDurationMinutes, 45);
+    const audit = await models.AuditLog.findOne({
+      where: { actionType: "auth.session.policy.updated", entityRef: "systemSetting" },
+      order: [["sequence", "DESC"]],
+    });
+    assert.equal(audit.actorId, admin.user.id);
+    assert.equal(audit.beforeState.sessionDurationMinutes, 30);
+    assert.equal(audit.afterState.sessionDurationMinutes, 45);
+
+    const restored = await request(adminJar, "PATCH", "/security/session-policy", {
+      sessionDurationMinutes: 30, expectedSessionDurationMinutes: 45,
+    });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+  });
+
 
   const configure = async (jar, changes, options = {}) => {
     const updates = [];

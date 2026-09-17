@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Plus, FileText, Eye, Save, History, Archive, ArrowLeft, AlertTriangle, Braces, Check,
+  Plus, FileText, Eye, Save, History, Archive, ArrowLeft, AlertTriangle, Braces, Check, Upload,
 } from 'lucide-react'
 import * as api from '../../api/documentGeneration'
 import { TEMPLATE_STATUS_TONES } from '../../api/documentGeneration'
@@ -378,12 +378,90 @@ function NewTemplateModal({ options, onClose, onCreated }) {
   )
 }
 
+function ImportTemplateModal({ options, onClose, onImported }) {
+  const [documentType, setDocumentType] = useState(options.documentTypes?.[0]?.key ?? 'other')
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [file, setFile] = useState(null)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!file || !name.trim() || submitting) return
+    setError('')
+    setSubmitting(true)
+    try {
+      const payload = new FormData()
+      payload.append('file', file)
+      payload.append('name', name.trim())
+      payload.append('documentType', documentType)
+      if (description.trim()) payload.append('description', description.trim())
+      onImported(await api.importTemplate(payload))
+    } catch (err) {
+      setError(err.response?.data?.message ?? 'The template could not be imported.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal
+      title="Import an HTML template"
+      subtitle="The layout is brought into the existing editor as a draft. Review it and activate it only when it is ready for use."
+      onClose={onClose}
+    >
+      <form className="flex flex-col gap-4" onSubmit={submit}>
+        <p className="rounded-md border border-border-muted bg-sidebar px-3 py-2.5 text-[12.5px] leading-relaxed text-text-secondary">
+          Import <strong className="font-medium text-navy">.html</strong> or <strong className="font-medium text-navy">.htm</strong> files exported from your document software. HTML is the format this system can preserve, edit and generate safely; Word and PDF files are not converted here.
+        </p>
+        <label className="text-xs text-text-secondary">
+          Document type
+          <select value={documentType} onChange={(event) => setDocumentType(event.target.value)} className={`mt-1 ${inputClass}`}>
+            {(options.documentTypes ?? []).map((type) => (
+              <option key={type.key} value={type.key}>{type.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-text-secondary">
+          Template name
+          <input value={name} onChange={(event) => setName(event.target.value)} className={`mt-1 ${inputClass}`} />
+        </label>
+        <label className="text-xs text-text-secondary">
+          Description <span className="text-text-faint">(optional)</span>
+          <input value={description} onChange={(event) => setDescription(event.target.value)} className={`mt-1 ${inputClass}`} />
+        </label>
+        <label className="text-xs text-text-secondary">
+          HTML template file
+          <input
+            type="file"
+            accept=".html,.htm,text/html,application/xhtml+xml"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            className="mt-1 block w-full rounded-md border border-border-muted bg-surface px-3 py-2 text-[12px] text-navy file:mr-3 file:rounded file:border-0 file:bg-navy-tint file:px-2 file:py-1 file:text-[11px] file:font-medium file:text-navy"
+          />
+          <span className="mt-1 block text-[11.5px] text-text-faint">
+            {file ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB` : 'One file, up to 2 MB.'}
+          </span>
+        </label>
+        {error && <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="submit" icon={Upload} disabled={!file || !name.trim() || submitting}>
+            {submitting ? 'Importing…' : 'Import draft'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export default function TemplateManager() {
   const permissions = usePermissions()
   const [templates, setTemplates] = useState([])
   const [options, setOptions] = useState({})
   const [editing, setEditing] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [error, setError] = useState('')
@@ -448,7 +526,12 @@ export default function TemplateManager() {
       <PageHeader
         title="Document Templates"
         subtitle="The wording of every official document the office issues. Editing a template saves a new version; the old one is kept so documents already issued stay explicable."
-        actions={canManage && <Button icon={Plus} onClick={() => setCreating(true)}>NEW TEMPLATE</Button>}
+        actions={canManage && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" icon={Upload} onClick={() => setImporting(true)}>Import HTML</Button>
+            <Button icon={Plus} onClick={() => setCreating(true)}>New template</Button>
+          </div>
+        )}
       />
 
       {error && (
@@ -536,6 +619,14 @@ export default function TemplateManager() {
           options={options}
           onClose={() => setCreating(false)}
           onCreated={(created) => { setCreating(false); setEditing(created) }}
+        />
+      )}
+
+      {importing && (
+        <ImportTemplateModal
+          options={options}
+          onClose={() => setImporting(false)}
+          onImported={(created) => { setImporting(false); setEditing(created) }}
         />
       )}
 

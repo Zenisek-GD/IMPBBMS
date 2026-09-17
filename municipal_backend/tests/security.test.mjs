@@ -118,10 +118,19 @@ test("rate-limit storage errors fail closed", async () => {
 });
 test("credentials and privilege changes revoke sessions immediately", () => {
   const user = { password: "bcrypt-hash", email: "a@example.test", roleId: 1, departmentId: 1, status: "active" };
-  const req = { session: { credentialHash: credentialStamp(user), authAt: Date.now() } };
+  const now = Date.now();
+  const req = {
+    session: {
+      credentialHash: credentialStamp(user),
+      authAt: now,
+      // The deadline is set once at login; a later policy change must not
+      // rewrite it. The security test therefore expires this value directly.
+      loginSessionExpiresAt: now + 30 * 60_000,
+    },
+  };
   assert.equal(passwordSessionValid(req, user), true);
   for (const key of ["password", "email", "roleId", "departmentId", "status"]) assert.equal(passwordSessionValid(req, { ...user, [key]: "changed" }), false);
-  assert.equal(passwordSessionValid({ session: { ...req.session, authAt: Date.now() - 9 * 3600000 } }, user), false);
+  assert.equal(passwordSessionValid({ session: { ...req.session, loginSessionExpiresAt: now - 1 } }, user), false);
   assert.equal(passwordSessionValid({ session: {} }, user), false);
 });
 test("role-only admin routes reject revoked password sessions", async (t) => {

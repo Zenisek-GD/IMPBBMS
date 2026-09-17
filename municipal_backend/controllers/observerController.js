@@ -15,6 +15,7 @@ import { Rfq } from "../models/biddingModel.js";
 import { User } from "../models/userModel.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { parseListParams, pageEnvelope } from "../services/listQuery.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -140,12 +141,45 @@ export const listInvitations = async (req, res) => {
     where.observerUserId = req.currentUser.id;
   }
 
-  const invitations = await ObserverInvitation.findAll({
+  // Keep the original array response for existing, record-scoped callers. The
+  // observer workspace supplies a page parameter and receives the common list
+  // envelope, so a growing invitation register is never loaded in full merely
+  // to display ten cards.
+  const requestsPaging = req.query.page !== undefined || req.query.pageSize !== undefined;
+  if (!requestsPaging) {
+    const invitations = await ObserverInvitation.findAll({
+      where,
+      ...invitationIncludes,
+      order: [["scheduledAt", "DESC"]],
+    });
+    return res.json(invitations.map(serializeInvitation));
+  }
+
+  const paging = parseListParams(req.query, {
+    sorts: {
+      scheduledAt: "scheduledAt",
+      invitedAt: "invitedAt",
+      attendance: "attendance",
+      stage: "stage",
+    },
+    defaultSort: { field: "scheduledAt", direction: "desc" },
+  });
+  const { rows, count } = await ObserverInvitation.findAndCountAll({
     where,
     ...invitationIncludes,
-    order: [["scheduledAt", "DESC"]],
+    order: paging.order,
+    limit: paging.limit,
+    offset: paging.offset,
+    distinct: true,
   });
-  res.json(invitations.map(serializeInvitation));
+  return res.json(
+    pageEnvelope({
+      rows: rows.map(serializeInvitation),
+      total: count,
+      page: paging.page,
+      pageSize: paging.pageSize,
+    })
+  );
 };
 
 // Sec. 43.1–43.2. The BAC invites; the invitation is the record that makes the

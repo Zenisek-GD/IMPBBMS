@@ -364,7 +364,9 @@ export const ROLE_PERMISSIONS = {
     "settings.manage",
     // System updates and maintenance notices are the administrator's to post.
     "announcements.manage",
-    "audit.viewLogs",
+    // The administrator can review both the technical trail and accountable
+    // official actions, but still cannot export the full evidence set.
+    "audit.viewLogs", "audit.viewAll",
     "security.view", "security.manage",
   ],
 

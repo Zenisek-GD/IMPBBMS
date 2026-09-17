@@ -19,6 +19,12 @@ export const fetchTemplateVersion = (versionId) =>
 export const createTemplate = (payload) =>
   apiClient.post('/doc-generation/templates', payload).then((res) => res.data)
 
+export const importTemplate = (payload) =>
+  // Let the browser set the multipart boundary. Supplying Content-Type here
+  // would omit that boundary in some clients and leave multer unable to read
+  // the file.
+  apiClient.post('/doc-generation/templates/import', payload).then((res) => res.data)
+
 export const updateTemplate = (id, payload) =>
   apiClient.patch(`/doc-generation/templates/${id}`, payload).then((res) => res.data)
 

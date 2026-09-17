@@ -594,7 +594,7 @@ export default function AnnouncementsAdmin() {
               <TableToolbar {...table.toolbarProps} searchPlaceholder="Search title, reference or text…" />
             </div>
             <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="min-w-[800px] w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('title')}>Title</SortableTh>
@@ -602,7 +602,7 @@ export default function AnnouncementsAdmin() {
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
                   <SortableTh {...table.sortProps('registrationDeadline')}>Registration closes</SortableTh>
                   <SortableTh {...table.sortProps('publishedAt')}>Published</SortableTh>
-                  <Th>Actions</Th>
+                  <Th className="min-w-[9rem]">Actions</Th>
                 </tr>
               </thead>
               <tbody>
@@ -641,33 +641,33 @@ export default function AnnouncementsAdmin() {
                       {row.publishedAt ? formatDateTime(row.publishedAt) : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
+                      <div className="flex min-w-[9rem] flex-wrap gap-1.5">
                         {row.status !== 'archived' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="secondary"
                             onClick={() => setEditing(row)}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            EDIT
-                          </button>
+                            Edit
+                          </Button>
                         )}
                         {row.status === 'draft' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="primary"
                             onClick={() => publish(row)}
-                            className="text-[11px] font-medium tracking-[0.03em] text-success hover:underline"
                           >
-                            PUBLISH
-                          </button>
+                            Publish
+                          </Button>
                         )}
                         {row.status === 'published' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="danger"
                             onClick={() => setWithdrawing(row)}
-                            className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                           >
-                            WITHDRAW
-                          </button>
+                            Withdraw
+                          </Button>
                         )}
                       </div>
                     </td>

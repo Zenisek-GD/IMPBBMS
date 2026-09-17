@@ -39,14 +39,20 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
   let lastUpdate;
   let authenticated = true;
   let forceExpired = false;
-  let deadline = Date.now() + 120_000;
+  let deadline = Date.now() + 10 * 60_000;
   let policyWrites = 0;
+  let sessionPolicyWrites = 0;
+  let sessionDurationMinutes = 30;
   const policy = () => ({ roles, requiredRoleCount: roles.filter((role) => role.twoFactorRequired).length,
-    trusted2faDurationMinutes: 30, sessionDurationMinutes: 30, automaticSessionLogout: true });
+    trusted2faDurationMinutes: 30 });
+  const sessionPolicy = () => ({ automaticSessionLogout: true, sessionDurationMinutes,
+    allowedSessionDurationMinutes: [15, 30, 45, 60, 120] });
   const user = () => ({
     id: 1, name: "Browser Test Admin", email: "admin@example.test", role: currentRole,
     roleName: currentRole, permissions: currentPermissions, themePreference: "light",
-    sessionTimeoutMs: 1_800_000, loginSessionExpiresAt: deadline,
+    // The current browser keeps its issued 30-minute deadline even after the
+    // administrator changes the policy for future sign-ins.
+    loginSessionExpiresAt: deadline, sessionDurationMinutes: 30,
     twoFactorTrustedUntil: deadline, serverTime: Date.now(), mfaVerified: true, mfaEnrollmentRequired: false,
   });
   await page.setRequestInterception(true);
@@ -82,6 +88,15 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
         policyWrites++;
       }
       data = policy();
+    } else if (url.pathname === "/api/security/session-policy") {
+      if (request.method() === "PATCH") {
+        const body = JSON.parse(request.postData());
+        assert.equal(body.expectedSessionDurationMinutes, sessionDurationMinutes);
+        assert.ok([15, 30, 45, 60, 120].includes(body.sessionDurationMinutes));
+        sessionDurationMinutes = body.sessionDurationMinutes;
+        sessionPolicyWrites++;
+      }
+      data = sessionPolicy();
     } else if (url.pathname === "/api/settings") {
       data = { lgu: { name: "Test Municipality" }, branding: { systemName: "ProcureNance" } };
     } else if (url.pathname.includes("notifications")) {
@@ -106,18 +121,29 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
   assert.equal((await page.$$('[role="switch"]')).length, 3);
   assert.match(await page.evaluate(() => document.body.innerText), /2 of 3 roles currently require/);
   assert.match(await page.evaluate(() => document.body.innerText), /Automatic Session Logout/);
+  await page.select('#session-duration', '45');
+  assert.equal(sessionPolicyWrites, 0);
+  await click('Save Session Duration');
+  await page.waitForFunction(() => document.body.innerText.includes('Session duration saved'));
+  await page.waitForSelector('#session-duration:not([disabled])');
+  assert.equal(sessionPolicyWrites, 1);
+  assert.equal(sessionDurationMinutes, 45);
   await click("Select All");
   assert.equal(await page.$$eval('input[type="checkbox"]', (items) => items.filter((item) => item.checked).length), 3);
   await click("Clear Selection");
   assert.equal(await page.$$eval('input[type="checkbox"]', (items) => items.filter((item) => item.checked).length), 0);
   assert.equal(policyWrites, 0);
-  await page.click('input[aria-label="Select Observer"]');
+  await page.evaluate(() => document.querySelector('input[aria-label="Select Observer"]')?.click());
+  await page.waitForFunction(() => [...document.querySelectorAll('button')]
+    .find((button) => button.textContent === 'Enable 2FA for Selected Roles')?.disabled === false);
   await click("Enable 2FA for Selected Roles");
+  await page.waitForFunction(() => document.body.innerText.includes('1 unsaved role change(s)'));
   assert.equal(policyWrites, 0);
   assert.equal(roles[1].twoFactorRequired, false);
   await click("Save Security Settings");
   await page.waitForSelector('[role="dialog"]');
-  await click("Cancel");
+  await page.evaluate(() => document.querySelector('[role="dialog"] button[aria-label="Close"]')?.click());
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   assert.equal(policyWrites, 0);
   await click("Save Security Settings");
   await click("Apply on Next Login");
@@ -132,7 +158,8 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
   await click("Save Security Settings");
   await page.waitForSelector('[role="dialog"]');
   assert.match(await page.$eval('[role="dialog"]', (element) => element.innerText), /System Administrator/);
-  await click("Cancel");
+  await page.evaluate(() => document.querySelector('[role="dialog"] button[aria-label="Close"]')?.click());
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   assert.equal(policyWrites, 1);
   await click("Save Security Settings");
   await click("Disable 2FA");

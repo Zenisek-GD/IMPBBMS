@@ -1,4 +1,4 @@
-import { sessionExpired, SESSION_EXPIRED_MESSAGE } from "../services/authPolicy.js";
+import { sessionExpired, sessionExpiredMessage } from "../services/authPolicy.js";
 import { destroyLoginSession } from "../services/loginSession.js";
 import { LoginSession } from "../models/authSecurityModel.js";
 import { expireStoredSession } from "../services/sessionStore.js";
@@ -18,7 +18,9 @@ export const sessionSecurity = async (req, res, next) => {
     req.sessionStore.generate(req);
     return next();
   }
-  return res.status(401).json({ code: "SESSION_EXPIRED", message: SESSION_EXPIRED_MESSAGE });
+  return res.status(401).json({
+    code: "SESSION_EXPIRED", message: sessionExpiredMessage(req.session?.loginSessionDurationMinutes),
+  });
 };
 
 // SameSite is defense in depth. Reject browser writes from any other origin,

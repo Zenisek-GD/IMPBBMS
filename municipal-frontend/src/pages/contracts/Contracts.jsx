@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FileSignature, Plus, Truck, PenLine, Send, GitBranch, ShieldCheck } from 'lucide-react'
+import { FileSignature, Plus, Truck, PenLine, Send, GitBranch, ShieldCheck, TriangleAlert } from 'lucide-react'
 import * as contractsApi from '../../api/contracts'
 import { CONTRACT_STATUS_LABELS, CONTRACT_STATUS_TONES } from '../../api/contracts'
 import { fetchAwards } from '../../api/bidding'
@@ -17,6 +17,7 @@ import ReasonModal from '../../components/ui/ReasonModal'
 import { NextInline } from '../../components/ui/NextStep'
 import { contractNext } from '../../config/nextSteps'
 import { useServerTable } from '../../components/ui/useServerTable'
+import { describeContractsLoadFailure } from './contractsLoadFailure'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -440,6 +441,7 @@ export default function Contracts() {
     ],
   })
   const { pageRows, paginationProps, refresh } = table
+  const loadFailure = table.failed ? describeContractsLoadFailure(table.error) : null
 
   return (
     <DashboardPage>
@@ -471,10 +473,15 @@ export default function Contracts() {
         {table.loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading contracts…</p>
         ) : table.failed ? (
-          <div className="px-4 py-8 text-center">
-            <p className="text-[13px] font-medium text-navy">Contracts could not be loaded</p>
-            <p className="mx-auto mt-1 max-w-md text-[13px] text-text-secondary">Check your connection and try again.</p>
-            <Button variant="secondary" size="sm" className="mt-3" onClick={refresh}>Retry</Button>
+          <div role="alert" aria-live="assertive" className="px-4 py-8 text-center">
+            <TriangleAlert aria-hidden="true" className="mx-auto text-warning" size={22} />
+            <p className="mt-2 text-[13px] font-medium text-navy">{loadFailure.title}</p>
+            <p className="mx-auto mt-1 max-w-md text-[13px] text-text-secondary">{loadFailure.message}</p>
+            {loadFailure.retryable && (
+              <Button variant="secondary" size="sm" className="mt-3" onClick={refresh}>
+                Retry loading contracts
+              </Button>
+            )}
           </div>
         ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">

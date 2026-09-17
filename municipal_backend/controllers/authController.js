@@ -9,11 +9,9 @@ import { clearRateLimit } from "../middleware/rateLimitMiddleware.js";
 import { passwordSessionValid } from "../middleware/permissionMiddleware.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
 import { sendPasswordChangedEmail } from "../services/mailer.js";
-import { SESSION_DURATION_MS, PENDING_MFA_TTL_MS, credentialVersion, sessionDetails, roleRequiresTwoFactor } from "../services/authPolicy.js";
+import { PENDING_MFA_TTL_MS, credentialVersion, sessionDetails, roleRequiresTwoFactor } from "../services/authPolicy.js";
 import { startLoginSession, destroyLoginSession, regenerateSession, saveSession } from "../services/loginSession.js";
 import { findTrustedDevice, securityAudit } from "../services/trustedDevices.js";
-
-export const sessionTtlForRole = () => SESSION_DURATION_MS;
 
 // Permissions travel with the session user so the UI can hide actions the
 // caller cannot perform. The server still enforces them independently — this
@@ -32,8 +30,6 @@ export const serializeUser = (user) => ({
   themePreference: user.themePreference ?? "light",
   sidebarCollapsed: Boolean(user.sidebarCollapsed),
   textSizePreference: user.textSizePreference ?? "normal",
-  // Fixed duration for every role; server deadlines are returned separately.
-  sessionTimeoutMs: sessionTtlForRole(user.Role.key),
 });
 
 export const userIncludes = [{ model: Role, include: [Permission] }, { model: Department }];

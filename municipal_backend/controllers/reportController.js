@@ -18,7 +18,7 @@ export async function getReport(req, res) {
   const columns = columnsForReport(report);
   const rawRows = await loadReportRows(report, req.currentUser, req.permissions);
   const rows = filterReportRows(rawRows, req.query, columns);
-  const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 25));
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 10));
   const page = Math.min(Math.max(1, Math.ceil(rows.length / pageSize)), Math.max(1, Number.parseInt(req.query.page, 10) || 1));
   // Explicit projection prevents future ORM fields from silently becoming exports.
   const project = (row) => Object.fromEntries([["id", row.id], ...columns.map(({ key }) => [key, row[key] ?? null])]);

@@ -83,7 +83,7 @@ export const listContracts = async (req, res) => {
     const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
     if (!vendor) {
       const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
-      return res.json(wantsPaging ? pageEnvelope({ rows: [], total: 0, page: 1, pageSize: 25 }) : []);
+      return res.json(wantsPaging ? pageEnvelope({ rows: [], total: 0, page: 1, pageSize: 10 }) : []);
     }
     where.vendorId = vendor.id;
     if (status) where.status = status;

@@ -5,6 +5,7 @@ import {
   getTemplate,
   getTemplateVersion,
   createTemplate,
+  importTemplate,
   updateTemplate,
   createVersion,
   activateVersion,
@@ -24,8 +25,15 @@ import {
   listForRecord,
 } from "../controllers/generatedDocumentController.js";
 import { requirePermission, requireAnyPermission } from "../middleware/permissionMiddleware.js";
+import { describeTemplateImportError, templateImportUpload } from "../services/templateImport.js";
 
 const router = express.Router();
+
+const receiveTemplateImport = (req, res, next) =>
+  templateImportUpload.single("file")(req, res, (error) => {
+    if (error) return res.status(400).json({ message: describeTemplateImportError(error) });
+    next();
+  });
 
 // ── Templates ────────────────────────────────────────────────────────────────
 // Reading a template is open to anyone who generates documents — they need to
@@ -41,6 +49,7 @@ router.get("/templates/:id", requireAnyPermission("template.view", "document.gen
 router.get("/template-versions/:versionId", requirePermission("template.view"), getTemplateVersion);
 
 router.post("/templates", requirePermission("template.manage"), createTemplate);
+router.post("/templates/import", requirePermission("template.manage"), receiveTemplateImport, importTemplate);
 router.patch("/templates/:id", requirePermission("template.manage"), updateTemplate);
 router.post("/templates/:id/versions", requirePermission("template.manage"), createVersion);
 router.post(

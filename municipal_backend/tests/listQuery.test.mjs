@@ -21,6 +21,8 @@ test('explicit sort direction is honoured only for allowlisted fields', () => {
 })
 
 test('page sizes are clamped and pages start at one', () => {
+  const defaultPage = parseListParams({}, { sorts: SORTS })
+  assert.equal(defaultPage.limit, 10)
   const huge = parseListParams({ pageSize: '1000000' }, { sorts: SORTS })
   assert.equal(huge.limit, 100)
   const negative = parseListParams({ page: '-3', pageSize: '7' }, { sorts: SORTS })

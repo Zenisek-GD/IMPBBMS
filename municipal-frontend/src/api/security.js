@@ -71,3 +71,8 @@ export const fetchAuthenticationSecurity = () =>
   apiClient.get('/security/authentication').then((res) => res.data)
 export const updateAuthenticationSecurity = (payload) =>
   apiClient.patch('/security/authentication', payload).then((res) => res.data)
+
+export const fetchSessionSecurityPolicy = () =>
+  apiClient.get('/security/session-policy').then((res) => res.data)
+export const updateSessionSecurityPolicy = (payload) =>
+  apiClient.patch('/security/session-policy', payload).then((res) => res.data)

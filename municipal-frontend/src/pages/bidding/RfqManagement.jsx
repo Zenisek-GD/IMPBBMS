@@ -396,7 +396,7 @@ export default function RfqManagement() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="min-w-[920px] w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('referenceNo')}>Reference</SortableTh>
@@ -406,7 +406,7 @@ export default function RfqManagement() {
                   <SortableTh {...table.sortProps('closingDate')}>Closing</SortableTh>
                   <SortableTh {...table.sortProps('openingDate')}>Bid opening</SortableTh>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
-                  <Th>Actions</Th>
+                  <Th className="min-w-[12rem]">Actions</Th>
                 </tr>
               </thead>
               <tbody>
@@ -437,48 +437,50 @@ export default function RfqManagement() {
                       <Badge tone={RFQ_STATUS_TONES[rfq.status]}>{rfq.statusLabel ?? (rfq.status === 'failed' ? `Failed — Attempt #${rfq.attemptNumber ?? 1}` : RFQ_STATUS_LABELS[rfq.status])}</Badge>
                       <NextInline next={rfqNext(rfq)} />
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex w-max items-center gap-2">
-                        <button type="button" onClick={() => setHistoryFor(rfq)} className="text-[11px] font-medium text-navy hover:underline">HISTORY / NEXT ACTION</button>
+                    <td className="px-4 py-3">
+                      <div className="flex min-w-[12rem] flex-wrap items-center gap-1.5">
+                        <Button size="table" variant="secondary" onClick={() => setHistoryFor(rfq)}>History / next action</Button>
                         {canPublish && rfq.status === 'draft' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="primary"
                             onClick={() => run(() => biddingApi.publishRfq(rfq.id), 'RFQ / ITB published. Bid submission is open until the recorded deadline.')}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            PUBLISH
-                          </button>
+                            Publish
+                          </Button>
                         )}
                         {canPublish && rfq.status === 'published' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="secondary"
                             onClick={() => run(() => biddingApi.closeRfq(rfq.id), 'Bid submission closed. Open bids at the recorded opening date and time.')}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            CLOSE
-                          </button>
+                            Close submissions
+                          </Button>
                         )}
                         {canPublish && rfq.status === 'closed' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="primary"
+                            icon={Inbox}
                             onClick={() => setOpening(rfq)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <Inbox size={12} /> OPEN BIDS
-                          </button>
+                            Open bids
+                          </Button>
                         )}
 
                         {/* The abstract is prepared after submission closes, so
                             it is offered from that point on — including after
                             award, since it stays part of the record. */}
                         {rfq.status !== 'draft' && rfq.status !== 'published' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="secondary"
+                            icon={Table2}
                             onClick={() => setAbstractFor(rfq)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <Table2 size={12} /> ABSTRACT OF BIDS
-                          </button>
+                            Abstract of bids
+                          </Button>
                         )}
                       </div>
                     </td>

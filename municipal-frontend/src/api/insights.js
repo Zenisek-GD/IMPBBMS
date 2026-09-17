@@ -5,7 +5,8 @@ export const fetchAuditLog = (params = {}) =>
 
 export const verifyAuditChain = () => apiClient.get('/audit/verify').then((res) => res.data)
 
-export const fetchAuditFacets = () => apiClient.get('/audit/facets').then((res) => res.data)
+export const fetchAuditFacets = (params = {}) =>
+  apiClient.get('/audit/facets', { params }).then((res) => res.data)
 
 export const fetchEntityTimeline = (entityRef, entityId) =>
   apiClient.get(`/audit/timeline/${entityRef}/${entityId}`).then((res) => res.data)
@@ -39,6 +40,7 @@ export const ACTION_LABELS = {
   'auth.login.success': 'Signed in',
   'auth.login.failed': 'Sign-in failed',
   'auth.session.expired': 'Session expired',
+  'role.permission.granted': 'Role permission granted',
   'auth.logout.automatic': 'Automatic logout',
   'auth.login.newDevice': 'Login from new browser/device',
   'auth.mfa.challenge.success': '2FA verification successful',
@@ -81,6 +83,8 @@ export const ACTION_LABELS = {
   'announcement.published': 'Announcement published',
   'announcement.updated': 'Announcement updated',
   'announcement.withdrawn': 'Announcement withdrawn',
+
+  'template.imported': 'Document template imported',
 
   'planning.cdp.recorded': 'Development plan recorded',
   'planning.cdp.adopted': 'Development plan adopted',

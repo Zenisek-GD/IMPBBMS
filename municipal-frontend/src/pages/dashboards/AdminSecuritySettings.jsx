@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
-import { ShieldCheck } from 'lucide-react'
-import { fetchAuthenticationSecurity, updateAuthenticationSecurity } from '../../api/security'
+import { Clock3, ShieldCheck } from 'lucide-react'
+import {
+  fetchAuthenticationSecurity, updateAuthenticationSecurity,
+  fetchSessionSecurityPolicy, updateSessionSecurityPolicy,
+} from '../../api/security'
 import { fetchCurrentUser } from '../../api/auth'
+import { useAuth } from '../../context/useAuth'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
@@ -9,13 +13,17 @@ import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 
 export default function AdminSecuritySettings() {
+  const { user } = useAuth()
   const [policy, setPolicy] = useState(null)
   const [draft, setDraft] = useState({})
+  const [sessionPolicy, setSessionPolicy] = useState(null)
+  const [sessionDurationDraft, setSessionDurationDraft] = useState(null)
   const [selected, setSelected] = useState([])
   const [busy, setBusy] = useState(false)
   const [dialog, setDialog] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const canManageSessionPolicy = user?.role === 'systemAdministrator'
 
   useEffect(() => {
     let cancelled = false
@@ -24,10 +32,20 @@ export default function AdminSecuritySettings() {
         if (cancelled) return
         setPolicy(data)
         setDraft(Object.fromEntries(data.roles.map((role) => [role.id, role.twoFactorRequired])))
+        if (canManageSessionPolicy) {
+          fetchSessionSecurityPolicy().then((sessionData) => {
+            if (cancelled) return
+            setSessionPolicy(sessionData)
+            setSessionDurationDraft(sessionData.sessionDurationMinutes)
+          }).catch(() => { if (!cancelled) setError('Could not load the session security policy.') })
+        } else {
+          setSessionPolicy(null)
+          setSessionDurationDraft(null)
+        }
       })
       .catch(() => { if (!cancelled) setError('Could not load authentication security settings.') })
     return () => { cancelled = true }
-  }, [])
+  }, [canManageSessionPolicy])
 
   const roles = policy?.roles ?? []
   const changed = roles.filter((role) => draft[role.id] !== role.twoFactorRequired)
@@ -45,7 +63,14 @@ export default function AdminSecuritySettings() {
   const reload = async () => {
     setBusy(true)
     setError('')
-    try { resetDraft(await fetchAuthenticationSecurity()) }
+    try {
+      resetDraft(await fetchAuthenticationSecurity())
+      if (canManageSessionPolicy) {
+        const sessionData = await fetchSessionSecurityPolicy()
+        setSessionPolicy(sessionData)
+        setSessionDurationDraft(sessionData.sessionDurationMinutes)
+      }
+    }
     catch (err) { setError(err.response?.data?.message || 'Could not reload security settings.') }
     finally { setBusy(false) }
   }
@@ -75,6 +100,24 @@ export default function AdminSecuritySettings() {
   const review = () => {
     if (disabling.length) setDialog('disable')
     else if (enabling.length) setDialog('apply')
+  }
+  const sessionDurationChanged = sessionPolicy && sessionDurationDraft !== sessionPolicy.sessionDurationMinutes
+  const saveSessionDuration = async () => {
+    if (!sessionDurationChanged) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const data = await updateSessionSecurityPolicy({
+        sessionDurationMinutes: sessionDurationDraft,
+        expectedSessionDurationMinutes: sessionPolicy.sessionDurationMinutes,
+      })
+      setSessionPolicy(data)
+      setSessionDurationDraft(data.sessionDurationMinutes)
+      setNotice('Session duration saved. The new duration applies only when users next sign in.')
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not save the session security policy.')
+    } finally { setBusy(false) }
   }
   const roleList = (items) => (
     <ul className="my-3 max-h-48 list-disc overflow-y-auto pl-5 text-sm font-medium text-navy">
@@ -164,7 +207,7 @@ export default function AdminSecuritySettings() {
                 <Button disabled={busy || !changed.length || Boolean(dialog)} onClick={review}>Save Security Settings</Button>
               </div>
             </div>
-            <div className="grid gap-5 border-t border-border-muted pt-5 sm:grid-cols-2">
+            <div className="border-t border-border-muted pt-5">
               <div>
                 <h3 className="font-semibold text-navy">Trusted 2FA Duration</h3>
                 <p className="mt-1 font-medium text-navy">30 Minutes</p>
@@ -173,16 +216,38 @@ export default function AdminSecuritySettings() {
                   Logging out and signing in again preserve the original trust expiration.
                 </p>
               </div>
-              <div>
-                <h3 className="font-semibold text-navy">Automatic Session Logout</h3>
-                <p className="mt-1 font-medium text-navy">30 Minutes</p>
-                <p className="mt-1 text-sm text-text-secondary">
-                  Every authenticated session expires after 30 minutes, including roles with 2FA disabled.
-                  Session expiration is separate from browser trust.
-                </p>
-              </div>
             </div>
           </div>
+        </Card>
+      )}
+      {policy && canManageSessionPolicy && (
+        <Card className="mt-6" title="Automatic Session Logout" icon={Clock3} bodyClassName="p-5">
+          {!sessionPolicy ? <p className="text-sm text-text-secondary">Loading the session security policy...</p> : (
+            <div className="max-w-2xl">
+              <label htmlFor="session-duration" className="block text-sm font-semibold text-navy">Maximum signed-in session duration</label>
+              <p id="session-duration-help" className="mt-1 text-sm text-text-secondary">
+                Every authenticated session expires after this duration, including roles with 2FA disabled. This is separate from trusted-browser 2FA duration.
+              </p>
+              <select id="session-duration" value={sessionDurationDraft ?? ''} disabled={busy || Boolean(dialog)}
+                aria-describedby="session-duration-help"
+                onChange={(event) => setSessionDurationDraft(Number(event.target.value))}
+                className="mt-3 w-full rounded-lg border border-border-muted bg-surface px-3 py-2 text-sm font-medium text-navy sm:max-w-xs">
+                {sessionPolicy.allowedSessionDurationMinutes.map((minutes) => (
+                  <option key={minutes} value={minutes}>{minutes} Minutes</option>
+                ))}
+              </select>
+              <p className="mt-3 rounded-lg bg-chip p-3 text-sm text-navy">
+                Changes affect only sessions started after you save. Active users keep the deadline issued when they signed in.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button variant="secondary" disabled={busy || !sessionDurationChanged || Boolean(dialog)}
+                  onClick={() => setSessionDurationDraft(sessionPolicy.sessionDurationMinutes)}>Discard Change</Button>
+                <Button disabled={busy || !sessionDurationChanged || Boolean(dialog)} onClick={saveSessionDuration}>
+                  {busy ? 'Saving...' : 'Save Session Duration'}
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
       {dialog === 'disable' && (

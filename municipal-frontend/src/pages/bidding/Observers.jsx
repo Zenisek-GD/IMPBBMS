@@ -19,8 +19,11 @@ import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
+import Pagination from '../../components/ui/Pagination'
+import { useServerTable } from '../../components/ui/useServerTable'
 
 const dateTime = (value) => (value ? new Date(value).toLocaleString() : '—')
+const emptyPagedResult = async () => ({ rows: [], total: 0, page: 1, pageSize: 10, totalPages: 1 })
 
 // ── Inviting observers to a stage (Sec. 43.1–43.2) ───────────────────────────
 function InviteModal({ rfq, organizations, onClose, onDone }) {
@@ -231,47 +234,58 @@ export default function Observers() {
   const canParticipate = has('observer.participate')
 
   const [organizations, setOrganizations] = useState([])
-  const [invitations, setInvitations] = useState([])
-  const [rfqs, setRfqs] = useState([])
   const [inviting, setInviting] = useState(null)
   const [reporting, setReporting] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [rosterError, setRosterError] = useState('')
 
-  // Bumped after any mutation to re-run the effect. The fetch lives inside the
-  // effect rather than in a callback the effect calls, which is the pattern the
-  // rest of the app uses and what keeps React from warning about cascading
-  // renders.
+  // The invitations and the BAC's solicitation queue are independently
+  // server-paged. The invite dialog is intentionally different: it needs the
+  // complete *active* roster to validate the required COA/private/CSO mix
+  // before the BAC sends a single invitation.
+  const invitationsTable = useServerTable(observersApi.fetchObserverInvitations, {
+    defaultPageSize: 10,
+    urlKey: 'observerInvitations',
+  })
+  const solicitationsTable = useServerTable(
+    canManage ? biddingApi.fetchRfqs : emptyPagedResult,
+    { defaultPageSize: 10, urlKey: 'observerSolicitations' }
+  )
+
+  // Only the roster needs a separate request now. Refreshing it after an
+  // invitation is harmless and makes a newly deactivated organisation vanish
+  // from the next invitation form without affecting the historical records.
   const [reloadKey, setReloadKey] = useState(0)
-  const reload = () => setReloadKey((key) => key + 1)
 
   useEffect(() => {
     let cancelled = false
-
-    const fetchAll = async () => {
-      try {
-        const [orgs, invites] = await Promise.all([
-          observersApi.fetchObserverOrganizations(),
-          observersApi.fetchObserverInvitations(),
-        ])
-        const solicitations = canManage ? await biddingApi.fetchRfqs() : []
+    observersApi
+      .fetchObserverOrganizations({ status: 'active' })
+      .then((orgs) => {
         if (cancelled) return
         setOrganizations(orgs)
-        setInvitations(invites)
-        setRfqs(solicitations)
-        setError('')
-      } catch (err) {
-        if (!cancelled) setError(err?.response?.data?.message ?? 'Could not load observer records.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    fetchAll()
+        setRosterError('')
+      })
+      .catch((err) => {
+        if (!cancelled) setRosterError(err?.response?.data?.message ?? 'Could not load the active observer roster.')
+      })
     return () => {
       cancelled = true
     }
-  }, [canManage, reloadKey])
+  }, [reloadKey])
+
+  const reload = () => {
+    setReloadKey((key) => key + 1)
+    invitationsTable.refresh()
+    solicitationsTable.refresh()
+  }
+
+  const invitationError = invitationsTable.failed
+    ? invitationsTable.error?.response?.data?.message ?? 'Could not load observer invitations.'
+    : ''
+  const solicitationError = solicitationsTable.failed
+    ? solicitationsTable.error?.response?.data?.message ?? 'Could not load solicitations.'
+    : ''
 
   const markAttended = async (invitation) => {
     try {
@@ -295,9 +309,9 @@ export default function Observers() {
         subtitle="RA 12009 Sec. 43 — the COA representative, a relevant private group and a civil society organisation sit in on the committee's proceedings."
       />
 
-      {error && (
+      {(error || rosterError || invitationError || (canManage && solicitationError)) && (
         <p role="alert" className="mb-4 rounded border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
-          {error}
+          {error || rosterError || invitationError || solicitationError}
         </p>
       )}
 
@@ -310,11 +324,17 @@ export default function Observers() {
             </span>
           </div>
           <div className="space-y-2">
-            {rfqs.length === 0 && <p className="text-sm text-text-secondary">No solicitations yet.</p>}
-            {rfqs.map((rfq) => (
+            {solicitationsTable.loading && <p className="text-sm text-text-secondary">Loading solicitations…</p>}
+            {!solicitationsTable.loading && solicitationError && (
+              <Button variant="secondary" onClick={solicitationsTable.refresh}>RETRY SOLICITATIONS</Button>
+            )}
+            {!solicitationsTable.loading && !solicitationError && solicitationsTable.total === 0 && (
+              <p className="text-sm text-text-secondary">No solicitations yet.</p>
+            )}
+            {solicitationsTable.pageRows.map((rfq) => (
               <div
                 key={rfq.id}
-                className="flex items-center justify-between rounded border border-border-muted px-3 py-2"
+                className="flex flex-wrap items-center justify-between gap-3 rounded border border-border-muted px-3 py-2"
               >
                 <div>
                   <p className="text-sm font-medium text-navy">{rfq.referenceNo}</p>
@@ -326,6 +346,11 @@ export default function Observers() {
               </div>
             ))}
           </div>
+          {!solicitationsTable.loading && !solicitationError && solicitationsTable.total > 0 && (
+            <div className="mt-3">
+              <Pagination {...solicitationsTable.paginationProps} label="solicitations" />
+            </div>
+          )}
         </Card>
       )}
 
@@ -333,12 +358,15 @@ export default function Observers() {
         <h2 className="mb-3 text-sm font-semibold text-navy">
           {canParticipate && !canManage ? 'Proceedings you were invited to' : 'Invitations'}
         </h2>
-        {loading && <p className="text-sm text-text-secondary">Loading…</p>}
-        {!loading && invitations.length === 0 && (
+        {invitationsTable.loading && <p className="text-sm text-text-secondary">Loading invitations…</p>}
+        {!invitationsTable.loading && invitationError && (
+          <Button variant="secondary" onClick={invitationsTable.refresh}>RETRY INVITATIONS</Button>
+        )}
+        {!invitationsTable.loading && !invitationError && invitationsTable.total === 0 && (
           <p className="text-sm text-text-secondary">No invitations on record.</p>
         )}
         <div className="space-y-2">
-          {invitations.map((invitation) => (
+          {invitationsTable.pageRows.map((invitation) => (
             <div key={invitation.id} className="rounded border border-border-muted px-3 py-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -390,6 +418,11 @@ export default function Observers() {
             </div>
           ))}
         </div>
+        {!invitationsTable.loading && !invitationError && invitationsTable.total > 0 && (
+          <div className="mt-3">
+            <Pagination {...invitationsTable.paginationProps} label="invitations" />
+          </div>
+        )}
       </Card>
 
       {inviting && (

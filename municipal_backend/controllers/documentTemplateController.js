@@ -20,6 +20,7 @@ import {
 } from "../services/documentTypes.js";
 import { tokensUsedIn, unresolvableTokens, renderTemplate } from "../services/templateRenderer.js";
 import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { importHtmlTemplate } from "../services/templateImport.js";
 
 // Template authoring. The wording of every official document the office issues
 // lives here, so the two things this controller is careful about are: never
@@ -224,6 +225,78 @@ export const createTemplate = async (req, res) => {
   res.status(201).json({
     ...serializeTemplate(await DocumentTemplate.findByPk(created.id, withVersions), { includeBody: true }),
     unresolvableTokens: unresolvable,
+  });
+};
+
+// Imported templates start as drafts. A template manager can inspect the
+// sanitised result, add placeholders in the existing editor, and only then
+// activate it for document generation.
+export const importTemplate = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: "Choose an HTML template file to import." });
+
+  const imported = importHtmlTemplate(req.file);
+  if (imported.error) return res.status(400).json({ message: imported.error });
+
+  const payload = {
+    name: req.body.name,
+    documentType: req.body.documentType,
+    description: req.body.description,
+    bodyHtml: imported.bodyHtml,
+    css: imported.css,
+  };
+  const error = validate(payload);
+  if (error) return res.status(400).json({ message: error });
+
+  const key = `${payload.documentType}-${Date.now().toString(36)}`.toLowerCase();
+  const { unresolvable } = tokenWarnings(payload);
+
+  const created = await sequelize.transaction(async (transaction) => {
+    const template = await DocumentTemplate.create(
+      {
+        key,
+        name: payload.name.trim(),
+        documentType: payload.documentType,
+        description: payload.description?.trim() || null,
+        status: "draft",
+        publishable: isPublishableType(payload.documentType),
+        createdById: req.currentUser.id,
+      },
+      { transaction }
+    );
+    const version = await DocumentTemplateVersion.create(
+      {
+        documentTemplateId: template.id,
+        versionNo: 1,
+        bodyHtml: imported.bodyHtml,
+        css: imported.css || null,
+        changeNote: `Imported from ${imported.sourceFilename}`,
+        createdById: req.currentUser.id,
+      },
+      { transaction }
+    );
+    await template.update({ activeVersionId: version.id }, { transaction });
+    return template;
+  });
+
+  await auditFromRequest(req, {
+    actionType: AUDIT_ACTIONS.TEMPLATE_IMPORTED,
+    entityRef: "documentTemplate",
+    entityId: created.id,
+    summary: `Template imported: ${created.name} from ${imported.sourceFilename}`,
+    afterState: {
+      key: created.key,
+      documentType: created.documentType,
+      status: created.status,
+      sourceFilename: imported.sourceFilename,
+      sourceChecksum: imported.sourceChecksum,
+      unresolvableTokens: unresolvable,
+    },
+  });
+
+  res.status(201).json({
+    ...serializeTemplate(await DocumentTemplate.findByPk(created.id, withVersions), { includeBody: true }),
+    unresolvableTokens: unresolvable,
+    importedFilename: imported.sourceFilename,
   });
 };
 

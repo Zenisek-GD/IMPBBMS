@@ -47,7 +47,7 @@ const readUrlState = (urlKey) => {
 export function useServerTable(fetcher, options = {}) {
   const {
     filters: filterDefs = [],
-    defaultPageSize = 25,
+    defaultPageSize = 10,
     pageSizeOptions = [10, 25, 50, 100],
     urlKey = null,
     debounceMs = 400,
@@ -62,7 +62,14 @@ export function useServerTable(fetcher, options = {}) {
   const [pageSize, setPageSize] = useState(
     Number(urlInitial.pageSize) > 0 ? Number(urlInitial.pageSize) : defaultPageSize
   )
-  const [result, setResult] = useState({ key: null, rows: [], total: 0, meta: null, failed: false })
+  const [result, setResult] = useState({
+    key: null,
+    rows: [],
+    total: 0,
+    meta: null,
+    failed: false,
+    error: null,
+  })
   const [refreshToken, setRefreshToken] = useState(0)
 
   // Debounced search also returns to the first page: the page the reader was
@@ -106,11 +113,12 @@ export function useServerTable(fetcher, options = {}) {
           // the rows visible on this page.
           meta: data?.summary ?? null,
           failed: false,
+          error: null,
         })
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
-        setResult({ key: requestKey, rows: [], total: 0, meta: null, failed: true })
+        setResult({ key: requestKey, rows: [], total: 0, meta: null, failed: true, error })
       })
     return () => {
       cancelled = true
@@ -177,6 +185,7 @@ export function useServerTable(fetcher, options = {}) {
     totalBeforeFilters: result.total,
     loading,
     failed: result.failed,
+    error: result.error,
     refresh,
     toolbarProps: {
       query,

@@ -1,4 +1,5 @@
-import { SESSION_DURATION_MS, cookieOptions, roleRequiresTwoFactor, credentialStamp } from "./authPolicy.js";
+import { cookieOptions, roleRequiresTwoFactor, credentialStamp, sessionDurationMs } from "./authPolicy.js";
+import { getSessionDurationMinutes } from "../models/systemSettingModel.js";
 
 export const regenerateSession = (req) =>
   new Promise((resolve, reject) => req.session.regenerate((err) => err ? reject(err) : resolve()));
@@ -8,15 +9,18 @@ export const saveSession = (req) =>
 export const startLoginSession = async (req, user, { enrollment, trustedUntil = null, enrollmentRequired = false, verified = false } = {}) => {
   await regenerateSession(req);
   const now = Date.now();
+  const sessionDurationMinutes = await getSessionDurationMinutes();
+  const sessionDuration = sessionDurationMs(sessionDurationMinutes);
   Object.assign(req.session, {
     roleId: user.Role.id, roleSessionVersion: user.Role.sessionVersion,
     mfaRequiredAtLogin: roleRequiresTwoFactor(user.Role),
-    userId: user.id, authAt: now, credentialHash: credentialStamp(user), loginSessionExpiresAt: now + SESSION_DURATION_MS,
+    userId: user.id, authAt: now, credentialHash: credentialStamp(user),
+    loginSessionExpiresAt: now + sessionDuration, loginSessionDurationMinutes: sessionDurationMinutes,
     twoFactorTrustedUntil: trustedUntil, mfaVerified: verified,
     mfaEnrollmentRequired: enrollmentRequired, mfaEnrollmentId: verified ? enrollment?.id : null,
     auditActor: { actorId: user.id, actorName: user.name, actorRole: user.Role?.key ?? null, ipAddress: req.ip },
   });
-  req.session.cookie.maxAge = SESSION_DURATION_MS;
+  req.session.cookie.maxAge = sessionDuration;
   await saveSession(req);
 };
 

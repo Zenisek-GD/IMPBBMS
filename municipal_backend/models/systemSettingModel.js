@@ -3,6 +3,7 @@ import { sequelize } from "./db.js";
 import { Op } from "sequelize";
 import { ProcurementLimit } from "./procurementLimitModel.js";
 import { DEFAULT_PROCUREMENT_POLICY, validateProcurementPolicy } from "../services/bacCommittee.js";
+import { DEFAULT_SESSION_DURATION_MINUTES, isSessionDurationMinutes } from "../services/authPolicy.js";
 
 // Simple key/value store for LGU-wide configuration. Values that regulators
 // periodically adjust (LGU income classification, which drives the Sec. 34.2
@@ -31,6 +32,9 @@ export const SETTING_KEYS = {
   // expensed on issue. COA Circular 2022-004 raised this to ₱50,000, and it has
   // moved before, so it is configuration rather than a constant.
   CAPITALIZATION_THRESHOLD: "accounting.capitalizationThreshold",
+  // The maximum lifetime of a signed-in browser session. Existing sessions keep
+  // their issued deadline; this value is read only when a new login starts.
+  SESSION_DURATION_MINUTES: "security.sessionDurationMinutes",
 
   // ── Branding ─────────────────────────────────────────────────────────────
   // The system name, transparency portal title, and transparency footer are
@@ -46,6 +50,14 @@ export const SETTING_KEYS = {
 };
 
 export const DEFAULT_CAPITALIZATION_THRESHOLD = 50000;
+
+export const getSessionDurationMinutes = async ({ transaction, lock } = {}) => {
+  const row = await SystemSetting.findOne({
+    where: { key: SETTING_KEYS.SESSION_DURATION_MINUTES }, transaction, lock,
+  });
+  const minutes = Number(row?.value);
+  return isSessionDurationMinutes(minutes) ? minutes : DEFAULT_SESSION_DURATION_MINUTES;
+};
 
 // ── Default branding values ────────────────────────────────────────────────
 export const DEFAULT_SYSTEM_NAME = "ProcureNance";

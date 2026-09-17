@@ -2,9 +2,14 @@ import { Op } from "sequelize";
 import { AuditLog } from "../models/auditLogModel.js";
 import { User } from "../models/userModel.js";
 import { verifyChain } from "../services/auditLog.js";
+import {
+  auditActivityWhere,
+  canViewSystemActivity,
+  resolveAuditActivityScope,
+} from "../services/auditVisibility.js";
 import { parseListParams, searchCondition, pageEnvelope } from "../services/listQuery.js";
 
-const serialize = (entry) => ({
+const serialize = (entry, { includeIpAddress = false } = {}) => ({
   id: entry.id,
   sequence: entry.sequence,
   actionType: entry.actionType,
@@ -14,7 +19,9 @@ const serialize = (entry) => ({
   summary: entry.summary,
   actorName: entry.actorName,
   actorRole: entry.actorRole,
-  ipAddress: entry.ipAddress,
+  // Network addresses are security data, not a prerequisite for reviewing an
+  // official decision. They stay available to the technical-log readers.
+  ipAddress: includeIpAddress ? entry.ipAddress : null,
   recordedAt: entry.recordedAt,
   beforeState: entry.beforeState,
   afterState: entry.afterState,
@@ -22,6 +29,13 @@ const serialize = (entry) => ({
   hash: entry.hash,
   prevHash: entry.prevHash,
 });
+
+const requestedAuditScope = (req, res) => {
+  const scope = resolveAuditActivityScope(req.query.scope, req.permissions);
+  if (scope) return scope;
+  res.status(400).json({ message: "Audit activity scope must be official or system." });
+  return null;
+};
 
 const AUDIT_SORTS = {
   sequence: "sequence",
@@ -33,8 +47,10 @@ const AUDIT_SORTS = {
 
 export const listAuditLog = async (req, res) => {
   const { actionType, entityRef, entityId, outcome, actor, limit, search, sort, page, pageSize } = req.query;
+  const scope = requestedAuditScope(req, res);
+  if (!scope) return;
 
-  const where = {};
+  const where = auditActivityWhere(scope);
   if (actionType) where.actionType = actionType;
   if (entityRef) where.entityRef = entityRef;
   if (entityId) where.entityId = Number(entityId);
@@ -59,7 +75,12 @@ export const listAuditLog = async (req, res) => {
       limit: params.limit,
       offset: params.offset,
     });
-    return res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: params.page, pageSize: params.pageSize }));
+    return res.json(pageEnvelope({
+      rows: rows.map((entry) => serialize(entry, { includeIpAddress: canViewSystemActivity(req.permissions) })),
+      total: count,
+      page: params.page,
+      pageSize: params.pageSize,
+    }));
   }
 
   const entries = await AuditLog.findAll({
@@ -68,7 +89,7 @@ export const listAuditLog = async (req, res) => {
     limit: Math.min(Number(limit) || 100, 500),
   });
 
-  res.json(entries.map(serialize));
+  res.json(entries.map((entry) => serialize(entry, { includeIpAddress: canViewSystemActivity(req.permissions) })));
 };
 
 // Section 7.9: the tamper-evidence claim is only meaningful if it can be
@@ -81,16 +102,20 @@ export const verifyAuditChain = async (req, res) => {
 // name only actions and roles that actually occur — without downloading the
 // whole log to derive them client-side.
 export const getAuditFacets = async (req, res) => {
+  const scope = requestedAuditScope(req, res);
+  if (!scope) return;
+  const scopeWhere = auditActivityWhere(scope);
   const [actions, roles] = await Promise.all([
     AuditLog.findAll({
       attributes: ["actionType"],
+      where: scopeWhere,
       group: ["actionType"],
       order: [["actionType", "ASC"]],
       raw: true,
     }),
     AuditLog.findAll({
       attributes: ["actorRole"],
-      where: { actorRole: { [Op.ne]: null } },
+      where: { ...scopeWhere, actorRole: { [Op.ne]: null } },
       group: ["actorRole"],
       order: [["actorRole", "ASC"]],
       raw: true,

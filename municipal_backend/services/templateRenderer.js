@@ -91,7 +91,7 @@ const BASE_CSS = `
 // injected into a <style> element, so it is filtered separately below.
 const CSS_BANNED = /(?:@import|expression\s*\(|url\s*\(\s*['"]?(?!data:)|javascript:|<\/style)/i;
 
-const safeCss = (css) => {
+export const sanitizeTemplateCss = (css) => {
   if (!css) return "";
   // A stylesheet cannot be parsed with the tag sanitiser, so it gets its own
   // narrow rule: nothing that loads a resource, and nothing that can close the
@@ -101,7 +101,7 @@ const safeCss = (css) => {
 
 export const assembleDocument = ({ bodyHtml, css, title }) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title ?? "Document")}</title>
-<style>${BASE_CSS}${safeCss(css)}</style>
+<style>${BASE_CSS}${sanitizeTemplateCss(css)}</style>
 </head><body>${sanitizeHtml(bodyHtml)}</body></html>`;
 
 // ── The one function callers use ─────────────────────────────────────────────

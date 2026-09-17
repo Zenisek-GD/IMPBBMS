@@ -530,6 +530,7 @@ export default function InvitationToBid() {
   const [loading, setLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   const refresh = useCallback(() => setRefreshToken((t) => t + 1), [])
 
@@ -541,6 +542,7 @@ export default function InvitationToBid() {
     ])
       .then(([rows, rfqs]) => {
         if (cancelled) return
+        setLoadError('')
         setNotices(Array.isArray(rows) ? rows : (rows.rows ?? []))
         // Only a live solicitation can be advertised — a draft has not been
         // opened and a cancelled one must not attract bids.
@@ -551,7 +553,11 @@ export default function InvitationToBid() {
         )
         setLoading(false)
       })
-      .catch(() => { if (!cancelled) setLoading(false) })
+      .catch(() => {
+        if (cancelled) return
+        setLoadError('Could not load Invitation to Bid notices. Check your connection and try again.')
+        setLoading(false)
+      })
     return () => { cancelled = true }
   }, [refreshToken])
 
@@ -637,6 +643,11 @@ export default function InvitationToBid() {
       <Card title="Invitations" icon={Megaphone} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading invitations…</p>
+        ) : loadError ? (
+          <div className="px-4 py-8 text-center">
+            <p role="alert" className="text-[13px] text-danger">{loadError}</p>
+            <Button className="mt-3" size="sm" variant="secondary" onClick={refresh}>Retry loading invitations</Button>
+          </div>
         ) : table.rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">
             {table.totalBeforeFilters === 0
@@ -645,7 +656,7 @@ export default function InvitationToBid() {
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="min-w-[840px] w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('referenceNo')}>Reference</SortableTh>
@@ -653,7 +664,7 @@ export default function InvitationToBid() {
                   <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
                   <SortableTh {...table.sortProps('submissionDeadline')}>Deadline</SortableTh>
                   <SortableTh {...table.sortProps('status')}>Status</SortableTh>
-                  <Th>Actions</Th>
+                  <Th className="min-w-[11rem]">Actions</Th>
                 </tr>
               </thead>
               <tbody>
@@ -680,46 +691,28 @@ export default function InvitationToBid() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
-                        <button type="button" onClick={() => setPreviewing(notice)}
-                          className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline">
-                          <Eye size={11} /> PREVIEW
-                        </button>
+                      <div className="flex min-w-[11rem] flex-wrap gap-1.5">
+                        <Button size="table" variant="secondary" icon={Eye} onClick={() => setPreviewing(notice)}>Preview</Button>
 
                         {canManage && notice.status === 'draft' && (
                           <>
-                            <button type="button" onClick={() => setEditing(notice)}
-                              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline">
-                              EDIT
-                            </button>
-                            <button type="button" onClick={() => setPublishing(notice)}
-                              className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-accent hover:underline">
-                              <Globe size={11} /> PUBLISH
-                            </button>
+                            <Button size="table" variant="secondary" onClick={() => setEditing(notice)}>Edit</Button>
+                            <Button size="table" icon={Globe} onClick={() => setPublishing(notice)}>Publish</Button>
                           </>
                         )}
 
                         {canManage && notice.status === 'published' && (
                           <>
-                            <button type="button" onClick={() => setWithdrawing(notice)}
-                              className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-danger hover:underline">
-                              <Undo2 size={11} /> WITHDRAW
-                            </button>
-                            <button type="button" onClick={() => act(() => api.archiveAnnouncement(notice.id))}
-                              className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline">
-                              <Archive size={11} /> ARCHIVE
-                            </button>
+                            <Button size="table" variant="danger" icon={Undo2} onClick={() => setWithdrawing(notice)}>Withdraw</Button>
+                            <Button size="table" variant="secondary" icon={Archive} onClick={() => act(() => api.archiveAnnouncement(notice.id))}>Archive</Button>
                           </>
                         )}
 
                         {canManage && (
-                          <button type="button" onClick={() => act(async () => {
+                          <Button size="table" variant="secondary" icon={Copy} onClick={() => act(async () => {
                             const copy = await api.duplicateAnnouncement(notice.id)
                             setEditing(copy)
-                          })}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline">
-                            <Copy size={11} /> DUPLICATE
-                          </button>
+                          })}>Duplicate</Button>
                         )}
                       </div>
                     </td>

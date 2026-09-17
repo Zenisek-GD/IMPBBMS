@@ -287,6 +287,8 @@ export const AUDIT_ACTIONS = {
   MFA_TRUST_EXPIRED: "auth.mfa.trust.expired",
   ROLE_MFA_ENABLED: "auth.mfa.role.enabled",
   ROLE_MFA_DISABLED: "auth.mfa.role.disabled",
+  SESSION_POLICY_UPDATED: "auth.session.policy.updated",
+  ROLE_PERMISSION_GRANTED: "role.permission.granted",
   MFA_POLICY_ENABLED: "auth.mfa.policy.enabled",
   MFA_POLICY_DISABLED: "auth.mfa.policy.disabled",
 
@@ -387,6 +389,7 @@ export const AUDIT_ACTIONS = {
   // municipality says in every future document of that kind — a heavier act
   // than issuing any single document, and one with no other trace.
   TEMPLATE_CREATED: "template.created",
+  TEMPLATE_IMPORTED: "template.imported",
   TEMPLATE_UPDATED: "template.updated",
   TEMPLATE_VERSION_SAVED: "template.version.saved",
   TEMPLATE_VERSION_ACTIVATED: "template.version.activated",

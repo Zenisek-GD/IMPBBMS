@@ -49,6 +49,7 @@ import { sequelize } from "./models/db.js";
 import "./models/index.js";
 import { migrateRoleSecurity } from "./services/migrateRoleSecurity.js";
 import { migrateUserTextSize } from "./services/migrateUserTextSize.js";
+import { migrateAuditVisibility } from "./services/migrateAuditVisibility.js";
 
 const args = new Set(process.argv.slice(2));
 const mode = args.has("--force")
@@ -183,6 +184,11 @@ const run = async () => {
   // must run it rather than relying on an operator to remember a second script.
   if (await migrateUserTextSize(sequelize)) {
     console.log("✅ user text-size preference column added");
+  }
+
+  const auditVisibility = await migrateAuditVisibility();
+  if (auditVisibility.granted) {
+    console.log("✅ System Administrator granted official audit activity visibility");
   }
 
   await sequelize.close();

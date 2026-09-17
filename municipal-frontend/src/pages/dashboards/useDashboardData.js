@@ -42,7 +42,7 @@ const SOURCES = {
   // is oversight, and oversight belongs to the Administrator, the Mayor as Head
   // of the Procuring Entity, and the Internal Auditor — whose entire statutory
   // job is reading this trail. Every other role sees its own work instead.
-  audit: { anyOf: ['audit.viewLogs', 'audit.export'], load: () => fetchAuditLog({ limit: 8 }) },
+  audit: { anyOf: ['audit.viewLogs', 'audit.export'], load: () => fetchAuditLog({ limit: 8, scope: 'system' }) },
   // Public, so no gate — and it is the one figure every role can be shown.
   publicOverview: { load: () => fetchPublicOverview() },
   notifications: { load: () => fetchNotifications({ unreadOnly: true, limit: 8 }) },

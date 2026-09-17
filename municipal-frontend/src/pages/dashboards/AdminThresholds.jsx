@@ -56,7 +56,7 @@ export default function AdminThresholds() {
     searchKeys: ['mode', 'citation'],
     accessors: { amount: (row) => row.amount },
     initialSort: { key: 'amount', direction: 'asc' },
-    pageSize: 25,
+    pageSize: 10,
   })
 
   return (

@@ -5,8 +5,9 @@ import * as authApi from '../api/auth'
 import { AuthContext } from './auth-context'
 import { apiClient } from '../api/client'
 
-const EXPIRED_MESSAGE = 'Your session has expired after 30 minutes. Please log in again.'
 const EXPIRY_WARNING_MS = 2 * 60 * 1000
+const expiryMessage = (minutes) =>
+  'Your session has expired after ' + ([15, 30, 45, 60, 120].includes(minutes) ? minutes : 30) + ' minutes. Please log in again.'
 
 export function AuthProvider({ children }) {
   const [user, setUserState] = useState(null)
@@ -23,6 +24,7 @@ export function AuthProvider({ children }) {
     const next = typeof value === 'function' ? value(current.current) : value
     if (next?.sessionDeadline) {
       try { sessionStorage.setItem('auth.lastDeadline', String(next.sessionDeadline)) } catch { /* storage unavailable */ }
+      try { sessionStorage.setItem('auth.lastSessionDurationMinutes', String(next.sessionDurationMinutes ?? 30)) } catch { /* storage unavailable */ }
     }
     current.current = next
     setUserState(next)
@@ -42,8 +44,8 @@ export function AuthProvider({ children }) {
 
   const expireSession = useCallback(() => {
     if (!current.current) return
-    clearSession(EXPIRED_MESSAGE, true)
-    // Ask the server to observe expiration. Its fixed deadline is authoritative;
+    clearSession(expiryMessage(current.current.sessionDurationMinutes), true)
+    // Ask the server to observe expiration. Its issued deadline is authoritative;
     // a client clock or countdown never controls server validity.
     authApi.fetchCurrentUser().catch(() => {})
   }, [clearSession])
@@ -59,7 +61,9 @@ export function AuthProvider({ children }) {
         if (cancelled || version !== generation.current || error.response?.status !== 401) return
         let lastDeadline = 0
         try { lastDeadline = Number(sessionStorage.getItem('auth.lastDeadline')) } catch { /* storage unavailable */ }
-        if (lastDeadline && Date.now() >= lastDeadline) setAuthNotice(EXPIRED_MESSAGE)
+        let lastDuration = 30
+        try { lastDuration = Number(sessionStorage.getItem('auth.lastSessionDurationMinutes')) || 30 } catch { /* storage unavailable */ }
+        if (lastDeadline && Date.now() >= lastDeadline) setAuthNotice(expiryMessage(lastDuration))
       })
       .finally(() => { if (!cancelled) setIsLoading(false) })
     return () => { cancelled = true }
@@ -70,7 +74,7 @@ export function AuthProvider({ children }) {
       if (!current.current && event.detail?.code !== 'SESSION_EXPIRED') return
       const expired = event.detail?.code === 'SESSION_EXPIRED' ||
         (current.current && Date.now() >= current.current.sessionDeadline)
-      clearSession(expired ? EXPIRED_MESSAGE : (event.detail?.message || 'Please log in again.'))
+      clearSession(expired ? expiryMessage(current.current?.sessionDurationMinutes) : (event.detail?.message || 'Please log in again.'))
     }
     const enrollmentRequired = () => {
       if (current.current) setUser((previous) => ({ ...previous, mfaEnrollmentRequired: true }))
@@ -106,7 +110,7 @@ export function AuthProvider({ children }) {
       }
       // This warning is presentation only.  The deadline remains signed in the
       // server session and the button below rechecks it with /auth/me; neither
-      // a browser clock nor a modal can prolong a 30-minute authenticated run.
+      // a browser clock nor a modal can prolong an authenticated run.
       if (active) {
         const deadlineKey = active.loginSessionExpiresAt
         setSessionWarning(
@@ -195,6 +199,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     // Clear protected views immediately; server-side revocation is still required.
     try { sessionStorage.removeItem('auth.lastDeadline') } catch { /* storage unavailable */ }
+    try { sessionStorage.removeItem('auth.lastSessionDurationMinutes') } catch { /* storage unavailable */ }
     clearSession('', true)
     const request = authApi.logout()
     logoutPending.current = request

@@ -18,6 +18,7 @@
     "create:controller": "node create.js controller",
     "migrate:auth": "node migrateAuthSecurity.js",
     "migrate:user-text-size": "node migrateUserTextSize.js",
+    "migrate:audit-visibility": "node migrateAuditVisibility.js",
     "migrate:planning-goal-sector": "node migratePlanningGoalSector.js",
     "test:security:unit": "node --test services/authPolicy.test.mjs services/totp.test.mjs",
     "test:security:integration": "node --test tests/authSecurity.integration.test.mjs",

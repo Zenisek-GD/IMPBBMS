@@ -1,4 +1,4 @@
-import { SESSION_DURATION_MS, sessionExpired, credentialStamp } from "../services/authPolicy.js";
+import { sessionExpired, credentialStamp } from "../services/authPolicy.js";
 import { User } from "../models/userModel.js";
 import { Role } from "../models/roleModel.js";
 import { Permission } from "../models/permissionModel.js";
@@ -7,7 +7,17 @@ import { Permission } from "../models/permissionModel.js";
 // revokes old sessions without relying on coarse DATETIME precision.
 export { credentialStamp } from "../services/authPolicy.js";
 export const passwordSessionValid = (req, user) => {
-  if (!Number.isFinite(req.session?.authAt) || Date.now() - req.session.authAt >= SESSION_DURATION_MS) return false;
+  // loginSessionExpiresAt is issued and persisted by the server at login. Do
+  // not reread the current admin policy here: changing it must not shorten or
+  // extend an already authenticated session. Check it here rather than
+  // indirectly through `sessionExpired`: this primitive must fail closed even
+  // when a caller is validating a partially constructed session object.
+  const expiresAt = req.session?.loginSessionExpiresAt;
+  if (
+    !Number.isFinite(req.session?.authAt) ||
+    !Number.isFinite(expiresAt) ||
+    Date.now() >= expiresAt
+  ) return false;
   return req.session.credentialHash === credentialStamp(user);
 };
 

@@ -1,9 +1,17 @@
 import crypto from "node:crypto";
 
-export const SESSION_DURATION_MS = 30 * 60 * 1000;
+export const DEFAULT_SESSION_DURATION_MINUTES = 30;
+export const SESSION_DURATION_OPTIONS_MINUTES = [15, 30, 45, 60, 120];
+export const isSessionDurationMinutes = (value) =>
+  Number.isSafeInteger(value) && SESSION_DURATION_OPTIONS_MINUTES.includes(value);
+export const sessionDurationMs = (minutes) => minutes * 60 * 1000;
+// Kept as the default-policy alias for existing callers and additive upgrades.
+export const SESSION_DURATION_MS = sessionDurationMs(DEFAULT_SESSION_DURATION_MINUTES);
 export const TRUST_DURATION_MS = 30 * 60 * 1000;
 export const PENDING_MFA_TTL_MS = 5 * 60 * 1000;
-export const SESSION_EXPIRED_MESSAGE = "Your session has expired after 30 minutes. Please log in again.";
+export const sessionExpiredMessage = (minutes = DEFAULT_SESSION_DURATION_MINUTES) =>
+  `Your session has expired after ${isSessionDurationMinutes(minutes) ? minutes : DEFAULT_SESSION_DURATION_MINUTES} minutes. Please log in again.`;
+export const SESSION_EXPIRED_MESSAGE = sessionExpiredMessage();
 // Used only to preserve the old policy during the additive migration.
 export const AUTH_POLICY_KEY = "security.twoFactorEnabled";
 export const roleRequiresTwoFactor = (role) => role?.twoFactorRequired !== false;
@@ -47,6 +55,8 @@ export const sessionExpired = (session, now = Date.now()) =>
 
 export const sessionDetails = (req) => ({
   loginSessionExpiresAt: req.session.loginSessionExpiresAt ?? null,
+  sessionDurationMinutes: isSessionDurationMinutes(req.session.loginSessionDurationMinutes)
+    ? req.session.loginSessionDurationMinutes : DEFAULT_SESSION_DURATION_MINUTES,
   twoFactorTrustedUntil: req.session.twoFactorTrustedUntil ?? null,
   serverTime: Date.now(),
   mfaEnrollmentRequired: Boolean(req.session.mfaEnrollmentRequired),
