@@ -18,6 +18,9 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
   t.after(async () => { await m.sequelize.close(); assert.match(scratch, /^impbbms_procurement_test_[a-f0-9]{16}$/); await admin.query(`DROP DATABASE \`${scratch}\``); await admin.end(); });
   await m.sequelize.sync();
   const evalApi = await import("../controllers/evaluationController.js");
+  const evaluationWorkflow = await import("../controllers/evaluationWorkflowController.js");
+  const { COMPLIANCE_REQUIREMENTS } = await import("../services/evaluationPolicy.js");
+  const goodsChecks = Object.fromEntries(COMPLIANCE_REQUIREMENTS.goods.map((row) => [row.key, "compliant"]));
   const twgApi = await import("../controllers/twgController.js");
   const bidding = await import("../controllers/biddingController.js");
   const governance = await import("../controllers/procurementGovernanceController.js");
@@ -48,7 +51,13 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
   const makeRfq = async (category="goods", status="opened") => {
     const n=++serial;
     const pr = await m.PrHeader.create({ prNumber:`PR-TEST-${n}`, dateRequired:"2026-12-01", status:"approved", totalAmount:1000, procurementModeId:mode.id });
-    return m.Rfq.create({ referenceNo:`ITB-TEST-${n}`, title:`Test ${n}`, category, abc:1000, closingDate:"2026-01-01T02:00:00Z", openingDate:"2026-01-01T05:00:00Z", status, prHeaderId:pr.id, procurementModeId:mode.id });
+    const rfq = await m.Rfq.create({ referenceNo:`ITB-TEST-${n}`, title:`Test ${n}`, category, abc:1000, closingDate:"2026-01-01T02:00:00Z", openingDate:"2026-01-01T05:00:00Z", status: category === "consulting" ? "draft" : status, prHeaderId:pr.id, procurementModeId:mode.id });
+    if (category === "consulting") {
+      await call(evaluationWorkflow.saveEvaluationPlan, secretariat, {id:rfq.id}, { qualityWeight:75,financialWeight:25,passingScore:60,financialMethod:"lowestResponsivePrice",criteria:[{key:"quality",name:"Approved quality criterion",maxScore:100,weight:100}] });
+      await call(evaluationWorkflow.approveEvaluationPlan, chair, {id:rfq.id}, {approvalReference:`CRITERIA-${n}`,attendingMemberIds});
+      await rfq.update({status});
+    }
+    return rfq;
   };
   const makeBid = async (rfq, label, price) => {
     const vendor = await m.Vendor.create({ businessName:`Test vendor ${serial} ${label}`, registrationStatus:"verified", philgepsRegistrationNo:`PG-${serial}-${label}`, philgepsExpiry:"2030-01-01" });
@@ -76,7 +85,7 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
       await call(twgApi.saveTwg,twg,{bidId:bid.id},{requirements,status:"submitted",recommendation:"compliant",remarks:"Meets the published technical requirements."});
       await assert.rejects(call(twgApi.saveTwg,twg,{bidId:bid.id},{requirements,status:"draft"}), /cannot be edited/);
       await assert.rejects(call(evalApi.submitEvaluation,twg,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:{quality:80}}), /own TWG/);
-      await call(evalApi.submitEvaluation,member,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:{quality:80}});
+      await call(evalApi.submitEvaluation,member,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:{quality:80},recommendation:"Quality criteria meet the approved minimum; proceed to price evaluation."});
     }
     await assert.rejects(call(evalApi.closeEvaluation,chair,{id:rfq.id},{}), /quorum/);
     m.AuditLog.addHook("beforeCreate","testAuditFailure",()=>{throw new Error("test audit storage failure");});
@@ -112,8 +121,8 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
     const rfq = await makeRfq(); const bid = await makeBid(rfq,"Bidder A",10);
     await call(twgApi.declareTwgConflict,twg,{id:rfq.id},{declared:true});
     await call(twgApi.saveTwg,twg,{bidId:bid.id},{requirements:[{...requirements[0],complianceStatus:"nonCompliant"}],recommendation:"nonCompliant",remarks:"Mandatory specification is missing.",status:"submitted"});
-    await assert.rejects(call(evalApi.submitEvaluation,member,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:{specification:"compliant"},verdict:"passed"}),/mandatory TWG/);
-    await call(evalApi.submitEvaluation,member,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:{specification:"nonCompliant"},verdict:"failed",remarks:"Mandatory specification missing."});
+    await assert.rejects(call(evalApi.submitEvaluation,member,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:goodsChecks,verdict:"passed",recommendation:"Proceed to review."}),/mandatory TWG/);
+    await call(evalApi.submitEvaluation,member,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:{...goodsChecks,technicalSpecifications:"nonCompliant"},verdict:"failed",failureReason:"technicalSpecification",remarks:"Mandatory specification missing.",recommendation:"Exclude this non-compliant bid."});
     await call(evalApi.closeEvaluation,chair,{id:rfq.id},{attendingMemberIds});
     assert.equal((await bid.reload()).status,"technicalFailed"); assert.equal(bid.financialSealed,true); assert.equal(bid.combinedScore,null);
     assert.equal((await call(bidding.submitPostQualification,member,{bidId:bid.id},{result:"passed"})).statusCode,409);
@@ -122,24 +131,42 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
     const rfq = await makeRfq("goods","closed");
     assert.equal((await call(bidding.openBids,secretariat,{id:rfq.id},{})).statusCode,409);
     assert.equal((await rfq.reload()).status,"closed");
-    const evidence = [{name:"Official minutes",url:"https://example.test/official-minutes.pdf"}];
-    const failure = { reason:"No bids received",resolutionNo:"Resolution No. Resolution No. 2026-001",resolutionDate:"2026-01-02",supportingDocuments:evidence,attendingMemberIds };
-    await call(governance.declareFailureOfBidding,chair,{id:rfq.id},failure);
+    const evidenceFor = async (record, docType="procurementEvidence") => {
+      const content=Buffer.from(`%PDF-1.4\nOfficial ${record.id} ${docType}`);
+      return m.Document.create({filename:`${docType}.pdf`,mimeType:"application/pdf",sizeBytes:content.length,content,checksum:crypto.createHash("sha256").update(content).digest("hex"),entityRef:"rfq",entityId:record.id,docType,uploadedAt:new Date()});
+    };
+    const officiallyFail = async (record, resolutionNo) => {
+      const document=await evidenceFor(record);
+      await call(governance.prepareFailureRecord,secretariat,{id:record.id},{reason:"No bids received",category:"noBids",explanation:"Submission closed without any received bid.",supportingDocuments:[document.id]});
+      await call(governance.submitFailureRecord,secretariat,{id:record.id});
+      await call(governance.reviewFailureRecord,chair,{id:record.id},{resolutionNo,resolutionDate:"2026-01-02",attendingMemberIds,remarks:"Reviewed the official no-bid record."});
+      await assert.rejects(call(governance.declareFailureOfBidding,chair,{id:record.id},{decision:"approved",remarks:"Attendance only",attendingMemberIds}),/authenticated approvals/);
+      for(const official of [chair,users.bacViceChairperson0,member]) await call(governance.voteFailureRecord,official,{id:record.id},{decision:"approved",remarks:"I personally approve the failure declaration."});
+      await call(governance.declareFailureOfBidding,chair,{id:record.id},{decision:"approved",remarks:"Required personal approvals complete."});
+    };
+    await officiallyFail(rfq,"Resolution No. Resolution No. 2026-001");
     assert.equal((await call(bidding.cancelRfq,secretariat,{id:rfq.id},{reason:"Cancel old attempt"})).statusCode,409);
     assert.equal((await rfq.reload()).status,"failed");
     assert.equal((await m.BacResolution.findOne({where:{entityRef:"rfq",entityId:rfq.id}})).resolutionNo,"2026-001");
-    await assert.rejects(call(governance.submitNegotiatedReview,secretariat,{id:rfq.id},{justification:"Review",legalBasis:"Approved local policy",supportingDocuments:evidence}), /attempt|failed/i);
-    const rebid = await call(governance.createRebid,secretariat,{id:rfq.id},{closingDate:"2028-01-15T02:00:00Z",openingDate:"2028-01-15T05:00:00Z"});
+    await assert.rejects(call(governance.submitNegotiatedReview,secretariat,{id:rfq.id},{justification:"Review",legalBasis:"Approved local policy",supportingDocuments:[]}), /attempt|failed/i);
+    const rebid = await call(governance.createRebid,secretariat,{id:rfq.id},{closingDate:"2028-01-15T02:00:00Z",openingDate:"2028-01-15T05:00:00Z",prebidRequired:false});
     const second = await m.Rfq.findByPk(rebid.body.id ?? rebid.body.rfq?.id);
     assert.ok(second); assert.notEqual(second.id,rfq.id);
     assert.equal((await rfq.reload()).status,"failed");
     await second.update({status:"closed",closingDate:"2026-01-02T02:00:00Z",openingDate:"2026-01-02T05:00:00Z"});
-    await call(governance.declareFailureOfBidding,chair,{id:second.id},{...failure,resolutionNo:"2026-002"});
+    await officiallyFail(second,"2026-002");
+    const {DEFAULT_PROCUREMENT_POLICY}=await import("../services/bacCommittee.js");
+    const evidence=[];
+    for(const item of DEFAULT_PROCUREMENT_POLICY.negotiatedRequirements.filter(row=>!row.categories||row.categories.includes("goods"))) {
+      const doc=await evidenceFor(second,`negotiated_${item.key}`);evidence.push({documentId:doc.id,requirementKey:item.key});
+    }
     await call(governance.submitNegotiatedReview,secretariat,{id:second.id},{justification:"Two attempts failed; specifications reviewed.",legalBasis:"Approved local policy",supportingDocuments:evidence});
     await assert.rejects(call(governance.startNegotiatedProcurement,secretariat,{id:second.id},{closingDate:"2028-02-01T02:00:00Z",openingDate:"2028-02-01T05:00:00Z"}), /approval|approved/i);
-    await assert.rejects(call(governance.decideNegotiatedReview,secretariat,{id:second.id},{decision:"approved",remarks:"Confirmed",resolutionNo:"2026-003",resolutionDate:"2026-01-03",attendingMemberIds,presidingMemberId:chair.id}), /own|another|independent/i);
-    await call(governance.decideNegotiatedReview,chair,{id:second.id},{decision:"approved",remarks:"Eligibility evidence confirmed.",resolutionNo:"2026-003",resolutionDate:"2026-01-03",attendingMemberIds});
-    await call(governance.startNegotiatedProcurement,secretariat,{id:second.id},{closingDate:"2028-02-01T02:00:00Z",openingDate:"2028-02-01T05:00:00Z"});
+    await assert.rejects(call(governance.decideNegotiatedReview,secretariat,{id:second.id},{decision:"approved",remarks:"Confirmed"}), /own|another|independent/i);
+    await call(governance.reviewNegotiatedDocuments,chair,{id:second.id},{resolutionNo:"2026-003",resolutionDate:"2026-01-03",attendingMemberIds,remarks:"Revised documents and end-user justification reviewed."});
+    for(const official of [chair,users.bacViceChairperson0,member]) await call(governance.voteNegotiatedReview,official,{id:second.id},{decision:"approved",remarks:"I personally approve negotiated eligibility."});
+    await call(governance.decideNegotiatedReview,chair,{id:second.id},{decision:"approved",remarks:"Eligibility evidence confirmed."});
+    await call(governance.startNegotiatedProcurement,secretariat,{id:second.id},{closingDate:"2028-02-01T02:00:00Z",openingDate:"2028-02-01T05:00:00Z",prebidRequired:false});
     assert.equal(await m.ProcurementAttempt.count({where:{projectKey:`pr:${rfq.prHeaderId}`}}),3);
   });
   await t.test("cancellation preserves its attempt and subsequent procurement receives a new number", async () => {

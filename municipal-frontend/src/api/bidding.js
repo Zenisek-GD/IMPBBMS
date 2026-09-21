@@ -33,8 +33,8 @@ export const submitBid = (id, payload) =>
 export const fetchBids = (rfqId) =>
   apiClient.get(`/bidding/rfqs/${rfqId}/bids`).then((res) => res.data)
 
-export const submitEvaluation = (bidId, criteriaBreakdown, remarks, verdict) =>
-  apiClient.post(`/bidding/bids/${bidId}/evaluations`, { criteriaBreakdown, remarks, verdict }).then((res) => res.data)
+export const submitEvaluation = (bidId, payload) =>
+  apiClient.post(`/bidding/bids/${bidId}/evaluations`, payload).then((res) => res.data)
 
 export const closeEvaluation = (rfqId, payload) =>
   apiClient.post(`/bidding/rfqs/${rfqId}/close-evaluation`, payload).then((res) => res.data)
@@ -138,3 +138,11 @@ export const startNegotiatedProcurement = (rfqId, payload) => apiClient.post(`/b
 // awarded to the lowest calculated responsive bid. Only Consulting Services is
 // scored on a rubric.
 export const usesRatedEvaluation = (category) => category === 'consulting'
+export const fetchEvaluationPlan = (id) => apiClient.get(`/bidding/rfqs/${id}/evaluation-plan`).then((res) => res.data)
+export const saveEvaluationPlan = (id, payload) => apiClient.put(`/bidding/rfqs/${id}/evaluation-plan`, payload).then((res) => res.data)
+export const approveEvaluationPlan = (id, payload) => apiClient.post(`/bidding/rfqs/${id}/evaluation-plan/approve`, payload).then((res) => res.data)
+export const declareEvaluatorConflict = (id, declared, reason) => apiClient.post(`/bidding/rfqs/${id}/evaluator-declaration`, { declared, reason }).then((res) => res.data)
+export const fetchEvaluationAdministration = (id) => apiClient.get(`/bidding/rfqs/${id}/evaluation-administration`).then((res) => res.data)
+export const returnEvaluation = (kind, id, payload) => apiClient.post(`/bidding/evaluations/${kind}/${id}/return`, payload).then((res) => res.data)
+export const requestCriteriaAmendment = (id, payload) => apiClient.post(`/bidding/rfqs/${id}/evaluation-plan/amendments`, payload).then((res) => res.data)
+export const approveCriteriaAmendment = (id, payload) => apiClient.post(`/bidding/evaluation-plan/amendments/${id}/approve`, payload).then((res) => res.data)

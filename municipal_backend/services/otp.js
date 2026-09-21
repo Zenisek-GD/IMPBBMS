@@ -227,6 +227,7 @@ export const consumeTicket = async ({
   purpose,
   contextRef = null,
   contextId = null,
+  transaction,
 }) => {
   const reject = (message = "Email verification is required before this action.") => ({
     ok: false,
@@ -236,7 +237,8 @@ export const consumeTicket = async ({
 
   if (typeof reference !== "string" || typeof ticket !== "string") return reject();
 
-  const challenge = await OtpChallenge.findOne({ where: { reference } });
+  const challenge = await OtpChallenge.findOne({ where: { reference }, transaction,
+    ...(transaction ? { lock: transaction.LOCK.UPDATE } : {}) });
   if (!challenge) return reject();
   if (challenge.userId !== userId) return reject();
   if (challenge.purpose !== purpose) return reject();
@@ -252,7 +254,7 @@ export const consumeTicket = async ({
   if (contextRef !== null && challenge.contextRef !== contextRef) return reject();
   if (contextId !== null && Number(challenge.contextId) !== Number(contextId)) return reject();
 
-  const [consumed] = await OtpChallenge.update({ ticketUsedAt: new Date() }, { where: { id: challenge.id, ticketUsedAt: null, voidedAt: null, ticketExpiresAt: { [Op.gt]: new Date() } } });
+  const [consumed] = await OtpChallenge.update({ ticketUsedAt: new Date() }, { transaction, where: { id: challenge.id, ticketUsedAt: null, voidedAt: null, ticketExpiresAt: { [Op.gt]: new Date() } } });
   if (consumed !== 1) return reject();
   return { ok: true, challenge };
 };

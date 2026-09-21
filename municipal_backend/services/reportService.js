@@ -33,7 +33,7 @@ const SOURCE_COLUMNS = {
   procurement: [...COMMON, "abc", "outcome", "deadline", "opening"],
   plans: ["reference", "project", "department", "year", "category", "method", "status", "abc", "date"],
   bids: [...COMMON, "bidder", "amount", "outcome"],
-  evaluations: [...COMMON, "bidder", "evaluator", "score", "qualityScore", "financialScore", "combinedScore", "remarks"],
+  evaluations: [...COMMON, "bidder", "evaluator", "score", "qualityScore", "financialScore", "combinedScore", "declaration", "declaredAt", "failureReason", "remarks"],
   twg: [...COMMON, "bidder", "evaluator", "recommendation", "declaration", "declaredAt", "requirements", "remarks"],
   bac: [...COMMON, "action", "resolution", "participants", "quorum", "remarks"],
   attempts: [...COMMON, "outcome", "failureReason", "resolution", "nextAction", "actor", "deadline", "opening"],
@@ -51,6 +51,26 @@ const rfqIncludes = [
 ];
 const rfqInclude = { model: Rfq, as: "rfq", include: rfqIncludes, required: true };
 const outcomeOf = (status) => ["awarded", "active", "completed", "issued", "accepted"].includes(status) ? "successful" : ["failed", "technicalFailed", "postDisqualified"].includes(status) ? "failed" : ["cancelled", "rescinded"].includes(status) ? "cancelled" : "ongoing";
+const TIMELINE_ACTIONS = {
+  "rfq.scheduleApproved": "Procurement schedule approved",
+  "rfq.scheduleAmendmentRequested": "Schedule amendment requested",
+  "rfq.scheduleAmendmentApproved": "Schedule amendment approved",
+  "rfq.scheduleAmendmentApplied": "Schedule amendment applied",
+  "rfq.deadlineReached": "Submission deadline reached",
+  "rfq.submissionsClosed": "Submission period closed",
+  "evaluation.criteriaApproved": "Consulting criteria approved",
+  "evaluation.criteriaAmendmentApproved": "Consulting criteria amendment approved",
+  "evaluation.conflictDeclared": "Conflict-of-interest declaration recorded",
+  "bidding.failure.prepared": "Failure documents prepared",
+  "bidding.failure.submitted": "Failure documents submitted to BAC",
+  "bidding.failure.bacReviewed": "BAC failure review completed",
+  "bidding.negotiated.bacReviewed": "BAC negotiated procurement review completed",
+  "bidding.failure.approved": "Failure of Bidding approved",
+  "bidding.rebid.created": "Rebid created",
+  "bidding.negotiated.reviewSubmitted": "Negotiated Procurement eligibility review submitted",
+  "bidding.negotiated.approved": "Negotiated Procurement approved",
+  "bidding.negotiated.started": "Negotiated Procurement started",
+};
 
 function procurementRow(rfq, attemptMap) {
   const app = rfq.appEntry || rfq.purchaseRequisition?.appEntry;
@@ -105,7 +125,7 @@ export async function loadReportRows(report, user, permissions) {
       return entries.map((entry) => {
         const disclosure = bidDisclosure(entry.bid, entry.bid.rfq);
         const consulting = entry.bid.rfq.category === "consulting";
-        return { ...base(entry.bid.rfq), id: `evaluation-${entry.id}`, bidder: disclosure.bidder, evaluator: entry.evaluator?.name, date: iso(entry.submittedAt), score: number(entry.score), qualityScore: consulting ? number(entry.bid.qualityScore) : null, financialScore: consulting && !disclosure.blind && !entry.bid.financialSealed ? number(entry.bid.financialScore) : null, combinedScore: consulting && !disclosure.blind && !entry.bid.financialSealed ? number(entry.bid.combinedScore) : null, remarks: disclosure.blind ? "Withheld during blind evaluation" : entry.remarks };
+        return { ...base(entry.bid.rfq), id: `evaluation-${entry.id}`, status: entry.status, declaration: entry.noConflictDeclared ? "Yes" : "No", declaredAt: iso(entry.declaredAt), failureReason: disclosure.blind ? (entry.failureReason ? "Recorded; available in evaluation workspace" : null) : entry.failureReason, bidder: disclosure.bidder, evaluator: entry.evaluator?.name, date: iso(entry.submittedAt), score: number(entry.score), qualityScore: consulting ? number(entry.bid.qualityScore) : null, financialScore: consulting && !disclosure.blind && !entry.bid.financialSealed ? number(entry.bid.financialScore) : null, combinedScore: consulting && !disclosure.blind && !entry.bid.financialSealed ? number(entry.bid.combinedScore) : null, remarks: disclosure.blind ? "Withheld during blind evaluation" : entry.remarks };
       });
     }
     // Submitted assessments are visible to BAC; a member's draft is private.
@@ -143,6 +163,8 @@ export async function loadReportRows(report, user, permissions) {
     });
     qualifications.forEach((entry) => append(entry, entry.bid?.rfqId, "Post-qualification", entry.verifiedAt, entry.result));
     awards.forEach((entry) => { append(entry, entry.rfqId, "Award recommendation", entry.createdAt); append(entry, entry.rfqId, "Award disapproved", entry.disapprovedAt, "returned"); });
+    const workflowEvents = await AuditLog.findAll({ where: { entityRef: "rfq", actionType: { [Op.in]: Object.keys(TIMELINE_ACTIONS) } }, attributes: ["id", "entityId", "actionType", "recordedAt", "outcome"] });
+    workflowEvents.forEach((entry) => append(entry, entry.entityId, TIMELINE_ACTIONS[entry.actionType], entry.recordedAt, entry.outcome));
     return rows;
   }
   if (source === "attempts") {

@@ -51,6 +51,7 @@ import securityRoutes from "./securityRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import reportRoutes from "./reportRoutes.js";
 import governanceRoutes from "./procurementGovernanceRoutes.js";
+import procurementScheduleRoutes from "./procurementScheduleRoutes.js";
 import { sessionSecurity, requireSameOrigin } from "../middleware/sessionSecurityMiddleware.js";
 import { requireMfaEnrollment } from "../middleware/mfaMiddleware.js";
 
@@ -97,6 +98,7 @@ router.use("/api/settings", settingsRoutes);
 router.use("/api/vendors", vendorRoutes);
 router.use("/api/bidding", biddingRoutes);
 router.use("/api/bidding", governanceRoutes);
+router.use("/api/bidding", procurementScheduleRoutes);
 router.use("/api/reports", reportRoutes);
 
 // The two transparency and remedy mechanisms RA 12009 attaches to bidding:

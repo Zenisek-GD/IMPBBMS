@@ -10,11 +10,11 @@ export function evaluationQueues(rfqs, permissions, userId) {
   for (const rfq of rfqs) {
     if (rfq.status === "opened") {
       const liveBids = (rfq.bids || []).filter((bid) => ["opened", "technicalPassed", "financialOpened"].includes(bid.status));
-      if (permissions.has("bidding.technicalInput") && rfq.twgRequired !== false && liveBids.some((bid) => !(bid.twgAssessments || []).some((entry) => entry.status === "submitted" && Number(entry.memberId) === Number(userId)))) technical.add(rfq.id);
+      if (permissions.has("bidding.technicalInput") && rfq.twgRequired !== false && liveBids.some((bid) => !(bid.twgAssessments || []).filter((entry) => !entry.excludedForConflict).some((entry) => entry.status === "submitted" && Number(entry.memberId) === Number(userId)))) technical.add(rfq.id);
       if (permissions.has("bidding.evaluate") || permissions.has("bidding.chairEvaluation")) {
-        const ready = liveBids.filter((bid) => rfq.twgRequired === false || (bid.twgAssessments || []).some((entry) => entry.status === "submitted"));
-        const ownReviewAvailable = permissions.has("bidding.evaluate") && ready.some((bid) => !(bid.twgAssessments || []).some((entry) => entry.status === "submitted" && Number(entry.memberId) === Number(userId)) && !(bid.evaluations || []).some((entry) => Number(entry.evaluatorId) === Number(userId)));
-        const readyToFinalize = permissions.has("bidding.chairEvaluation") && ready.length > 0 && ready.length === liveBids.length && ready.every((bid) => (bid.evaluations || []).length && !(bid.twgAssessments || []).some((entry) => entry.status === "draft"));
+        const ready = liveBids.filter((bid) => rfq.twgRequired === false || (bid.twgAssessments || []).filter((entry) => !entry.excludedForConflict).some((entry) => entry.status === "submitted"));
+        const ownReviewAvailable = permissions.has("bidding.evaluate") && ready.some((bid) => !(bid.twgAssessments || []).filter((entry) => !entry.excludedForConflict).some((entry) => entry.status === "submitted" && Number(entry.memberId) === Number(userId)) && !(bid.evaluations || []).some((entry) => (!entry.status || entry.status === "submitted") && Number(entry.evaluatorId) === Number(userId)));
+        const readyToFinalize = permissions.has("bidding.chairEvaluation") && ready.length > 0 && ready.length === liveBids.length && ready.every((bid) => (bid.evaluations || []).some((entry) => !entry.status || entry.status === "submitted") && !(bid.evaluations || []).some((entry) => entry.status === "returned") && !(bid.twgAssessments || []).filter((entry) => !entry.excludedForConflict).some((entry) => ["draft", "returned"].includes(entry.status)));
         if (ownReviewAvailable || readyToFinalize) bac.add(rfq.id);
       }
     }

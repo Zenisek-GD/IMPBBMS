@@ -16,7 +16,7 @@ export default function BacAttendance({ value, onChange }) {
   const satisfied = complete && ids.length >= Number(quorum) && (!data.policy.requirePresidingOfficer || Boolean(value.presidingMemberId))
   return (
     <fieldset className="space-y-2 rounded border border-border-muted bg-sidebar p-3">
-      <legend className="px-1 text-sm font-semibold text-navy">Participating BAC members</legend>
+      <legend className="px-1 text-sm font-semibold text-navy">BAC meeting attendance</legend>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {!data && !error && <p className="text-sm text-text-faint">Loading official signatories…</p>}
       {data?.committee.map((member) => (
@@ -38,7 +38,7 @@ export default function BacAttendance({ value, onChange }) {
           </select>
         </label>
         <p className={`text-xs ${satisfied ? 'text-success' : 'text-warning'}`} role="status">
-          {ids.length} present; {quorum} required. {satisfied ? 'Configured quorum is satisfied.' : 'BAC action cannot be finalized because the required quorum has not been met.'}
+          {ids.length} present; {quorum} required. {satisfied ? 'Attendance quorum is satisfied; individual approvals are recorded separately.' : 'BAC action cannot be finalized because the required quorum has not been met.'}
         </p>
         {!complete && <p className="text-xs text-danger">The official BAC composition must be completed in Procurement Settings before finalization.</p>}
       </>}

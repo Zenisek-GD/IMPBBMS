@@ -31,8 +31,7 @@ import RichTextEditor from '../../components/ui/RichTextEditor'
 //
 // Everything a bidder plans around — ABC, mode, the three dates, where to
 // submit, who to call — is populated from the solicitation rather than retyped,
-// then frozen on the notice. A published notice must not change because
-// somebody edited the RFQ behind it.
+// and maintained by the approved procurement schedule amendment process.
 
 const peso = (value) =>
   value === null || value === undefined
@@ -199,9 +198,10 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
         fundSource: draft.fundSource ?? current.fundSource,
         procurementMethod: draft.procurementMethod ?? current.procurementMethod,
         procurementMethodCitation: draft.procurementMethodCitation ?? current.procurementMethodCitation,
-        prebidAt: toLocalInput(draft.prebidAt) || current.prebidAt,
-        submissionDeadline: toLocalInput(draft.submissionDeadline) || current.submissionDeadline,
-        bidOpeningAt: toLocalInput(draft.bidOpeningAt) || current.bidOpeningAt,
+        prebidAt: toLocalInput(draft.prebidAt),
+        venue: draft.venue ?? current.venue,
+        submissionDeadline: toLocalInput(draft.submissionDeadline),
+        bidOpeningAt: toLocalInput(draft.bidOpeningAt),
         appEntryId: draft.appEntryId ?? current.appEntryId,
       }))
     } catch (err) {
@@ -275,19 +275,20 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
       {/* ── Link to the solicitation ── */}
       <LargeFormPage.Section
         title="Linked solicitation"
-        description="Linking copies the reference, ABC, mode and schedule from the record. Values freeze on the notice once saved."
+        description="Select a procurement with an approved schedule. Its official dates populate this notice and update through approved schedule amendments."
       >
         <label className={labelClass}>
           <span className="flex items-center gap-1.5">
             <Link2 size={12} /> Solicitation this notice invites bids for
           </span>
           <select
+            disabled={Boolean(existing?.rfqId)}
             value={form.rfqId ?? ''}
             onChange={(event) => pullFromSolicitation(event.target.value)}
             className={`mt-1 ${inputClass}`}
           >
             <option value="">Not linked — the notice precedes the solicitation</option>
-            {solicitations.map((rfq) => (
+            {solicitations.filter((rfq) => rfq.scheduleApprovedAt || rfq.id === existing?.rfqId).map((rfq) => (
               <option key={rfq.id} value={rfq.id}>
                 {rfq.referenceNo} — {rfq.title}
               </option>
@@ -308,6 +309,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
               Reference number
               <input
                 value={form.referenceNo}
+                readOnly={Boolean(form.rfqId)}
                 onChange={(e) => set('referenceNo', e.target.value)}
                 placeholder="ITB-2026-014"
                 className={`mt-1 ${inputClass}`}
@@ -332,6 +334,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
             <input
               type="number"
               value={form.abc}
+              readOnly={Boolean(form.rfqId)}
               onChange={(e) => set('abc', e.target.value)}
               className={`mt-1 ${inputClass}`}
             />
@@ -343,12 +346,13 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
           </label>
           <label className={labelClass}>
             Mode of procurement
-            <input value={form.procurementMethod} onChange={(e) => set('procurementMethod', e.target.value)} className={`mt-1 ${inputClass}`} />
+            <input readOnly={Boolean(form.rfqId)} value={form.procurementMethod} onChange={(e) => set('procurementMethod', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
           <label className={labelClass}>
             Legal basis
             <input
               value={form.procurementMethodCitation}
+              readOnly={Boolean(form.rfqId)}
               onChange={(e) => set('procurementMethodCitation', e.target.value)}
               placeholder="IRR Sec. 26"
               className={`mt-1 ${inputClass}`}
@@ -358,22 +362,22 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
       </LargeFormPage.Section>
 
       {/* ── Schedule ── */}
-      <LargeFormPage.Section title="Schedule">
+      <LargeFormPage.Section title="Official procurement schedule" description="These dates come from the approved procurement schedule. Request date changes in RFQ / ITB Management under Schedule / Criteria.">
         <div className="flex flex-col gap-3">
           <div className="grid gap-3 sm:grid-cols-3">
             <label className={labelClass}>
               Pre-bid conference
-              <WorkHoursDateTimeInput value={form.prebidAt} onChange={(e) => set('prebidAt', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <input type="datetime-local" readOnly value={form.prebidAt} className={`mt-1 ${inputClass}`} />
               {err('prebidAt')}
             </label>
             <label className={labelClass}>
               Deadline for bids
-              <WorkHoursDateTimeInput value={form.submissionDeadline} onChange={(e) => set('submissionDeadline', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <input type="datetime-local" readOnly value={form.submissionDeadline} className={`mt-1 ${inputClass}`} />
               {err('submissionDeadline')}
             </label>
             <label className={labelClass}>
               Bid opening
-              <WorkHoursDateTimeInput value={form.bidOpeningAt} onChange={(e) => set('bidOpeningAt', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <input type="datetime-local" readOnly value={form.bidOpeningAt} className={`mt-1 ${inputClass}`} />
               {err('bidOpeningAt')}
             </label>
           </div>

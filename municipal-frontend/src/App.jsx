@@ -283,6 +283,8 @@ function App() {
 
           <Route element={<RoleRoute allow={['bacSecretariat']} />}>
             <Route path="/secretariat" element={<RoleWorkspace />} />
+          </Route>
+          <Route element={<RoleRoute allow={['bacSecretariat', 'bacChairperson', 'bacViceChairperson', 'bacMember', 'internalAuditor']} />}>
             <Route path="/secretariat/rfq" element={<RfqManagement />} />
           </Route>
 

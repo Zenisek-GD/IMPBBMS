@@ -3,6 +3,7 @@ import { Vendor } from "../models/vendorModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
 import { Bid, Rfq } from "../models/biddingModel.js";
 import { TwgAssessment } from "../models/twgModel.js";
+import { EvaluationReturn, EvaluatorDeclaration } from "../models/evaluationWorkflowModel.js";
 import { Invoice } from "../models/paymentModel.js";
 import { User } from "../models/userModel.js";
 import { checksumOf, safeFilename, validateFileContent } from "../services/documentStore.js";
@@ -274,6 +275,7 @@ export const deleteDocument = async (req, res) => {
   if (document.entityRef === "twgAssessment") {
     await withAuditTransaction(async (transaction, audit) => {
       await lockTechnicalAttachment(req, document.entityRef, document.entityId, transaction);
+      if (await EvaluationReturn.findOne({ where: { targetType: "twgAssessment", targetId: document.entityId }, transaction })) throw workflowError("Supporting files from a previously submitted assessment remain part of its correction history. Attach an additional document instead.");
       await document.destroy({ transaction });
       await audit(actorAudit(req, { actionType: "document.deleted", entityRef: document.entityRef, entityId: document.entityId, summary: "Supporting file removed from a TWG draft.", beforeState: { documentId: document.id, checksum: document.checksum } }));
     });
@@ -303,6 +305,7 @@ const lockTechnicalAttachment = async (req, entityRef, entityId, transaction) =>
   if (!rfq) throw workflowError("Procurement not found.", 404);
   if (assessment) {
     await assessment.reload({ transaction });
+    if (assessment.excludedForConflict || await EvaluatorDeclaration.findOne({ where: { rfqId: rfq.id, userId: req.currentUser.id, noConflictDeclared: false }, transaction })) throw workflowError("A reported conflict of interest prevents changes to this evaluation's documents.", 403);
     if (assessment.status !== "draft" || rfq.status !== "opened" || assessment.memberId !== req.currentUser.id || !req.permissions.has("bidding.technicalInput")) throw workflowError("Supporting files cannot be changed after TWG submission.", 403);
   } else if (["awarded", "cancelled"].includes(rfq.status) || !["bidding.publish", "bidding.chairEvaluation"].some((permission) => req.permissions.has(permission))) throw workflowError("Supporting records cannot be changed at this procurement stage.", 403);
 };

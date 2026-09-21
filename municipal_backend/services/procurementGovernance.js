@@ -7,18 +7,19 @@ import { Role } from "../models/roleModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { sequelize } from "../models/db.js";
 import { ProcurementMode } from "../models/procurementModeModel.js";
-import { ProcurementAttempt, NegotiatedReview } from "../models/procurementAttemptModel.js";
+import { ProcurementAttempt, NegotiatedReview, FailureRecord, BacDecisionVote } from "../models/procurementAttemptModel.js";
 import { BacResolution } from "../models/bacResolutionModel.js";
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
 import { getProcurementPolicy } from "../models/systemSettingModel.js";
-import { BAC_ROLE_KEYS, PRESIDING_ROLE_KEYS, evaluateBacQuorum } from "./bacCommittee.js";
+import { BAC_ROLE_KEYS, PRESIDING_ROLE_KEYS, evaluateBacQuorum, evaluateBacDecision } from "./bacCommittee.js";
 import { workflowError } from "./workflowSupport.js";
 import { negotiatedEligibility } from "./attemptPolicy.js";
 
-export const committeeSnapshot = ({ committee, present }) => committee.map((member) => ({
+export const committeeSnapshot = ({ committee, present, votes }) => committee.map((member) => ({
   userId: member.id, name: member.name, role: member.Role?.key ?? member.role, position: member.position,
   present: present.some((attendee) => attendee.id === member.id),
-  concurred: present.some((attendee) => attendee.id === member.id),
+  concurred: votes ? votes.some((vote) => Number(vote.userId) === Number(member.id) && vote.decision === "approved") : present.some((attendee) => attendee.id === member.id),
+  ...(votes ? { participated: votes.some((vote) => Number(vote.userId) === Number(member.id)), decision: votes.find((vote) => Number(vote.userId) === Number(member.id))?.decision ?? "pending" } : {}),
 }));
 
 export const getBacContext = async (req = {}, { transaction } = {}) => {
@@ -50,6 +51,12 @@ export const assertBacAction = async (req, options = {}) => {
 };
 
 export const projectKeyFor = (rfq) => rfq.prHeaderId ? `pr:${rfq.prHeaderId}` : rfq.appEntryId ? `app:${rfq.appEntryId}` : `rfq:${rfq.id}`;
+export const assertNoPendingFailure = async (rfq, { transaction } = {}) => {
+  const attempt = await ProcurementAttempt.findOne({ where: { rfqId: rfq.id }, transaction });
+  if (attempt && await FailureRecord.findOne({ where: { attemptId: attempt.id, status: { [Op.in]: ["submitted", "reviewed"] } }, transaction })) {
+    throw workflowError("Failure of Bidding is under BAC review. Complete the recorded committee decision before changing this attempt's outcome.");
+  }
+};
 export const projectScopeFor = (rfq) => rfq.prHeaderId ? { prHeaderId: rfq.prHeaderId } : rfq.appEntryId ? { appEntryId: rfq.appEntryId } : { id: rfq.id };
 export const lockProcurementProject = async (scope, transaction) => {
   if (!transaction) return;
@@ -86,7 +93,7 @@ export const ensureProcurementAttempt = async (rfq, { transaction, actorId = nul
 };
 
 export const attemptsForProject = (rfq, { transaction } = {}) => ProcurementAttempt.findAll({ where: { projectKey: projectKeyFor(rfq) },
-  include: [{ model: Rfq, as: "rfq", include: [{ model: ProcurementMode, as: "mode" }] }, { model: BacResolution, as: "resolution" }, { model: User, as: "responsibleUser", attributes: ["id", "name"] }], order: [["attemptNumber", "ASC"]], transaction });
+  include: [{ model: Rfq, as: "rfq", include: [{ model: ProcurementMode, as: "mode" }] }, { model: FailureRecord, as: "failureRecords" }, { model: BacResolution, as: "resolution" }, { model: User, as: "responsibleUser", attributes: ["id", "name"] }], order: [["attemptNumber", "ASC"]], transaction });
 
 export const assertNegotiatedEligibility = async (rfq, { transaction } = {}) => {
   const [attempts, policy] = await Promise.all([attemptsForProject(rfq, { transaction }), getProcurementPolicy({ transaction })]);
@@ -102,11 +109,12 @@ export const normalizeSupportingDocuments = async (input, rfq, { transaction } =
   if (!Array.isArray(input) || input.length > 30) throw workflowError("Provide at most 30 supporting document references.", 400);
   const output = [];
   for (const item of input) {
+    const requirementKey = typeof item?.requirementKey === "string" ? item.requirementKey.trim() : null;
     const documentId = Number(typeof item === "number" ? item : item?.documentId);
     if (Number.isSafeInteger(documentId) && documentId > 0) {
       const document = await Document.findByPk(documentId, { attributes: DOCUMENT_METADATA_ATTRIBUTES, transaction });
       if (!document || document.entityRef !== "rfq" || document.entityId !== rfq.id) throw workflowError("Supporting files must belong to this procurement attempt.", 400);
-      output.push({ documentId, name: document.filename, checksum: document.checksum, url: `/api/documents/${documentId}/download` });
+      output.push({ documentId, name: document.filename, checksum: document.checksum, url: `/api/documents/${documentId}/download`, ...(requirementKey ? { requirementKey } : {}) });
     } else {
       const name = typeof item?.name === "string" ? item.name.trim() : "";
       const url = typeof item?.url === "string" ? item.url.trim() : "";
@@ -117,6 +125,29 @@ export const normalizeSupportingDocuments = async (input, rfq, { transaction } =
     }
   }
   return output;
+};
+
+export const assertOfficialBacUser = (req, committee, { presiding = false } = {}) => {
+  const role = req.currentUser?.Role?.key ?? req.currentUser?.role?.key ?? req.currentUser?.role;
+  if (!(presiding ? PRESIDING_ROLE_KEYS : BAC_ROLE_KEYS).includes(role) || !committee.some((member) => Number(member.id) === Number(req.currentUser?.id))) {
+    throw workflowError(presiding ? "Only the designated BAC Chairperson or Vice-Chairperson may finalize this committee decision." : "Only a designated BAC official may personally review or vote on this decision.", 403);
+  }
+  return role;
+};
+
+export const votesForDecision = (subjectType, subjectId, { transaction } = {}) => BacDecisionVote.findAll({ where: { subjectType, subjectId }, order: [["votedAt", "ASC"]], transaction });
+
+export const assertRecordedBacDecision = async (req, record, subjectType, { transaction, decision = "approved" } = {}) => {
+  const current = await getBacContext({}, { transaction });
+  assertOfficialBacUser(req, current.committee, { presiding: true });
+  const review = record.committeeReview;
+  if (!review) throw workflowError("BAC review must be completed before a committee decision can be finalized.");
+  assertOfficialBacUser(req, review?.committee ?? [], { presiding: true });
+  const votes = await votesForDecision(subjectType, record.id, { transaction });
+  const quorum = evaluateBacDecision({ committeeReview: review, votes, decision });
+  if (!quorum.ok) throw workflowError(quorum.message, 409, { quorum });
+  if (!votes.some((vote) => vote.userId === req.currentUser.id && vote.decision === decision)) throw workflowError("The BAC officer finalizing this decision must personally record a matching vote.", 403);
+  return { committee: review.committee, present: review.committee.filter((member) => review.attendingMemberIds.includes(member.id)), presidingId: review.presidingId, policy: review.policy, quorum, votes };
 };
 
 export const snapshotAttemptOutcome = async (rfq, { transaction } = {}) => {

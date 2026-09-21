@@ -1,4 +1,5 @@
 import express from "express";
+import { getEvaluationPlan, saveEvaluationPlan, approveEvaluationPlan, declareEvaluatorConflict, returnEvaluationForCorrection, getEvaluationAdministration, requestCriteriaAmendment, approveCriteriaAmendment } from "../controllers/evaluationWorkflowController.js";
 import { updateRfqSchedule } from "../controllers/biddingController.js";
 import { listTwg, declareTwgConflict, saveTwg } from "../controllers/twgController.js";
 import {
@@ -25,6 +26,14 @@ import {
 import { requirePermission, requireAnyPermission } from "../middleware/permissionMiddleware.js";
 
 const router = express.Router();
+router.get("/rfqs/:id/evaluation-plan", requireAnyPermission("bidding.view", "bidding.publish", "bidding.evaluate", "bidding.technicalInput", "bidding.chairEvaluation"), getEvaluationPlan);
+router.put("/rfqs/:id/evaluation-plan", requirePermission("bidding.publish"), saveEvaluationPlan);
+router.post("/rfqs/:id/evaluation-plan/approve", requirePermission("bidding.chairEvaluation"), approveEvaluationPlan);
+router.post("/rfqs/:id/evaluation-plan/amendments", requirePermission("bidding.publish"), requestCriteriaAmendment);
+router.post("/evaluation-plan/amendments/:amendmentId/approve", requirePermission("bidding.chairEvaluation"), approveCriteriaAmendment);
+router.post("/rfqs/:id/evaluator-declaration", requireAnyPermission("bidding.evaluate", "bidding.technicalInput"), declareEvaluatorConflict);
+router.get("/rfqs/:id/evaluation-administration", requireAnyPermission("bidding.view", "bidding.evaluate", "bidding.technicalInput", "bidding.chairEvaluation", "audit.viewAll"), getEvaluationAdministration);
+router.post("/evaluations/:kind/:evaluationId/return", requirePermission("bidding.chairEvaluation"), returnEvaluationForCorrection);
 
 // ── RFQ / ITB ───────────────────────────────────────────────────────────────
 router.get(

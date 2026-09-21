@@ -5,6 +5,9 @@ import { TwgDeclaration, TwgAssessment } from "../models/twgModel.js";
 import { ProcurementAttempt, NegotiatedReview } from "../models/procurementAttemptModel.js";
 import { ProcurementLimit } from "../models/procurementLimitModel.js";
 import { backfillProcurementAttempts } from "./backfillProcurementAttempts.js";
+import { migrateProcurementSchedule } from "./migrateProcurementSchedule.js";
+import { migrateEvaluationWorkflow } from "./migrateEvaluationWorkflow.js";
+import { migrateFailureGovernance } from "./migrateFailureGovernance.js";
 
 // Additive and resumable: never sync({alter:true}), drop, rename, or rewrite an
 // existing evaluation, resolution, award, bid, attachment, or audit record.
@@ -32,6 +35,12 @@ export const migrateProcurementWorkflow = async () => {
   }
   for (const model of [TwgDeclaration, TwgAssessment, ProcurementAttempt, NegotiatedReview, ProcurementLimit]) {
     await model.sync();
+  }
+  // Add all new columns before reading historical RFQs through current models.
+  // Each migration is resumable and retains original approvals and submissions.
+  for (const migrate of [migrateProcurementSchedule, migrateEvaluationWorkflow, migrateFailureGovernance]) {
+    const result = await migrate();
+    added.push(...result.added);
   }
   const history = await backfillProcurementAttempts();
   return { added, ...history };

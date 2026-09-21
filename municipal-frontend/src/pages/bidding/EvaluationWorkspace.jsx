@@ -32,6 +32,7 @@ export default function EvaluationWorkspace() {
   const [bidData, setBidData] = useState(null)
   const [loadedId, setLoadedId] = useState(null)
   const [twg, setTwg] = useState(null)
+  const [administration, setAdministration] = useState(null)
   const [modal, setModal] = useState(null)
   const [declaring, setDeclaring] = useState(false)
   const [actionError, setActionError] = useState('')
@@ -43,6 +44,7 @@ export default function EvaluationWorkspace() {
   const canChair = permissions.has('bidding.chairEvaluation')
   const selected = rfqs.find((rfq) => rfq.id === selectedId)
   const consulting = selected?.category === 'consulting'
+  const evaluationOpen = selected?.status === 'opened' && !administration?.failureReviewPending
 
   useEffect(() => {
     let active = true
@@ -58,8 +60,8 @@ export default function EvaluationWorkspace() {
   useEffect(() => {
     if (!selectedId) return
     let active = true
-    Promise.all([biddingApi.fetchBids(selectedId), biddingApi.fetchTwg(selectedId)]).then(([bids, assessments]) => {
-      if (active) { setBidData(bids); setTwg(assessments); setLoadedId(selectedId) }
+    Promise.all([biddingApi.fetchBids(selectedId), biddingApi.fetchTwg(selectedId), biddingApi.fetchEvaluationAdministration(selectedId)]).then(([bids, assessments, administrationData]) => {
+      if (active) { setBidData(bids); setTwg(assessments); setAdministration(administrationData); setLoadedId(selectedId) }
     }).catch((err) => { if (active) { setBidData(null); setTwg(null); setActionError(err.response?.data?.message ?? 'Could not load bid and TWG evaluation records.') } })
     return () => { active = false }
   }, [selectedId, refreshToken])
@@ -88,7 +90,7 @@ export default function EvaluationWorkspace() {
   }
   if (modal?.type === 'evaluate') {
     return <DashboardPage>
-      <BidEvaluationModal bid={modal.bid} consulting={consulting} weights={{ qualityWeight: bidData?.qualityWeight ?? selected?.qualityWeight, financialWeight: bidData?.financialWeight ?? selected?.financialWeight }} onClose={() => setModal(null)} onSubmit={(criteria, remarks, verdict) => run(() => biddingApi.submitEvaluation(modal.bid.id, criteria, remarks, verdict), 'BAC evaluation recorded. The Chairperson may close evaluation after all required reviews are complete.')} />
+      <BidEvaluationModal bid={modal.bid} rfq={selected} plan={bidData?.evaluationPlan} requirements={bidData?.complianceRequirements} onClose={() => setModal(null)} onSubmit={(payload) => run(() => biddingApi.submitEvaluation(modal.bid.id, payload), 'BAC evaluation recorded. The Chairperson may close evaluation after all required reviews are complete.')} />
     </DashboardPage>
   }
   return <DashboardPage>
@@ -105,13 +107,16 @@ export default function EvaluationWorkspace() {
     </Card>
     {selected && bidData && loadedId === selectedId && <>
       <ProcurementTimeline rfq={selected} bids={bidData.bids} twgComplete={twgComplete} />
-      {canTwg && selected.status === 'opened' && <Card title="Conflict-of-interest declaration">
-        {twg?.declaration?.noConflictDeclared ? <p className="text-sm text-success">No conflict of interest declared by {user?.name} on {new Date(twg.declaration.declaredAt).toLocaleString('en-PH')}. You may prepare your technical assessment.</p> : <div className="space-y-3">
+      {administration?.failureReviewPending && <p role="status" className="rounded border border-border-muted p-4 text-sm text-info">Failure of Bidding is under BAC review. Evaluation evidence is locked until the recorded committee decision is complete.</p>}
+      {(canTwg || canEvaluate) && evaluationOpen && <Card title="Conflict-of-interest declaration">
+        {administration?.declaration?.noConflictDeclared === false ? <p role="alert" className="text-sm text-danger">You reported a conflict of interest. Evaluation is blocked and administrative reassignment is required.</p> : (administration?.declaration ?? twg?.declaration)?.noConflictDeclared ? <p className="text-sm text-success">No conflict of interest declared by {user?.name} on {new Date((administration?.declaration ?? twg.declaration).declaredAt).toLocaleString('en-PH')}. You may prepare your evaluation.</p> : <div className="space-y-3">
           <p className="text-sm text-text-secondary">I confirm that I have no conflict of interest with any bidder participating in this procurement.</p>
           <label className="flex items-center gap-2 text-sm text-navy"><input type="checkbox" checked={declaring} onChange={(event) => setDeclaring(event.target.checked)} />I declare that I have no conflict of interest.</label>
-          <Button disabled={!declaring} onClick={() => run(() => biddingApi.declareNoConflict(selected.id), 'Declaration recorded. You may now prepare the TWG technical assessment.').catch((err) => setActionError(err.response?.data?.message ?? 'Could not record the declaration.'))}>Record declaration</Button>
+          <Button disabled={!declaring} onClick={() => run(() => biddingApi.declareEvaluatorConflict(selected.id, true), 'Declaration recorded. You may now prepare your evaluation.').catch((err) => setActionError(err.response?.data?.message ?? 'Could not record the declaration.'))}>Record declaration</Button>
         </div>}
+        {administration?.declaration?.noConflictDeclared !== false && <div className="mt-3 space-y-2"><p className="text-xs text-text-secondary">If you have a conflict with any participating bidder, record it here. Your participation will be blocked for reassignment.</p><Button variant="secondary" onClick={() => run(() => biddingApi.declareEvaluatorConflict(selected.id, false), 'Conflict recorded; reassignment required.').catch((err) => setActionError(err.response?.data?.message ?? 'Could not record the conflict.'))}>I have a conflict of interest</Button></div>}
       </Card>}
+      {canChair && administration?.conflicts?.length > 0 && <Card title="Evaluator reassignment required">{administration.conflicts.map((row) => <p key={row.id} className="text-sm text-danger">{row.user?.name} ({row.role}) reported a conflict on {new Date(row.declaredAt).toLocaleString('en-PH')}. Assign another authorized evaluator; this user is blocked from participation.</p>)}</Card>}
       <Card title={`${selected.referenceNo} — ${selected.title}`} icon={bidData.blind ? EyeOff : Eye} action={<Badge tone={RFQ_STATUS_TONES[selected.status]}>{RFQ_STATUS_LABELS[selected.status]}</Badge>} bodyClassName="">
         <div className="border-b border-border-muted px-4 py-3">
           <NextStep next={rfqNext(selected)} tone={RFQ_STATUS_TONES[selected.status]} />
@@ -128,7 +133,7 @@ export default function EvaluationWorkspace() {
         </tr></thead><tbody>{bidTable.pageRows.map((bid) => {
           const own = ownAssessment(bid.id)
           const submitted = assessmentsFor(bid.id).some((row) => row.status === 'submitted')
-          const evaluatedByMe = (bid.evaluations ?? []).some((row) => (row.evaluatorId ?? row.memberId) === user?.id)
+          const evaluatedByMe = (bid.evaluations ?? []).some((row) => (row.evaluatorId ?? row.memberId) === user?.id && (!row.status || row.status === 'submitted'))
           return <tr key={bid.id} className="border-t border-border-muted">
             <td className="px-4 py-3 text-sm text-navy">{bid.vendorName ?? bid.blindLabel}</td>
             {consulting ? <><td className="px-4 py-3 text-sm">{score(bid.qualityScore ?? bid.averageScore)}</td><td className="px-4 py-3 text-sm">{score(bid.financialScore)}</td><td className="px-4 py-3 text-sm font-semibold">{score(bid.combinedScore)}</td></> : <td className="px-4 py-3 text-xs">{['technicalPassed', 'postQualified', 'awarded'].includes(bid.status) ? 'Compliant' : ['technicalFailed', 'disqualified'].includes(bid.status) ? 'Non-Compliant' : 'Awaiting technical decision'}</td>}
@@ -136,8 +141,8 @@ export default function EvaluationWorkspace() {
             <td className="whitespace-nowrap px-4 py-3 text-sm">{peso(bid.totalBidPrice)}</td>
             <td className="px-4 py-3"><Badge tone={bid.status === 'awarded' ? 'success' : /failed|disqual/i.test(bid.status) ? 'danger' : 'info'}>{bid.status}</Badge></td>
             <td className="px-4 py-3 whitespace-nowrap"><div className="flex w-max items-center gap-2">
-              {selected.status === 'opened' && canTwg && own?.status !== 'submitted' && <Button size="table" variant="secondary" disabled={!twg?.declaration?.noConflictDeclared} title={twg?.declaration?.noConflictDeclared ? undefined : 'Record your conflict-of-interest declaration above first'} onClick={() => setModal({ type: 'twg', bid, assessment: own })}>{own ? 'Continue TWG draft' : 'TWG assessment'}</Button>}
-              {selected.status === 'opened' && canEvaluate && !own && !evaluatedByMe && <Button size="table" variant="secondary" disabled={twg?.required !== false && !submitted} title={twg?.required !== false && !submitted ? 'Available after the TWG submits its technical assessment' : undefined} onClick={() => setModal({ type: 'evaluate', bid })}>{consulting ? 'Score quality' : 'Evaluate compliance'}</Button>}
+              {evaluationOpen && canTwg && own?.status !== 'submitted' && <Button size="table" variant="secondary" disabled={!twg?.declaration?.noConflictDeclared} title={twg?.declaration?.noConflictDeclared ? undefined : 'Record your conflict-of-interest declaration above first'} onClick={() => setModal({ type: 'twg', bid, assessment: own })}>{own ? 'Continue TWG draft' : 'TWG assessment'}</Button>}
+              {evaluationOpen && canEvaluate && !own && !evaluatedByMe && <Button size="table" variant="secondary" disabled={administration?.declaration?.noConflictDeclared === false || (twg?.required !== false && !submitted) || (consulting && bidData?.evaluationPlan?.status !== 'approved')} title={twg?.required !== false && !submitted ? 'Available after the TWG submits its technical assessment' : undefined} onClick={() => setModal({ type: 'evaluate', bid })}>{consulting ? 'Evaluate Quality and Price' : 'Evaluate compliance'}</Button>}
               {(canChair || canEvaluate) && selected.status === 'evaluated' && bid.status === 'technicalPassed' && <Button size="table" variant="secondary" title="Final supplier verification (post-qualification): check the lowest responsive bidder's documents and capability" onClick={() => setModal({ type: 'postQualification', bid })}>Verify supplier</Button>}
               {canChair && !rfqAlreadyAwarded && bid.status === 'postQualified' && <Button size="table" onClick={() => setModal({ type: 'recommend', bid })}>Recommend award</Button>}
             </div></td>
@@ -145,7 +150,7 @@ export default function EvaluationWorkspace() {
         })}</tbody></table></div>
         {bidTable.rows.length === 0 && <p className="p-6 text-sm text-text-faint">No bids match this selection.</p>}
         <Pagination {...bidTable.paginationProps} label="bids" />
-        {selected.status === 'opened' && canChair && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-muted p-4"><p className="max-w-xl text-xs text-text-secondary">Complete TWG assessments and BAC evaluations before closing. Closing reveals identities and opens financial envelopes only for technically compliant bidders.</p><Button disabled={twg?.required !== false && !twgComplete} onClick={() => setModal({ type: 'close' })}>Close technical evaluation</Button></div>}
+        {evaluationOpen && canChair && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-muted p-4"><p className="max-w-xl text-xs text-text-secondary">Complete TWG assessments and BAC evaluations before closing. Closing reveals identities and opens financial envelopes only for technically compliant bidders.</p><Button disabled={twg?.required !== false && !twgComplete} onClick={() => setModal({ type: 'close' })}>Close technical evaluation</Button></div>}
         {!bidData.blind && permissions.has('bidding.award') && <p className="border-t border-border-muted p-4 text-xs text-text-secondary">Award approval is available in the Awards queue. The BAC recommends and the authorized approving officer reviews.</p>}
       </Card>
       <Card title="BAC evaluation breakdown">
@@ -153,23 +158,32 @@ export default function EvaluationWorkspace() {
           <summary className="cursor-pointer text-sm font-medium text-navy">{bid.vendorName ?? bid.blindLabel} · {evaluation.evaluatorName ?? `Evaluator #${evaluation.evaluatorId}`} · {consulting ? `Quality ${score(evaluation.score)} / 100` : Number(evaluation.score) === 100 ? 'Compliant' : 'Non-Compliant'}</summary>
           <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">{Object.entries(evaluation.criteriaBreakdown?.requirementsExamined ?? evaluation.criteriaBreakdown ?? {}).filter(([key]) => key !== 'verdict').map(([key, value]) => <div key={key}><dt className="text-text-faint">{key.replace(/([a-z])([A-Z])/g, '$1 $2')}</dt><dd>{String(value)}</dd></div>)}</dl>
           {evaluation.remarks && <p className="mt-2 text-sm text-text-secondary">Remarks: {evaluation.remarks}</p>}
+          <p className="mt-2 text-xs text-text-faint">Status: {evaluation.status ?? 'submitted'}; submitted {new Date(evaluation.submittedAt).toLocaleString('en-PH')}. Conflict declaration: {evaluation.noConflictDeclared ? new Date(evaluation.declaredAt).toLocaleString('en-PH') : 'Missing'}.</p>
+          {evaluation.failureReason && <p className="mt-2 text-sm text-danger">Failure: {evaluation.failureReason}. {evaluation.failureExplanation}</p>}
+          {evaluation.recommendation && <p className="mt-2 text-sm">Recommendation: {evaluation.recommendation}</p>}
+          {Object.entries(evaluation.requirementRemarks ?? {}).filter(([, value]) => value).map(([key, value]) => <p key={key} className="mt-1 text-xs">{key}: {value}</p>)}
+          {(evaluation.supportingDocuments ?? []).map((document, index) => <a key={index} className="mr-3 text-xs text-info underline" href={document.url} target="_blank" rel="noreferrer">{document.name}</a>)}
+          {canChair && evaluationOpen && evaluation.status === 'submitted' && evaluation.evaluatorId !== user?.id && <Button size="table" variant="secondary" onClick={() => setModal({ type: 'return', kind: 'bac', evaluation })}>Return evaluation for correction</Button>}
         </details>))}
         {!bidData.bids.some((bid) => bid.evaluations?.length) && <p className="text-sm text-text-faint">Submitted BAC evaluations and their criterion results will appear here.</p>}
       </Card>
       <Card title="TWG assessments available for BAC review">
         {(twg?.assessments ?? []).filter((row) => row.status === 'submitted').length === 0 && <p className="text-sm text-text-faint">Submitted technical assessments will appear here before BAC review.</p>}
-        {(twg?.assessments ?? []).filter((row) => row.status === 'submitted').map((assessment) => <details key={assessment.id} className="border-b border-border-muted py-3 last:border-0">
+        {(twg?.assessments ?? []).filter((row) => ['submitted', 'recused'].includes(row.status)).map((assessment) => <details key={assessment.id} className="border-b border-border-muted py-3 last:border-0">
           <summary className="cursor-pointer text-sm font-medium text-navy">{bidData.bids.find((bid) => bid.id === assessment.bidId)?.vendorName ?? `Bid ${assessment.bidId}`} · {assessment.memberName} · {recommendationLabels[assessment.recommendation] ?? assessment.recommendation}</summary>
           <p className="mt-2 text-xs text-text-secondary">No conflict declared: {assessment.noConflictDeclared ? new Date(assessment.declaredAt).toLocaleString('en-PH') : 'Not recorded'} · Submitted: {assessment.submittedAt ? new Date(assessment.submittedAt).toLocaleString('en-PH') : '—'}</p>
-          <p className="mt-2 text-sm text-navy">Justification: {assessment.remarks}</p>
+          <p className="mt-2 text-sm text-navy">{assessment.status === 'recused' ? 'Excluded following conflict of interest. ' : ''}Justification: {assessment.remarks}</p>
+          {canChair && evaluationOpen && assessment.status === 'submitted' && assessment.memberId !== user?.id && <Button size="table" variant="secondary" onClick={() => setModal({ type: 'return', kind: 'twg', evaluation: assessment })}>Return assessment for correction</Button>}
           {(assessment.requirements ?? []).map((item, index) => <div key={index} className="mt-3 rounded border border-border-muted p-3 text-sm">
             <p className="font-medium text-navy">{item.requirement} — {item.complianceStatus}</p><p className="mt-1 text-text-secondary">{item.findings}</p>{item.remarks && <p className="mt-1 text-text-secondary">Remarks: {item.remarks}</p>}{item.supportingInformation && <p className="mt-1 text-text-secondary">Supporting information: {item.supportingInformation}</p>}
             {(item.documents ?? []).map((doc) => <button key={typeof doc === 'object' ? doc.id : doc} className="mr-3 mt-2 text-xs text-info underline" onClick={() => downloadDocument(typeof doc === 'object' ? doc.id : doc, doc.filename ?? `TWG-support-${index + 1}.pdf`).catch((err) => setActionError(err.response?.data?.message ?? 'Could not download supporting document.'))}>Download supporting document</button>)}
           </div>)}
         </details>)}
       </Card>
+      {administration?.returns?.length > 0 && <Card title="Evaluation correction history">{administration.returns.map((correction) => <details key={correction.id} className="border-b border-border-muted py-3"><summary className="cursor-pointer text-sm">{correction.targetType === 'evaluation' ? 'BAC evaluation' : 'TWG assessment'} #{correction.targetId}: {correction.correctedAt ? 'Corrected' : 'Awaiting correction'}</summary><p className="mt-2 text-sm">Returned by {correction.returnedBy?.name} on {new Date(correction.returnedAt).toLocaleString('en-PH')}: {correction.reason}</p><div className="mt-2 grid gap-3 sm:grid-cols-2">{[['Previous submission', correction.previousSubmission], ['Updated submission', correction.updatedSubmission]].map(([label, submission]) => <div key={label}><p className="text-sm font-medium">{label}</p>{submission ? <><p className="text-xs">{submission.submittedAt ? new Date(submission.submittedAt).toLocaleString('en-PH') : ''} {submission.score != null ? `Score: ${submission.score}` : ''}</p><p className="text-xs">{submission.remarks}</p><pre className="overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(submission.criteriaBreakdown ?? submission.requirements, null, 2)}</pre></> : <p className="text-xs">Pending evaluator resubmission</p>}</div>)}</div></details>)}</Card>}
     </>}
     {modal?.type === 'postQualification' && <PostQualificationModal bid={modal.bid} onClose={() => setModal(null)} onSubmit={(payload) => run(() => biddingApi.submitPostQualification(modal.bid.id, payload), 'Final supplier verification (post-qualification) recorded. Compliant bidders may proceed to BAC award recommendation.')} />}
+    {modal?.type === 'return' && <CommitteeActionModal title="Return evaluation for correction" description="State the correction required. The original submission and this BAC action will be retained in the permanent history." reasonRequired onClose={() => setModal(null)} onSubmit={(payload) => run(() => biddingApi.returnEvaluation(modal.kind, modal.evaluation.id, payload), 'Evaluation returned for correction.')} />}
     {(modal?.type === 'close' || modal?.type === 'recommend') && <CommitteeActionModal title={modal.type === 'close' ? 'Close technical evaluation' : 'BAC award recommendation'} description={modal.type === 'close' ? 'Confirm the attending BAC members. This decision closes technical evaluation and calculates the eligible financial ranking.' : 'Confirm BAC participation before forwarding the recommendation for award approval.'} onClose={() => setModal(null)} onSubmit={(payload) => modal.type === 'close' ? run(() => biddingApi.closeEvaluation(selected.id, payload), 'Technical evaluation closed. Review financial ranking and proceed to post-qualification.') : run(() => biddingApi.recommendAward(modal.bid.id, payload), 'BAC award recommendation recorded and forwarded to the approving officer.')} />}
     {(permissions.has('bidding.award') || canChair || permissions.has('bidding.view')) && <AwardQueue version={refreshToken} onChanged={refresh} />}
   </DashboardPage>

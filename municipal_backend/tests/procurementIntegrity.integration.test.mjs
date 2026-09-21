@@ -1,0 +1,78 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import mysql from 'mysql2/promise';
+import { conferenceSchedule, conferenceDisplayDate } from '../services/conferenceSchedulePolicy.js';
+
+test('conferences consume authoritative dates and preserve completed meeting history', () => {
+  const rfq = { status: 'published', prebidRequired: true, prebidAt: '2028-01-10T01:00:00Z', closingDate: '2028-01-20T01:00:00Z', openingDate: '2028-01-20T02:00:00Z' };
+  assert.equal(conferenceSchedule(rfq).scheduledAt.toISOString(), rfq.prebidAt.replace('Z', '.000Z'));
+  assert.throws(() => conferenceSchedule(rfq, { scheduledAt: '2028-01-11T01:00:00Z' }), /must match/);
+  assert.throws(() => conferenceSchedule({ ...rfq, prebidRequired: false }), /not applicable/);
+  assert.throws(() => conferenceSchedule({ ...rfq, prebidAt: rfq.closingDate }), /before/);
+  assert.throws(() => conferenceSchedule({ ...rfq, openingDate: rfq.closingDate }, { purpose: 'opening' }), /after/);
+  assert.throws(() => conferenceSchedule({ ...rfq, status: 'failed' }), /failed/);
+  assert.throws(() => conferenceSchedule(rfq, { purpose: 'other', scheduledAt: 'invalid' }), /valid/);
+  assert.equal(conferenceDisplayDate({ rfq, purpose: 'prebid', status: 'scheduled', scheduledAt: 'old' }), rfq.prebidAt);
+  assert.equal(conferenceDisplayDate({ rfq, purpose: 'prebid', status: 'completed', scheduledAt: 'old' }), 'old');
+});
+
+test('bid acceptance commits security, verification and audit atomically', { skip: process.env.RUN_PROCUREMENT_DB_TESTS !== '1', timeout: 120000 }, async (t) => {
+  const scratch = `impbbms_integrity_test_${crypto.randomBytes(8).toString('hex')}`;
+  const port = Number(process.env.PROCUREMENT_TEST_DB_PORT ?? 33317);
+  Object.assign(process.env, { DB_HOST: '127.0.0.1', DB_PORT: String(port), DB_NAME: scratch, DB_USER: 'root', DB_PASSWORD: '', NODE_ENV: 'test' });
+  const admin = await mysql.createConnection({ host: '127.0.0.1', port, user: 'root', password: '' });
+  assert.match(scratch, /^impbbms_integrity_test_[a-f0-9]{16}$/);
+  await admin.query(`CREATE DATABASE \`${scratch}\``);
+  const m = await import('../models/index.js');
+  t.after(async () => { await m.sequelize.close(); assert.match(scratch, /^impbbms_integrity_test_[a-f0-9]{16}$/); await admin.query(`DROP DATABASE \`${scratch}\``); await admin.end(); });
+  await m.sequelize.sync();
+  const { submitBid } = await import('../controllers/biddingController.js');
+  const { verifyChain } = await import('../services/auditLog.js');
+  const role = await m.Role.create({ key: 'supplier', name: 'Supplier' });
+  const user = await m.User.create({ name: 'Bidder', email: 'bidder@example.test', password: 'ExamplePassword123!', roleId: role.id, status: 'active' });
+  user.Role = role;
+  const vendor = await m.Vendor.create({ businessName: 'Integrity vendor', userId: user.id, registrationStatus: 'verified', philgepsExpiry: '2035-01-01' });
+  const rfq = await m.Rfq.create({ referenceNo: 'RFQ-INTEGRITY-1', title: 'Audit atomicity', abc: 1000, category: 'goods', closingDate: '2030-01-01T01:00:00Z', openingDate: '2030-01-01T02:00:00Z', status: 'published' });
+  const ticket = crypto.randomBytes(24).toString('hex');
+  const challenge = await m.OtpChallenge.create({ userId: user.id, reference: crypto.randomUUID(), purpose: 'bidSubmission', codeHash: 'test', deliveredTo: user.email, expiresAt: new Date(Date.now() + 600000), consumedAt: new Date(), ticketHash: crypto.createHash('sha256').update(ticket).digest('hex'), ticketExpiresAt: new Date(Date.now() + 600000), contextRef: 'rfq', contextId: rfq.id });
+  const invoke = async () => {
+    let output;
+    const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(value) { output = value; return this; } };
+    await submitBid({ currentUser: user, params: { id: rfq.id }, body: { totalBidPrice: 800, bidSecurityForm: 'suretyBond', reference: challenge.reference, ticket }, ip: '127.0.0.1' }, res);
+    return { status: res.statusCode, body: output };
+  };
+  m.AuditLog.addHook('beforeCreate', 'rejectAudit', () => { throw new Error('Simulated unavailable audit storage'); });
+  await assert.rejects(invoke(), /unavailable audit/);
+  m.AuditLog.removeHook('beforeCreate', 'rejectAudit');
+  assert.equal(await m.Bid.count(), 0);
+  assert.equal(await m.Security.count(), 0);
+  assert.equal((await challenge.reload()).ticketUsedAt, null);
+  const outcomes = await Promise.allSettled([invoke(), invoke()]);
+  assert.equal(outcomes.filter((result) => result.status === 'fulfilled' && result.value.status === 201).length, 1);
+  assert.equal(await m.Bid.count({ where: { rfqId: rfq.id, vendorId: vendor.id } }), 1);
+  assert.equal(await m.Security.count(), 1);
+  assert.ok((await challenge.reload()).ticketUsedAt);
+  const event = await m.AuditLog.findOne({ where: { actionType: 'bid.submitted' } });
+  assert.equal(event.afterState.attemptNumber, 1);
+  assert.equal(event.actorId, user.id);
+  const { closeExpiredProcurements } = await import('../services/procurementDeadlineSweep.js');
+  assert.equal((await closeExpiredProcurements({ now: new Date('2029-01-01') })).closed, 0);
+  assert.equal((await closeExpiredProcurements({ now: new Date('2030-01-02') })).closed, 1);
+  assert.equal((await rfq.reload()).status, 'closed');
+  assert.equal((await closeExpiredProcurements({ now: new Date('2030-01-02') })).closed, 0);
+  assert.equal(await m.AuditLog.count({ where: { actionType: 'rfq.deadlineReached' } }), 1);
+  assert.equal(await m.Bid.count(), 1, 'deadline closure preserves submitted bids');
+  const attempt = await m.ProcurementAttempt.findOne({ where: { rfqId: rfq.id } });
+  const failure = await m.FailureRecord.create({ attemptId: attempt.id, createdById: user.id, failureNumber: 'FOB-DASHBOARD', status: 'reviewed', reason: 'Insufficient offers', category: 'insufficientOffers', explanation: 'The committee is reviewing the received offer count.', committeeReview: { attendingMemberIds: [user.id] } });
+  const { getMyWork } = await import('../controllers/myWorkController.js');
+  const dashboard = async (roleKey, grants) => {
+    const viewer = { id: user.id, Role: { key: roleKey, Permissions: grants.map(key => ({ key })) } };
+    let result;
+    await getMyWork({ currentUser: viewer, query: {} }, { setHeader() {}, json(value) { result = value; } }, error => { throw error; });
+    return result;
+  };
+  assert.ok((await dashboard('bacMember', ['bidding.view', 'bidding.evaluate'])).items.some(row => row.type === 'failure' && row.recordId === failure.id && /personal/.test(row.action)));
+  assert.equal((await dashboard('supplier', ['bidding.viewPublished'])).items.length, 0, 'supplier dashboards do not expose committee approval tasks');
+  assert.equal((await verifyChain()).intact, true);
+});

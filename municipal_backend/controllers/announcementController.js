@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import '../models/announcementScheduleAssociation.js';
 import {
   Announcement,
   ANNOUNCEMENT_CATEGORIES,
@@ -7,12 +8,15 @@ import {
   releaseScheduledAnnouncements,
 } from "../models/announcementModel.js";
 import { Rfq } from "../models/biddingModel.js";
+import { announcementSchedule, announcementFromOfficialSchedule } from "../services/procurementSchedulePolicy.js";
+import { assertApprovedSchedule } from "../services/procurementSchedule.js";
+import { workflowError, actorAudit } from "../services/workflowSupport.js";
 import { ProcurementMode } from "../models/procurementModeModel.js";
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
 import { sanitizeHtml } from "../services/htmlSanitizer.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { User } from "../models/userModel.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
 import { notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -31,11 +35,14 @@ const withIncludes = {
     { model: User, as: "author", attributes: ["id", "name"] },
     { model: User, as: "publisher", attributes: ["id", "name"] },
     { model: AppEntry, as: "project", attributes: ["id", "projectTitle", "fiscalYear"] },
+    { model: Rfq, as: 'officialProcurement' },
   ],
 };
 
 // The internal view: everything, including what the public never sees.
-const serialize = (announcement) => ({
+const serialize = (source) => {
+  const announcement = announcementFromOfficialSchedule(source);
+  return ({
   id: announcement.id,
   title: announcement.title,
   body: announcement.body,
@@ -56,6 +63,10 @@ const serialize = (announcement) => ({
   procurementMethod: announcement.procurementMethod,
   procurementMethodCitation: announcement.procurementMethodCitation,
   prebidAt: announcement.prebidAt,
+  prebidVenue: announcement.prebidVenue ?? null,
+  prebidRequired: announcement.prebidRequired ?? Boolean(announcement.prebidAt),
+  procurementType: announcement.procurementType ?? null,
+  publicationDate: announcement.publicationDate ?? null,
   submissionDeadline: announcement.submissionDeadline,
   bidOpeningAt: announcement.bidOpeningAt,
   venue: announcement.venue,
@@ -87,6 +98,7 @@ const serialize = (announcement) => ({
   createdAt: announcement.createdAt,
   updatedAt: announcement.updatedAt,
 });
+};
 
 // A deadline is only meaningful on a notice that is inviting bidders to apply,
 // and only in the future. Both are checked here rather than in the model so the
@@ -254,161 +266,79 @@ export const listAnnouncementsForAuthor = async (req, res) => {
   res.json(announcements.map(serialize));
 };
 
+const canonicalNotice = async (payload, previous, transaction, { publishing = false } = {}) => {
+  const rfqId = payload.rfqId ?? previous?.rfqId;
+  if (previous?.rfqId && Object.hasOwn(payload, 'rfqId') && Number(payload.rfqId) !== previous.rfqId) throw workflowError('A linked procurement notice cannot be detached or moved to another attempt. Create a new draft.');
+  const procurement = (payload.category ?? previous?.category) === 'procurementOpportunity';
+  if (!rfqId) {
+    const hasBiddingDates = ['submissionDeadline', 'bidOpeningAt', 'prebidAt'].some((key) => [payload[key], previous?.[key]].some((value) => value !== undefined && value !== null && value !== ''));
+    if ((procurement && publishing) || hasBiddingDates) throw workflowError('Link this procurement announcement to its official RFQ / ITB schedule before entering bidding dates or publishing.');
+    return payload;
+  }
+  const rfq = await Rfq.findByPk(rfqId, { include: [{ model: ProcurementMode, as: 'mode' }], transaction, lock: transaction.LOCK.UPDATE });
+  if (!rfq) throw workflowError('The linked procurement does not exist.', 400);
+  if (publishing) {
+    if (rfq.status !== 'published') throw workflowError('Publish the approved procurement before publishing its Invitation to Bid.');
+    assertApprovedSchedule(rfq);
+    if (new Date(rfq.closingDate) <= new Date()) throw workflowError('The official bid submission deadline has passed.');
+  }
+  const official = announcementSchedule(rfq);
+  for (const field of ['prebidAt', 'submissionDeadline', 'bidOpeningAt']) {
+    if (!Object.hasOwn(payload, field)) continue;
+    const supplied = payload[field] ? new Date(payload[field]).getTime() : null;
+    const canonical = official[field] ? new Date(official[field]).getTime() : null;
+    if (supplied !== canonical) throw workflowError(`${field} must match the official procurement schedule. Request a schedule amendment to change published dates.`, 400);
+  }
+  return { ...payload, ...official, rfqId: rfq.id, category: 'procurementOpportunity', procurementMethod: rfq.mode?.name ?? null, procurementMethodCitation: rfq.mode?.citation ?? null };
+};
+
 export const createAnnouncement = async (req, res) => {
-  const { errors, patch } = readBody(req.body ?? {}, { partial: false });
-  if (Object.keys(errors).length) {
-    return res.status(400).json({ message: "Please correct the highlighted fields.", errors });
-  }
-
-  if (patch.appEntryId) {
-    const project = await AppEntry.findByPk(patch.appEntryId);
-    if (!project) {
-      return res.status(400).json({
-        message: "The project this notice links to does not exist.",
-        errors: { appEntryId: "Choose a project from the list." },
-      });
-    }
-  }
-
-  // Always born as a draft, whatever the caller sent. Publishing is a separate
-  // call so it is a separate, auditable decision — and so a notice cannot go out
-  // to the public as a side effect of a form submit.
-  const announcement = await Announcement.create({
-    ...patch,
-    status: "draft",
-    createdByUserId: req.currentUser.id,
+  const announcement = await withAuditTransaction(async (transaction, audit) => {
+    const payload = await canonicalNotice(req.body ?? {}, null, transaction);
+    const { errors, patch } = readBody(payload, { partial: false });
+    if (Object.keys(errors).length) throw workflowError(Object.values(errors)[0], 400, { errors });
+    if (patch.appEntryId && !await AppEntry.findByPk(patch.appEntryId, { transaction })) throw workflowError('The linked project does not exist.', 400);
+    const created = await Announcement.create({ ...patch, status: 'draft', createdByUserId: req.currentUser.id }, { transaction });
+    await audit(actorAudit(req, { actionType: 'announcement.generated', entityRef: 'announcement', entityId: created.id, summary: 'Public announcement draft generated for review using the official procurement dates.', afterState: { rfqId: created.rfqId, status: 'draft', prebidAt: created.prebidAt, submissionDeadline: created.submissionDeadline, bidOpeningAt: created.bidOpeningAt } }));
+    return created;
   });
-
   res.status(201).json(serialize(await Announcement.findByPk(announcement.id, withIncludes)));
 };
 
 export const updateAnnouncement = async (req, res) => {
-  const announcement = await Announcement.findByPk(req.params.id, withIncludes);
-  if (!announcement) return res.status(404).json({ message: "Announcement not found." });
-
-  if (announcement.status === "archived") {
-    return res.status(409).json({
-      message:
-        "This notice has been withdrawn. Withdrawn notices are kept as a record of what the " +
-        "public was told and are not edited — post a new one instead.",
-    });
-  }
-
-  const { errors, patch } = readBody({ prebidAt: announcement.prebidAt, submissionDeadline: announcement.submissionDeadline, bidOpeningAt: announcement.bidOpeningAt, ...(req.body ?? {}) }, { partial: true });
-  if (Object.keys(errors).length) {
-    return res.status(400).json({ message: "Please correct the highlighted fields.", errors });
-  }
-
-  const wasPublished = announcement.status === "published";
-  const before = wasPublished
-    ? {
-        title: announcement.title,
-        body: announcement.body,
-        submissionDeadline: announcement.submissionDeadline,
-        bidOpeningAt: announcement.bidOpeningAt,
-        registrationDeadline: announcement.registrationDeadline,
-        expiresAt: announcement.expiresAt,
-      }
-    : null;
-
-  await announcement.update(patch);
-
-  // Only edits to a live notice are recorded. A draft being reworked is not an
-  // accountable event — nobody has read it — but changing what the municipality
-  // has already been told is, particularly when it moves a deadline.
-  if (wasPublished || ["submissionDeadline", "bidOpeningAt", "prebidAt"].some((key) => Object.hasOwn(req.body ?? {}, key))) {
-    await auditFromRequest(req, {
-      actionType: AUDIT_ACTIONS.ANNOUNCEMENT_UPDATED,
-      entityRef: "announcement",
-      entityId: announcement.id,
-      summary: `Published announcement "${announcement.title}" was edited`,
-      beforeState: before,
-      afterState: {
-        title: announcement.title,
-        body: announcement.body,
-        submissionDeadline: announcement.submissionDeadline,
-        bidOpeningAt: announcement.bidOpeningAt,
-        registrationDeadline: announcement.registrationDeadline,
-        expiresAt: announcement.expiresAt,
-      },
-    });
-  }
-
-  res.json(serialize(await Announcement.findByPk(announcement.id, withIncludes)));
+  // RFQ is locked before the notice, matching the amendment propagation order.
+  const previous = await Announcement.findByPk(req.params.id);
+  if (!previous) throw workflowError('Announcement not found.', 404);
+  await withAuditTransaction(async (transaction, audit) => {
+    const payload = await canonicalNotice(req.body ?? {}, previous, transaction);
+    const announcement = await Announcement.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (announcement.status === 'archived') throw workflowError('Archived notices preserve what the public was told and cannot be edited.');
+    const { errors, patch } = readBody({ prebidAt: announcement.prebidAt, submissionDeadline: announcement.submissionDeadline, bidOpeningAt: announcement.bidOpeningAt, ...payload }, { partial: true });
+    if (Object.keys(errors).length) throw workflowError(Object.values(errors)[0], 400, { errors });
+    const before = { status: announcement.status, submissionDeadline: announcement.submissionDeadline, bidOpeningAt: announcement.bidOpeningAt, prebidAt: announcement.prebidAt };
+    if (announcement.status === 'published' && !announcement.rfqId && ['submissionDeadline', 'bidOpeningAt', 'prebidAt'].some((key) => Object.hasOwn(req.body ?? {}, key))) throw workflowError('Published bidding dates require an official procurement schedule amendment.');
+    await announcement.update(patch, { transaction });
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.ANNOUNCEMENT_UPDATED, entityRef: 'announcement', entityId: announcement.id, summary: 'Public announcement reviewed and updated; bidding dates come from the official schedule.', beforeState: before, afterState: { rfqId: announcement.rfqId, ...patch } }));
+  });
+  res.json(serialize(await Announcement.findByPk(req.params.id, withIncludes)));
 };
 
-/**
- * Puts the notice on the public portal.
- *
- * A deadline in the past is refused here rather than allowed through and hidden
- * by the serialiser: a call for bidders that is closed the moment it appears
- * wastes the time of everyone who reads it.
- */
 export const publishAnnouncement = async (req, res) => {
+  const previous = await Announcement.findByPk(req.params.id);
+  if (!previous) throw workflowError('Announcement not found.', 404);
+  await withAuditTransaction(async (transaction, audit) => {
+    const canonical = await canonicalNotice({}, previous, transaction, { publishing: true });
+    const announcement = await Announcement.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (announcement.status !== 'draft') throw workflowError('Only a draft announcement can be published.');
+    const now = new Date();
+    if (announcement.registrationDeadline && new Date(announcement.registrationDeadline) <= now) throw workflowError('The registration deadline has passed.', 400);
+    if (announcement.expiresAt && new Date(announcement.expiresAt) <= now) throw workflowError('The announcement expiry date has passed.', 400);
+    await announcement.update({ ...canonical, status: 'published', publishedAt: now, publishedByUserId: req.currentUser.id }, { transaction });
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.ANNOUNCEMENT_PUBLISHED, entityRef: 'announcement', entityId: announcement.id, summary: 'Public announcement published using the approved official procurement schedule.', beforeState: { status: 'draft' }, afterState: { status: 'published', rfqId: announcement.rfqId, submissionDeadline: announcement.submissionDeadline, bidOpeningAt: announcement.bidOpeningAt } }));
+  });
   const announcement = await Announcement.findByPk(req.params.id, withIncludes);
-  if (!announcement) return res.status(404).json({ message: "Announcement not found." });
-
-  if (announcement.status === "published") {
-    return res.status(409).json({ message: "This notice is already published." });
-  }
-  if (announcement.status === "archived") {
-    return res.status(409).json({ message: "A withdrawn notice cannot be republished." });
-  }
-
-  const now = new Date();
-  if (announcement.registrationDeadline && new Date(announcement.registrationDeadline) <= now) {
-    return res.status(400).json({
-      message:
-        "The registration deadline on this notice has already passed. Move it forward before " +
-        "publishing, or clear it if this notice is not calling for bidders.",
-    });
-  }
-  if (announcement.expiresAt && new Date(announcement.expiresAt) <= now) {
-    return res.status(400).json({
-      message: "This notice is set to expire in the past, so publishing it would hide it at once.",
-    });
-  }
-
-  await announcement.update({
-    status: "published",
-    publishedAt: now,
-    publishedByUserId: req.currentUser.id,
-  });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.ANNOUNCEMENT_PUBLISHED,
-    entityRef: "announcement",
-    entityId: announcement.id,
-    summary: `Announcement "${announcement.title}" published to the public portal`,
-    beforeState: { status: "draft" },
-    afterState: {
-      status: "published",
-      category: announcement.category,
-      registrationDeadline: announcement.registrationDeadline,
-      expiresAt: announcement.expiresAt,
-      // On the record because it is the fact that decides whether the public
-      // form will accept a submission.
-      acceptingRegistrations: acceptsRegistrations(announcement, now),
-    },
-  });
-
-  // A call for bidders is the one announcement the Secretariat needs to know
-  // went out, since applications will start arriving in their queue against it.
-  if (acceptsRegistrations(announcement, now)) {
-    await notifyByPermission("bidding.publish", {
-      type: NOTIFICATION_EVENTS.ANNOUNCEMENT_PUBLISHED,
-      title: "Call for bidders published",
-      body: `"${announcement.title}" is open for registration until ${new Date(
-        announcement.registrationDeadline
-      ).toLocaleString("en-PH")}.`,
-      link: "/announcements/manage",
-      refEntity: "announcement",
-      refId: announcement.id,
-      severity: "info",
-    });
-  }
-
-  res.json(serialize(await Announcement.findByPk(announcement.id, withIncludes)));
+  if (acceptsRegistrations(announcement)) await notifyByPermission('bidding.publish', { type: NOTIFICATION_EVENTS.ANNOUNCEMENT_PUBLISHED, title: 'Call for bidders published', body: `"${announcement.title}" is open for registration.`, link: '/announcements/manage', refEntity: 'announcement', refId: announcement.id, severity: 'info' });
+  res.json(serialize(announcement));
 };
 
 /**
@@ -503,6 +433,8 @@ export const draftFromSolicitation = async (req, res) => {
     ],
   });
   if (!rfq) return res.status(404).json({ message: "That solicitation does not exist." });
+  assertApprovedSchedule(rfq);
+  await auditFromRequest(req, { actionType: "announcement.previewGenerated", entityRef: "rfq", entityId: rfq.id, summary: "Invitation to Bid generated from the approved official schedule for review.", afterState: announcementSchedule(rfq) });
 
   res.json({
     rfqId: rfq.id,
@@ -514,7 +446,11 @@ export const draftFromSolicitation = async (req, res) => {
     fundSource: rfq.appEntry?.fundSource ?? null,
     procurementMethod: rfq.mode?.name ?? null,
     procurementMethodCitation: rfq.mode?.citation ?? null,
-    prebidAt: rfq.prebidAt,
+    procurementType: rfq.category,
+    publicationDate: rfq.publicationStartAt ?? rfq.publishDate,
+    prebidRequired: rfq.prebidRequired,
+    venue: rfq.prebidVenue,
+    prebidAt: rfq.prebidRequired ? rfq.prebidAt : null,
     submissionDeadline: rfq.closingDate,
     // Bid opening follows the deadline on the same day unless the office says
     // otherwise — the usual practice, and a sensible default the officer can

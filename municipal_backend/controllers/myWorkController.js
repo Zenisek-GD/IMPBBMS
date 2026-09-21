@@ -5,6 +5,10 @@ import { DevelopmentPlan } from "../models/developmentPlanModel.js";
 import { InvestmentProgram } from "../models/investmentProgramModel.js";
 import { Rfq, Award } from "../models/biddingModel.js";
 import { Vendor } from "../models/vendorModel.js";
+import { FailureRecord, ProcurementAttempt, NegotiatedReview, BacDecisionVote } from "../models/procurementAttemptModel.js";
+import { ScheduleAmendment } from "../models/scheduleAmendmentModel.js";
+import { EvaluatorDeclaration } from "../models/evaluationWorkflowModel.js";
+import { BAC_ROLE_KEYS } from "../services/bacCommittee.js";
 import { permissionsOf } from "../middleware/permissionMiddleware.js";
 import { APP_TRANSITIONS } from "../services/appWorkflow.js";
 import { PR_TRANSITIONS } from "../services/prWorkflow.js";
@@ -131,8 +135,39 @@ export const getMyWork = async (req, res, next) => {
         for (const rfq of rfqs) rows.push(item({
           type: "rfq", id: rfq.id, title: rfq.referenceNo, subtitle: rfq.title, stage: rfq.status,
           href: "/secretariat/rfq", amount: rfq.abc, dueAt: rfq.closingDate || null,
-          action: ["failed", "cancelled"].includes(rfq.status) ? "Start a documented rebid" : "Continue the solicitation", actionLabel: "Open solicitation",
+          action: rfq.status === "failed" ? "Review approved failure history and the authorized next action" : rfq.status === "cancelled" ? "Review procurement preparation" : "Continue the solicitation", actionLabel: "Open solicitation",
         }));
+      })());
+    }
+
+    if (permissions.has("bidding.view") && anyPermission(permissions, ["bidding.publish", "bidding.chairEvaluation", "bidding.evaluate"])) {
+      jobs.push((async () => {
+        const officer = permissions.has("bidding.chairEvaluation") && ["bacChairperson", "bacViceChairperson"].includes(user.Role?.key);
+        const member = BAC_ROLE_KEYS.includes(user.Role?.key) && anyPermission(permissions, ["bidding.evaluate", "bidding.chairEvaluation"]);
+        const canPrepare = permissions.has("bidding.publish");
+        const failures = await FailureRecord.findAll({ where: { status: { [Op.in]: ["draft", "submitted", "reviewed"] } }, include: [{ model: ProcurementAttempt, as: "attempt", include: [{ model: Rfq, as: "rfq" }] }] });
+        for (const failure of failures) {
+          const vote = failure.status === "reviewed" ? await BacDecisionVote.findOne({ where: { subjectType: "failure", subjectId: failure.id, userId: user.id } }) : null;
+          const present = failure.committeeReview?.attendingMemberIds?.some((id) => Number(id) === user.id);
+          const action = failure.status === "draft" && canPrepare ? "Complete and submit failure documents" : failure.status === "submitted" && officer ? "Review failure documents and record BAC attendance" : failure.status === "reviewed" && member && present && !vote ? "Record your personal BAC decision" : failure.status === "reviewed" && officer ? "Review committee decisions and finalization requirements" : null;
+          if (action) rows.push(item({ type: "failure", id: failure.id, title: failure.failureNumber, subtitle: failure.attempt?.rfq?.title, stage: failure.status, href: "/secretariat/rfq", action, actionLabel: "Open procurement history" }));
+        }
+        if (officer) {
+          const amendments = await ScheduleAmendment.findAll({ where: { status: "submitted", requestedById: { [Op.ne]: user.id } }, include: [{ model: Rfq, as: "rfq" }] });
+          for (const amendment of amendments) rows.push(item({ type: "scheduleAmendment", id: amendment.id, title: amendment.referenceNo, subtitle: amendment.rfq?.title, stage: "For schedule approval", href: "/secretariat/rfq", action: "Review proposed dates and supporting document", actionLabel: "Open schedule review" }));
+          const schedules = await Rfq.findAll({ where: { status: "draft", scheduleApprovedAt: null, schedulePreparedById: { [Op.ne]: user.id } }, attributes: ["id", "referenceNo", "title", "closingDate"] });
+          for (const schedule of schedules) rows.push(item({ type: "schedule", id: schedule.id, title: schedule.referenceNo, subtitle: schedule.title, stage: "For schedule approval", dueAt: schedule.closingDate, href: "/secretariat/rfq", action: "Review and approve the procurement schedule", actionLabel: "Open schedule" }));
+          const conflicts = await EvaluatorDeclaration.findAll({ where: { reassignmentRequired: true }, include: [{ model: Rfq, as: "rfq" }] });
+          for (const conflict of conflicts) rows.push(item({ type: "evaluatorConflict", id: conflict.id, title: conflict.rfq?.referenceNo ?? "Evaluator conflict", subtitle: conflict.rfq?.title, stage: "Reassignment required", href: "/evaluation", action: "Assign an unconflicted evaluator to complete the review", actionLabel: "Open evaluation" }));
+        }
+        if (member) {
+          const reviews = await NegotiatedReview.findAll({ where: { status: "pending" }, include: [{ model: ProcurementAttempt, as: "sourceAttempt", include: [{ model: Rfq, as: "rfq" }] }] });
+          for (const review of reviews) {
+            const vote = await BacDecisionVote.findOne({ where: { subjectType: "negotiated", subjectId: review.id, userId: user.id } });
+            const present = review.committeeReview?.attendingMemberIds?.some((id) => Number(id) === user.id);
+            if (officer || (present && !vote)) rows.push(item({ type: "negotiatedReview", id: review.id, title: review.sourceAttempt?.rfq?.referenceNo ?? "Negotiated Procurement", subtitle: review.sourceAttempt?.rfq?.title, stage: "Negotiated Procurement eligibility review", href: "/secretariat/rfq", action: "Review eligibility documents and required BAC decisions", actionLabel: "Open procurement history" }));
+          }
+        }
       })());
     }
 

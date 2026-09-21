@@ -1,4 +1,7 @@
 import { Op } from "sequelize";
+import '../models/announcementScheduleAssociation.js';
+import { Rfq } from '../models/biddingModel.js';
+import { announcementFromOfficialSchedule } from '../services/procurementSchedulePolicy.js';
 import { AuditLog } from "../models/auditLogModel.js";
 import { Role } from "../models/roleModel.js";
 import { User } from "../models/userModel.js";
@@ -434,7 +437,9 @@ const daysUntil = (date, now) =>
 //
 // It deliberately omits author, publisher, draft state and withdrawal history —
 // everything the internal serialiser carries and the public must not.
-export const publicAnnouncement = (announcement, now) => ({
+export const publicAnnouncement = (source, now) => {
+  const announcement = announcementFromOfficialSchedule(source);
+  return ({
   source: "announcement",
   id: announcement.id,
   title: announcement.title,
@@ -457,6 +462,10 @@ export const publicAnnouncement = (announcement, now) => ({
   procurementMethod: announcement.procurementMethod ?? null,
   procurementMethodCitation: announcement.procurementMethodCitation ?? null,
   prebidAt: announcement.prebidAt ?? null,
+  prebidVenue: announcement.prebidVenue ?? null,
+  prebidRequired: announcement.prebidRequired ?? Boolean(announcement.prebidAt),
+  procurementType: announcement.procurementType ?? null,
+  publicationDate: announcement.publicationDate ?? null,
   submissionDeadline: announcement.submissionDeadline ?? null,
   submissionClosesInDays: daysUntil(announcement.submissionDeadline, now),
   bidOpeningAt: announcement.bidOpeningAt ?? null,
@@ -485,6 +494,7 @@ export const publicAnnouncement = (announcement, now) => ({
   projectId: announcement.appEntryId ?? null,
   projectTitle: announcement.project?.projectTitle ?? null,
 });
+};
 
 export const listAnnouncements = async (req, res) => {
   const now = new Date();
@@ -506,7 +516,7 @@ export const listAnnouncements = async (req, res) => {
         status: "published",
         [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: now } }],
       },
-      include: [{ model: AppEntry, as: "project", attributes: ["id", "projectTitle"] }],
+      include: [{ model: AppEntry, as: "project", attributes: ["id", "projectTitle"] }, { model: Rfq, as: 'officialProcurement' }],
       order: [["publishedAt", "DESC"]],
     }),
   ]);
@@ -619,7 +629,7 @@ export const listArchivedAnnouncements = async (req, res) => {
         { status: "published", expiresAt: { [Op.ne]: null, [Op.lte]: now } },
       ],
     },
-    include: [{ model: AppEntry, as: "project", attributes: ["id", "projectTitle"] }],
+    include: [{ model: AppEntry, as: "project", attributes: ["id", "projectTitle"] }, { model: Rfq, as: 'officialProcurement' }],
     order: [["publishedAt", "DESC"]],
     limit: Math.min(Number(req.query.limit) || 200, 500),
   });

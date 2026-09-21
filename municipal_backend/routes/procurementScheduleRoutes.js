@@ -1,0 +1,10 @@
+import express from 'express';
+import { requirePermission, requireAnyPermission } from '../middleware/permissionMiddleware.js';
+import { getSchedule, approveSchedule, requestScheduleAmendment, submitScheduleAmendment, decideScheduleAmendment } from '../controllers/procurementScheduleController.js';
+const router = express.Router();
+router.get('/rfqs/:id/schedule', requireAnyPermission('bidding.view', 'bidding.publish', 'bidding.chairEvaluation', 'audit.viewAll'), getSchedule);
+router.post('/rfqs/:id/schedule/approve', requirePermission('bidding.chairEvaluation'), approveSchedule);
+router.post('/rfqs/:id/schedule/amendments', requirePermission('bidding.publish'), requestScheduleAmendment);
+router.post('/rfqs/:id/schedule/amendments/:amendmentId/submit', requirePermission('bidding.publish'), submitScheduleAmendment);
+router.post('/rfqs/:id/schedule/amendments/:amendmentId/decision', requirePermission('bidding.chairEvaluation'), decideScheduleAmendment);
+export default router;

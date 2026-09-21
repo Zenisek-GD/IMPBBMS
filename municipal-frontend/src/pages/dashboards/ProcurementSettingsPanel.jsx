@@ -40,6 +40,16 @@ export default function ProcurementSettingsPanel() {
       </fieldset>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={policy.requirePresidingOfficer} onChange={(event) => setPolicy({ ...policy, requirePresidingOfficer: event.target.checked })} />Require an attending presiding Chairperson or Vice-Chairperson</label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={policy.requireFailureDocuments} onChange={(event) => setPolicy({ ...policy, requireFailureDocuments: event.target.checked })} />Require supporting documents for failed procurement and eligibility review</label>
+      <fieldset className="space-y-3 rounded border border-border-muted p-4">
+        <legend className="px-1 text-sm font-semibold">Negotiated Procurement review requirements</legend>
+        <p className="text-xs text-text-secondary">Record the document checklist approved for your process. Reviewers must attach evidence for each applicable required item before BAC approval.</p>
+        {(policy.negotiatedRequirements ?? []).map((requirement, index) => <div key={requirement.key} className="grid gap-2 md:grid-cols-[1fr_auto]">
+          <label className="text-xs text-text-secondary">Requirement<input className={fieldClass} required maxLength={255} value={requirement.label} onChange={(event) => setPolicy({ ...policy, negotiatedRequirements: policy.negotiatedRequirements.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item) })} /></label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={requirement.required} onChange={(event) => setPolicy({ ...policy, negotiatedRequirements: policy.negotiatedRequirements.map((item, itemIndex) => itemIndex === index ? { ...item, required: event.target.checked } : item) })} />Required</label>
+          <p className="text-xs text-text-faint">Applies to: {requirement.categories?.join(', ') || 'all procurement types'}</p>
+        </div>)}
+        <Button type="button" variant="secondary" disabled={(policy.negotiatedRequirements?.length ?? 0) >= 30} onClick={() => setPolicy({ ...policy, negotiatedRequirements: [...(policy.negotiatedRequirements ?? []), { key: `additional${Date.now()}`, label: 'Additional supporting document', required: true }] })}>Add supporting requirement</Button>
+      </fieldset>
       <Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save approved procurement settings'}</Button>
     </form>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}

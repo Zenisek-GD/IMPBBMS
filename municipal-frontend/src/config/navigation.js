@@ -164,6 +164,7 @@ export const ROLE_NAV = {
         heading: 'Bidding',
         items: [
           { label: 'Evaluation & Award', href: '/evaluation', icon: Gavel, shortcut: 'Alt+3' },
+          { label: 'Procurement Approvals', href: '/secretariat/rfq', icon: ClipboardCheck },
           { label: 'Observers', href: '/observers', icon: Eye, shortcut: 'Alt+4' },
           { label: 'Protests', href: '/protests', icon: Scale, shortcut: 'Alt+5' },
           { label: 'Live Conference', href: '/conferences', icon: CalendarClock, shortcut: 'Alt+6' },
@@ -202,6 +203,7 @@ export const ROLE_NAV = {
         heading: 'Bidding',
         items: [
           { label: 'Evaluation & Award', href: '/evaluation', icon: Gavel, shortcut: 'Alt+3' },
+          { label: 'Procurement Approvals', href: '/secretariat/rfq', icon: ClipboardCheck },
           { label: 'Observers', href: '/observers', icon: Eye, shortcut: 'Alt+4' },
           { label: 'Protests', href: '/protests', icon: Scale, shortcut: 'Alt+5' },
           { label: 'Live Conference', href: '/conferences', icon: CalendarClock, shortcut: 'Alt+6' },
@@ -232,6 +234,7 @@ export const ROLE_NAV = {
         heading: 'Evaluation',
         items: [
           { label: 'Bid Evaluation', href: '/evaluation', icon: Gavel, shortcut: 'Alt+2' },
+          { label: 'BAC Decisions', href: '/secretariat/rfq', icon: ClipboardCheck },
           { label: 'Live Conference', href: '/conferences', icon: CalendarClock, shortcut: 'Alt+3' },
         ],
       },

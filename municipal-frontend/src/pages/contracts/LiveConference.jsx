@@ -36,6 +36,12 @@ function ScheduleModal({ onClose, onScheduled }) {
     }
   }, [])
 
+  const selectedRfq = rfqs.find((rfq) => rfq.id === Number(form.rfqId))
+  const usesOfficialDate = ['prebid', 'opening'].includes(form.purpose)
+  const officialDate = form.purpose === 'prebid' ? selectedRfq?.prebidAt : selectedRfq?.openingDate
+  const effectiveDate = usesOfficialDate ? officialDate : form.scheduledAt
+  const prebidUnavailable = form.purpose === 'prebid' && selectedRfq && !selectedRfq.prebidRequired
+
   return (
     <Modal title="Schedule conference" onClose={onClose}>
       <div className="flex flex-col gap-4">
@@ -78,11 +84,14 @@ function ScheduleModal({ onClose, onScheduled }) {
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Date &amp; time
             </label>
-            <WorkHoursDateTimeInput
+            {usesOfficialDate ? <p className="rounded border border-border-muted bg-chip/40 px-3 py-2 text-sm" role="status">
+              {prebidUnavailable ? 'Pre-bid conference is not applicable.' : officialDate ? new Date(officialDate).toLocaleString() : 'Complete the procurement schedule first.'}
+              <span className="mt-1 block text-xs text-text-faint">From the main procurement schedule. Approved changes use a schedule amendment.</span>
+            </p> : <WorkHoursDateTimeInput
               value={form.scheduledAt}
               onChange={(event) => setForm({ ...form, scheduledAt: event.target.value })}
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-            />
+            />}
           </div>
         </div>
 
@@ -115,12 +124,12 @@ function ScheduleModal({ onClose, onScheduled }) {
           </Button>
           <button
             type="button"
-            disabled={saving || !form.rfqId || !form.scheduledAt}
+            disabled={saving || !form.rfqId || !effectiveDate || prebidUnavailable}
             onClick={async () => {
               setError('')
               setSaving(true)
               try {
-                await contractsApi.scheduleConference({ ...form, rfqId: Number(form.rfqId) })
+                await contractsApi.scheduleConference({ ...form, scheduledAt: usesOfficialDate ? undefined : form.scheduledAt, rfqId: Number(form.rfqId) })
                 onScheduled()
                 onClose()
               } catch (err) {
@@ -205,8 +214,7 @@ export default function LiveConference() {
       <div className="flex items-start gap-3 rounded-lg border border-border-muted bg-chip/40 p-4">
         <Info size={16} className="mt-0.5 shrink-0 text-navy" />
         <p className="text-[13px] text-text-secondary">
-          A pre-bid conference is mandatory at an ABC of ₱3,000,000 or more for competitive selection modes
-          (IRR Sec. 51.1). Joining records your attendance in the meeting log.
+          Pre-bid conferences appear when required by the procurement schedule. Conference and bid opening dates come from that schedule. Joining records your attendance in the meeting log.
         </p>
       </div>
 

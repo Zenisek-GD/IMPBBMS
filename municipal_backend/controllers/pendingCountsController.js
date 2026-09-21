@@ -53,7 +53,7 @@ export async function getPendingCounts(req, res) {
   }
   if (anyPermission(permissions, ["bidding.technicalInput", "bidding.evaluate", "bidding.chairEvaluation"])) {
     jobs.push((async () => {
-      const rfqs = await Rfq.findAll({ where: { status: { [Op.in]: ["opened", "evaluated"] } }, include: [{ model: Bid, as: "bids", attributes: ["id", "status"], include: [{ model: Evaluation, as: "evaluations", attributes: ["evaluatorId"] }, { model: TwgAssessment, as: "twgAssessments", attributes: ["memberId", "status", "recommendation"] }] }] });
+      const rfqs = await Rfq.findAll({ where: { status: { [Op.in]: ["opened", "evaluated"] } }, include: [{ model: Bid, as: "bids", attributes: ["id", "status"], include: [{ model: Evaluation, as: "evaluations", attributes: ["evaluatorId", "status"] }, { model: TwgAssessment, as: "twgAssessments", attributes: ["memberId", "status", "recommendation", "excludedForConflict"] }] }] });
       Object.assign(queues, evaluationQueues(rfqs, permissions, user.id));
       counts["/evaluation"] = queues.evaluation;
     })());

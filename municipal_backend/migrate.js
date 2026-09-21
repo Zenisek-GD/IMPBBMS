@@ -49,6 +49,7 @@ import { sequelize } from "./models/db.js";
 import "./models/index.js";
 import { migrateRoleSecurity } from "./services/migrateRoleSecurity.js";
 import { migrateUserTextSize } from "./services/migrateUserTextSize.js";
+import { migrateProcurementWorkflow } from "./services/migrateProcurementWorkflow.js";
 import { migrateAuditVisibility } from "./services/migrateAuditVisibility.js";
 import { migratePublicMessageProjectContext } from "./services/migratePublicMessageProjectContext.js";
 
@@ -187,6 +188,8 @@ const run = async () => {
     console.log("✅ user text-size preference column added");
   }
 
+  const procurement = await migrateProcurementWorkflow();
+  console.log(`Procurement workflow migration complete: ${procurement.added.length} columns added; existing history preserved.`);
   const auditVisibility = await migrateAuditVisibility();
   if (auditVisibility.granted) {
     console.log("✅ System Administrator granted official audit activity visibility");

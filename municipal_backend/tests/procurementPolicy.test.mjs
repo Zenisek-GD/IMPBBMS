@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scheduleError, weightError, combinedScores, evaluationError, requirementsError, assessmentCompliant } from "../services/evaluationPolicy.js";
+import { scheduleError, weightError, combinedScores, evaluationError, requirementsError, assessmentCompliant, COMPLIANCE_REQUIREMENTS } from "../services/evaluationPolicy.js";
 import { evaluateBacQuorum, DEFAULT_PROCUREMENT_POLICY } from "../services/bacCommittee.js";
 import { procurementAmountError, suggestProcurementMode, requiresPrebidConference } from "../services/procurementThresholds.js";
 import { negotiatedEligibility } from "../services/attemptPolicy.js";
@@ -22,11 +22,12 @@ test("quality dominates financial weight, both contribute and sum to 100", () =>
 });
 test("goods and infrastructure reject rating scores and failed mandatory criteria", () => {
   for (const category of ["goods", "infrastructure"]) {
+    const criteriaBreakdown = Object.fromEntries(COMPLIANCE_REQUIREMENTS[category].map((row) => [row.key, "compliant"]));
     assert.ok(evaluationError({ category, verdict:"passed", criteriaBreakdown:{ specification:90 } }));
     assert.ok(evaluationError({ category, verdict:"passed", criteriaBreakdown:{ specification:"nonCompliant" } }));
     assert.ok(evaluationError({ category, verdict:"passed", criteriaBreakdown:{ specification:"needsClarification" } }));
-    assert.equal(evaluationError({ category, verdict:"passed", criteriaBreakdown:{ specification:"compliant" } }), null);
-    assert.equal(evaluationError({ category, verdict:"failed", criteriaBreakdown:{ specification:"nonCompliant" }, remarks:"Required specification missing" }), null);
+    assert.equal(evaluationError({ category, verdict:"passed", criteriaBreakdown }), null);
+    assert.equal(evaluationError({ category, verdict:"failed", criteriaBreakdown: { ...criteriaBreakdown, technicalSpecifications:"nonCompliant" }, failureReason:"technicalSpecification", remarks:"Required specification missing" }), null);
   }
   assert.ok(evaluationError({ category:"consulting", criteriaBreakdown:{ expertise:"" } }));
 });
@@ -66,7 +67,7 @@ test("central category limits affect amount checks, mode suggestions and pre-bid
 });
 
 test("negotiated review identifies the precise missing records and excludes incomplete attempts", () => {
-  const failure = {attemptNumber:1,status:"failed",failureReason:"No bids",bacResolutionId:1,resolution:{resolutionNo:"2026-001",resolvedAt:"2026-01-01",quorumMet:true,members:[{concurred:true}]},supportingDocuments:[{name:"Minutes"}]};
+  const failure = {attemptNumber:1,status:"failed",failureReason:"No bids",bacResolutionId:1,resolution:{resolutionNo:"2026-001",resolvedAt:"2026-01-01",quorumMet:true,members:[{concurred:true}]},supportingDocuments:[{name:"Minutes"}],failureRecords:[{status:"approved",approvedById:1,approvedAt:"2026-01-01",bacResolutionId:1}]};
   assert.equal(negotiatedEligibility([failure]).eligible,false);
   assert.ok(negotiatedEligibility([failure,{...failure,attemptNumber:2,bacResolutionId:null}]).missing.includes("Resolution for Procurement Attempt #2 has not yet been recorded."));
   assert.equal(negotiatedEligibility([failure,{...failure,attemptNumber:2}]).eligible,true);

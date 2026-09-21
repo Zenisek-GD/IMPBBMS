@@ -11,6 +11,7 @@ TwgDeclaration.belongsTo(Rfq, { as: "rfq", foreignKey: { name: "rfqId", allowNul
 TwgDeclaration.belongsTo(User, { as: "member", foreignKey: { name: "memberId", allowNull: false }, onDelete: "RESTRICT" });
 
 export const TwgAssessment = sequelize.define("TwgAssessment", {
+  excludedForConflict: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   requirements: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
   recommendation: { type: DataTypes.STRING, allowNull: true },
   remarks: { type: DataTypes.TEXT, allowNull: true },

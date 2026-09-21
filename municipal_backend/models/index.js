@@ -1,6 +1,8 @@
 export { TrustedDevice, LoginSession } from "./authSecurityModel.js";
 export { TwgDeclaration, TwgAssessment } from "./twgModel.js";
-export { ProcurementAttempt, NegotiatedReview } from "./procurementAttemptModel.js";
+export { ProcurementAttempt, NegotiatedReview, FailureRecord, BacDecisionVote } from "./procurementAttemptModel.js";
+export { EvaluationPlan, EvaluatorDeclaration, EvaluationReturn, EvaluationCriteriaAmendment } from "./evaluationWorkflowModel.js";
+export { ScheduleAmendment } from "./scheduleAmendmentModel.js";
 export { ProcurementLimit } from "./procurementLimitModel.js";
 // Single registration point for every Sequelize model. Import new models here
 // so `npm run migrate` and `npm run seed` always see the full schema.

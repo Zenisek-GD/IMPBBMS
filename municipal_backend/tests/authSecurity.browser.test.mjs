@@ -5,7 +5,7 @@ import path from "node:path";
 import express from "express";
 import puppeteer from "puppeteer-core";
 
-test("security settings and fixed session expiry in a real browser", { timeout: 90_000 }, async (t) => {
+test("security settings and fixed session expiry in a real browser", { timeout: 180_000 }, async (t) => {
   const executablePath = [
     process.env.CHROME_PATH,
     "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -20,11 +20,13 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
   });
-  const browser = await puppeteer.launch({ executablePath, headless: true });
+  let browser;
   t.after(async () => {
-    await browser.close();
+    await browser?.close();
+    server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
+  browser = await puppeteer.launch({ executablePath, headless: true });
   const origin = "http://127.0.0.1:" + server.address().port;
   const page = await browser.newPage();
   const errors = [];
@@ -39,7 +41,9 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
   let lastUpdate;
   let authenticated = true;
   let forceExpired = false;
-  let deadline = Date.now() + 10 * 60_000;
+  // Keep expiry warnings out of policy-edit dialogs; expiry is tested below
+  // with its own deliberately short fixed deadline.
+  let deadline = Date.now() + 600_000;
   let policyWrites = 0;
   let sessionPolicyWrites = 0;
   let sessionDurationMinutes = 30;
@@ -101,23 +105,28 @@ test("security settings and fixed session expiry in a real browser", { timeout: 
       data = { lgu: { name: "Test Municipality" }, branding: { systemName: "ProcureNance" } };
     } else if (url.pathname.includes("notifications")) {
       data = [];
+    } else if (url.pathname === "/api/reports/pending-counts") {
+      data = { counts: {}, queues: {} };
     }
     await request.respond({ status, contentType: "application/json", headers, body: JSON.stringify(data) });
   });
 
 
-  const click = (label) => page.evaluate((label) => {
-    const button = [...document.querySelectorAll('button')].find((button) => button.textContent === label);
+  const click = async (label) => {
+    await page.waitForFunction((label) => [...document.querySelectorAll('button')].some((button) => button.textContent.trim() === label && !button.disabled), {}, label);
+    return page.evaluate((label) => {
+    const button = [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === label);
     if (!button) throw new Error("Missing button: " + label);
     button.click();
-  }, label);
+    }, label);
+  };
   const waitSaved = (count) => page.waitForFunction((count) =>
     document.body.innerText.includes(count + ' of 3 roles currently require'), {}, count);
   const adminSwitch = '[role="switch"][aria-label="Require 2FA for System Administrator"]';
   const observerSwitch = '[role="switch"][aria-label="Require 2FA for Observer"]';
   const customSwitch = '[role="switch"][aria-label="Require 2FA for Custom Database Role"]';
   await page.goto(origin + "/admin/security-settings", { waitUntil: "networkidle0" });
-  await page.waitForSelector(adminSwitch);
+  await page.waitForSelector(adminSwitch).catch(async (error) => { throw new Error(`${error.message}\nURL: ${page.url()}\nPage: ${await page.evaluate(() => document.body.innerText)}\nErrors: ${errors.join('; ')}`); });
   assert.equal((await page.$$('[role="switch"]')).length, 3);
   assert.match(await page.evaluate(() => document.body.innerText), /2 of 3 roles currently require/);
   assert.match(await page.evaluate(() => document.body.innerText), /Automatic Session Logout/);

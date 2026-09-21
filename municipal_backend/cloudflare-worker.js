@@ -185,9 +185,11 @@ export default {
   async scheduled(_controller, _workerEnv, ctx) {
     configureDatabaseConnection();
     const { runSecurityScan } = await import("./controllers/securityController.js");
+    const { closeExpiredProcurements } = await import("./services/procurementDeadlineSweep.js");
     ctx.waitUntil(
       Promise.all([
         runSecurityScan(null, null),
+        closeExpiredProcurements(),
         // Prevent expired cookie sessions accumulating indefinitely in D1.
         env.SESSIONS.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(Date.now()).run(),
         env.SESSIONS.prepare("DELETE FROM rate_limits WHERE expires_at <= ?").bind(Date.now()).run(),

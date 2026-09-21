@@ -243,21 +243,28 @@ export const submissionsClosed = (announcement, now = new Date()) =>
  * caveat: attach it to a real scheduler for punctual releases.
  */
 export const releaseScheduledAnnouncements = async (now = new Date()) => {
-  const { Op } = await import("sequelize");
-
-  const due = await Announcement.findAll({
-    where: {
-      status: "draft",
-      publishAt: { [Op.ne]: null, [Op.lte]: now },
-    },
-  });
-
-  for (const announcement of due) {
-    // An expiry already in the past would publish and immediately hide it,
-    // which reads as the scheduler having failed. Left as a draft for a human.
-    if (announcement.expiresAt && new Date(announcement.expiresAt) <= now) continue;
-    await announcement.update({ status: "published", publishedAt: now });
+  const { Op } = await import('sequelize');
+  const { Rfq } = await import('./biddingModel.js');
+  const { scheduleValidationError, announcementSchedule } = await import('../services/procurementSchedulePolicy.js');
+  const { withAuditTransaction } = await import('../services/auditLog.js');
+  const due = await Announcement.findAll({ where: { status: 'draft', publishAt: { [Op.ne]: null, [Op.lte]: now } } });
+  const released = [];
+  for (const candidate of due) {
+    const result = await withAuditTransaction(async (transaction, audit) => {
+      const rfq = candidate.rfqId ? await Rfq.findByPk(candidate.rfqId, { transaction, lock: transaction.LOCK.UPDATE }) : null;
+      const announcement = await Announcement.findByPk(candidate.id, { transaction, lock: transaction.LOCK.UPDATE });
+      if (!announcement || announcement.status !== 'draft' || !announcement.publishAt || new Date(announcement.publishAt) > now) return null;
+      if (announcement.expiresAt && new Date(announcement.expiresAt) <= now) return null;
+      if (announcement.registrationDeadline && new Date(announcement.registrationDeadline) <= now) return null;
+      const hasBiddingDates = ['submissionDeadline', 'bidOpeningAt', 'prebidAt'].some((key) => announcement[key] !== undefined && announcement[key] !== null && announcement[key] !== '');
+      if (announcement.category === 'procurementOpportunity' || announcement.rfqId || hasBiddingDates) {
+        if (!rfq || rfq.id !== announcement.rfqId || rfq.status !== 'published' || !rfq.scheduleApprovedAt || scheduleValidationError(rfq) || new Date(rfq.closingDate) <= now) return null;
+      }
+      await announcement.update({ ...(rfq ? announcementSchedule(rfq) : {}), status: 'published', publishedAt: now }, { transaction });
+      await audit({ actionType: 'announcement.published', entityRef: 'announcement', entityId: announcement.id, actorRole: 'system', summary: 'Scheduled announcement published using the approved official schedule.', beforeState: { status: 'draft' }, afterState: { status: 'published', rfqId: rfq?.id, scheduledAt: announcement.publishAt, submissionDeadline: announcement.submissionDeadline, bidOpeningAt: announcement.bidOpeningAt } });
+      return announcement;
+    });
+    if (result) released.push(result);
   }
-
-  return due;
+  return released;
 };

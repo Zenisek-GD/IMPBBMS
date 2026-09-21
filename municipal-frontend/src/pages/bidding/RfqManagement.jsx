@@ -7,6 +7,7 @@ import DashboardPage from '../../components/ui/DashboardPage'
 import { usePermissions } from '../../context/usePermissions'
 import ScheduleFields from './ScheduleFields'
 import { schedulePayload } from './schedulePayload'
+import ScheduleWorkspace from './ScheduleWorkspace'
 import AttemptHistoryModal from './AttemptHistoryModal'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
@@ -302,6 +303,7 @@ export default function RfqManagement() {
   const [opening, setOpening] = useState(null)
   const [abstractFor, setAbstractFor] = useState(null)
   const [historyFor, setHistoryFor] = useState(null)
+  const [scheduleFor, setScheduleFor] = useState(null)
   const [witnesses, setWitnesses] = useState('')
   const [actionError, setActionError] = useState('')
   const [message, setMessage] = useState('')
@@ -355,6 +357,8 @@ export default function RfqManagement() {
       </DashboardPage>
     )
   }
+
+  if (scheduleFor) return <DashboardPage><ScheduleWorkspace rfq={scheduleFor} onClose={() => setScheduleFor(null)} onChanged={(result) => { refresh(); setMessage(result?.message ?? 'Procurement preparation updated.') }} /></DashboardPage>
 
   return (
     <DashboardPage>
@@ -440,10 +444,13 @@ export default function RfqManagement() {
                     <td className="px-4 py-3">
                       <div className="flex min-w-[12rem] flex-wrap items-center gap-1.5">
                         <Button size="table" variant="secondary" onClick={() => setHistoryFor(rfq)}>History / next action</Button>
+                        <Button size="table" variant="secondary" onClick={() => setScheduleFor(rfq)}>Schedule / criteria</Button>
                         {canPublish && rfq.status === 'draft' && (
                           <Button
                             size="table"
                             variant="primary"
+                            disabled={!rfq.scheduleApprovedAt}
+                            title={!rfq.scheduleApprovedAt ? 'Approve the official schedule before publication.' : 'Publish the approved procurement'}
                             onClick={() => run(() => biddingApi.publishRfq(rfq.id), 'RFQ / ITB published. Bid submission is open until the recorded deadline.')}
                           >
                             Publish

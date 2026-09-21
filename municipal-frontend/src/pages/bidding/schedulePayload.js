@@ -6,21 +6,20 @@ export const localDateTime = (value) => {
   return local.toISOString().slice(0, 16)
 }
 
-export const schedulePayload = (form, category = form.category) => {
+export const schedulePayload = (form) => {
   const closing = new Date(form.closingDate)
   const opening = new Date(form.openingDate)
   if (Number.isNaN(closing.getTime()) || Number.isNaN(opening.getTime())) throw new Error('Enter a complete bid submission deadline and bid opening date and time.')
   if (opening <= closing) throw new Error('Bid opening must be scheduled after the bid submission deadline.')
   const payload = { closingDate: closing.toISOString(), openingDate: opening.toISOString() }
-  if (form.prebidAt) payload.prebidAt = new Date(form.prebidAt).toISOString()
-  if (category === 'consulting') {
-    const quality = Number(form.qualityWeight)
-    const financial = Number(form.financialWeight)
-    const passing = Number(form.consultingPassingScore)
-    if (!Number.isFinite(quality) || !Number.isFinite(financial) || quality <= financial) throw new Error('Quality weighting must be higher than the financial/price weighting.')
-    if (quality <= 0 || financial <= 0 || Math.abs(quality + financial - 100) > 0.001) throw new Error('Quality and financial weights must both be positive and total 100%.')
-    if (form.consultingPassingScore === '' || !Number.isFinite(passing) || passing <= 0 || passing > 100) throw new Error('Enter a minimum passing quality score greater than 0 and at most 100.')
-    Object.assign(payload, { qualityWeight: quality, financialWeight: financial, consultingPassingScore: passing })
+  payload.prebidRequired = Boolean(form.prebidRequired)
+  payload.prebidAt = payload.prebidRequired && form.prebidAt ? new Date(form.prebidAt).toISOString() : null
+  payload.prebidVenue = payload.prebidRequired ? String(form.prebidVenue ?? '').trim() : null
+  payload.prebidRemarks = payload.prebidRequired ? String(form.prebidRemarks ?? '').trim() : null
+  if (payload.prebidRequired && (!payload.prebidAt || !payload.prebidVenue)) throw new Error('A required pre-bid conference needs a date, time, and venue or online meeting details.')
+  if (payload.prebidAt && new Date(payload.prebidAt) >= closing) throw new Error('The pre-bid conference must be scheduled before the bid submission deadline.')
+  for (const key of ['procurementStartAt', 'publicationStartAt', 'publicationEndAt', 'evaluationStartAt', 'evaluationEndAt', 'postQualificationStartAt', 'postQualificationEndAt', 'expectedAwardAt']) {
+    payload[key] = form[key] ? new Date(form[key]).toISOString() : null
   }
   return payload
 }

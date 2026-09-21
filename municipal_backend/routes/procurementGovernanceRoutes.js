@@ -1,12 +1,20 @@
 import express from "express";
 import { requireAnyPermission, requirePermission } from "../middleware/permissionMiddleware.js";
-import { getBacCommittee, listAttemptHistory, createRebid, recordAttemptEvidence, submitNegotiatedReview, decideNegotiatedReview, startNegotiatedProcurement } from "../controllers/procurementGovernanceController.js";
+import { getBacCommittee, listAttemptHistory, createRebid, recordAttemptEvidence, submitNegotiatedReview, decideNegotiatedReview, startNegotiatedProcurement,
+  prepareFailureRecord, submitFailureRecord, reviewFailureRecord, voteFailureRecord, declareFailureOfBidding, reviewNegotiatedDocuments, voteNegotiatedReview } from "../controllers/procurementGovernanceController.js";
 const router = express.Router();
 router.get("/bac-committee", requireAnyPermission("bidding.view", "bidding.publish", "settings.manage", "pr.determineMode", "app.consolidate", "vendor.determineEligibility", "bidding.chairEvaluation"), getBacCommittee);
 router.get("/rfqs/:id/attempts", requireAnyPermission("bidding.view", "bidding.publish", "audit.viewAll"), listAttemptHistory);
 router.post("/rfqs/:id/rebid", requireAnyPermission("bidding.publish", "bidding.chairEvaluation"), createRebid);
 router.post("/rfqs/:id/attempt-evidence", requireAnyPermission("bidding.publish", "bidding.chairEvaluation"), recordAttemptEvidence);
+router.post("/rfqs/:id/failure", requireAnyPermission("bidding.publish", "bidding.chairEvaluation"), prepareFailureRecord);
+router.post("/rfqs/:id/failure/submit", requireAnyPermission("bidding.publish", "bidding.chairEvaluation"), submitFailureRecord);
+router.post("/rfqs/:id/failure/review", requirePermission("bidding.evaluate"), reviewFailureRecord);
+router.post("/rfqs/:id/failure/vote", requirePermission("bidding.evaluate"), voteFailureRecord);
+router.post("/rfqs/:id/failure/decision", requirePermission("bidding.chairEvaluation"), declareFailureOfBidding);
 router.post("/rfqs/:id/negotiated-review", requireAnyPermission("bidding.publish", "bidding.chairEvaluation"), submitNegotiatedReview);
 router.post("/rfqs/:id/negotiated-review/decision", requirePermission("bidding.chairEvaluation"), decideNegotiatedReview);
+router.post("/rfqs/:id/negotiated-review/review", requirePermission("bidding.evaluate"), reviewNegotiatedDocuments);
+router.post("/rfqs/:id/negotiated-review/vote", requirePermission("bidding.evaluate"), voteNegotiatedReview);
 router.post("/rfqs/:id/negotiated-start", requireAnyPermission("bidding.publish", "bidding.chairEvaluation"), startNegotiatedProcurement);
 export default router;

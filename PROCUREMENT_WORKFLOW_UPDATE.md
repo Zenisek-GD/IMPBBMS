@@ -1,67 +1,103 @@
-# Municipal procurement workflow update
+﻿# Municipal procurement workflow update
 
-The existing Express/Sequelize and React workflow now connects technical assessment, BAC decisions, procurement attempts, awards and detailed reports. The Decision Support Dashboard remains available.
+The local checkout includes the procurement and bidding improvements on top of upstream commit `6f6c049`. The existing React, Express and Sequelize application now connects approved schedules, category-specific evaluation, committee decisions, permanent procurement attempts and audit history.
 
-## Evaluation and committee decisions
+## Evaluation
 
-- Resolution entry uses a fixed **Resolution No.** prefix. Only newly entered or edited values are normalized; historical values and audit records are retained.
-- Submission and opening use complete timestamps. Opening must be strictly later, including when both occur on the same day. RFQ preparation includes the pre-bid conference schedule.
-- Consulting uses configurable quality and financial weights. Both are positive, total 100%, and quality exceeds financial. Defaults for new procurements are 75/25, with a configurable passing quality score of 60.
-- Quality is the average of submitted technical scores. Financial score is `lowest responsive bid price / bidder price × 100`. Combined score is `quality score × quality weight / 100 + financial score × financial weight / 100`, stored to four decimal places. Only responsive bids enter financial ranking.
-- Goods and infrastructure use mandatory compliance findings followed by lowest-price ranking. A mandatory failure excludes the bid; unresolved clarification cannot be finalized as compliant.
-- TWG members declare no conflict before preparing assessments. Drafts support findings, recommendations, written justification and attachments. Submitted assessments and supporting files become immutable. BAC reviewers cannot review their own TWG submissions.
-- Committee decisions require explicit attendance, valid BAC positions and configured quorum. This covers APP consolidation recommendations, PR mode determination, bidder eligibility decisions, evaluation closure, award recommendations, failure resolutions and negotiated-review decisions.
-- Defaults require five signatories: one Chairperson, one Vice-Chairperson and three Members, with a quorum of three and an attending presiding officer. Administrators can change the approved configuration in **Settings → Procurement Settings**.
-- HoPE award approval remains separate from BAC recommendation. A recommender cannot approve or reject their own award. Existing notification and contract preparation flows remain available.
+| Procurement category | Evaluation and ranking |
+| --- | --- |
+| Goods | Mandatory compliance checklist, pass/fail findings and responsive lowest-price ranking |
+| Infrastructure | Mandatory compliance checklist, pass/fail findings and responsive lowest-price ranking |
+| Consulting services | Independently approved technical criteria, quality threshold, quality/price weights and weighted ranking |
+
+Consulting criteria must be approved before publication. Quality and price weights are positive, total 100%, and quality exceeds price. Approved criteria are read-only during evaluation. A documented criteria amendment requires independent approval and is blocked after bids have been received.
+
+Financial score is `lowest responsive bid price / bidder price * 100`; the combined score applies the approved quality and price weights. Only responsive bids enter financial ranking. Goods and infrastructure cannot submit consulting-style numeric scores. Failed compliance findings require a reason, explanation and recommendation.
+
+Each evaluator records their own conflict-of-interest declaration. A conflict excludes that evaluator's contribution and creates reassignment work. Users cannot declare on another evaluator's behalf. TWG submissions require declarations and independent BAC review.
+
+Submitted evaluations and TWG assessments are locked. Authorized returns require a reason and retain the previous submission. Replacement submissions, return history and supporting documents remain available; returned or superseded evaluations do not count toward closure or award ranking.
 
 ## Failure, rebid and negotiated procurement
 
-Each attempt has a separate RFQ and numbered history under its original PR or early-procurement APP project. A rebid preserves previous bids, evaluations, resolutions, evidence and outcomes.
+Failure of Bidding follows preparation, submission, BAC review, attendance validation, individual committee decisions and authorized finalization. The Secretariat prepares documents; the presiding BAC officer finalizes only when recorded personal decisions meet configured quorum and participation requirements. Each member must record their own decision. Submission of failure documents does not itself declare a procurement failed.
 
-Cancellations retain a completed attempt record; subsequent procurement receives a new attempt number. Failed attempts cannot be relabeled by cancelling them. A disapproved award remains recorded when the BAC submits a fresh recommendation.
+Permanent failure records include their number, procurement attempt, category, explanation, responsible officials, recommendations, resolution, evidence, next action and approval metadata. Rejected proposals and prior failures remain in history. Pending BAC failure review blocks conflicting evaluation, post-qualification, award and cancellation actions.
 
-The default negotiated-review requirement is two failed attempts. Each failure needs an official reason, BAC resolution with recorded approval, and supporting evidence when configured. The API lists missing requirements. Negotiated procurement requires an eligibility submission, another authorized BAC officer's decision, then a separate action to start the approved process. A rejected review permits a rebid. No ordinary RFQ or PR mode action can bypass this history.
+The first approved failure permits a rebid. A new attempt retains the original PR or early-procurement APP link while preserving the previous attempt's schedule, bids, evaluations, resolutions and evidence. Failed attempts cannot be relabeled through cancellation.
 
-Historical missing evidence can be appended through attempt history. Existing failure reasons and resolutions are retained. Evidence files cannot be deleted through ordinary document actions.
+Negotiated Procurement requires the configured failed-attempt count (default two), official approved failure records, a complete eligibility checklist and a separate BAC review. The configurable document checklist supports revised specifications or scope, updated costs, market and price references, end-user justification, resolutions and other required approvals. Missing requirements are shown explicitly. Each participating BAC member records a personal decision, and starting the approved negotiated attempt remains a separate authorized action.
 
-## Settings, pending work and reports
+Legacy missing failure evidence can be appended through the governed review process. Original failure details remain intact, and ordinary document deletion cannot remove permanent procurement evidence.
 
-**Settings → Procurement Settings → Applicable Limits** manages category, method, amounts, effective date, status, policy reference and remarks. Effective values are loaded centrally; category-specific values take priority over general values. Existing server defaults remain when no effective override exists. Changes are audited.
+## Authoritative schedules and announcements
 
-Sidebar counts use the current user's permissions and relevant work queues. They refresh after successful actions, navigation, window focus and periodically.
+Each procurement attempt stores the authoritative publication, pre-bid, submission, opening, evaluation, post-qualification and expected award dates. The full-page Schedule / Criteria workspace supports preparation and independent BAC schedule approval before publication.
 
-The Reports section has fourteen detailed reports: procurement summary, status, plans, bidding activities, bidder participation, bid evaluation, TWG evaluation, BAC actions and resolutions, failures, rebids, negotiated procurement, awarded contracts, timeline and audit trail. Each supports authorized viewing, applicable filters, search, sorting and pagination. CSV opens in Excel; **Print / PDF** produces a print view with browser Save as PDF support. Exports are limited to 10,000 filtered records with an explicit instruction to narrow oversized reports.
+Pre-bid conferences are optional. When required, a date, time and venue or online meeting details are mandatory, and the conference must precede the submission deadline. Opening must be strictly after the deadline, including on the same day. All supplied milestones are checked for a valid sequence.
 
-Report projections preserve departmental and supplier scope, private TWG drafts, blind bidder identities and sealed prices. Audit export requires the existing audit export permission.
+Linked public announcements, invitations, conferences, dashboard deadlines and reports consume these dates. Bidding-date fields cannot be published on an unlinked notice, even if it is classified as a general announcement. Archived announcements and completed conference dates retain their historical values.
 
-## Migration and rollout
+Published schedules require a formal amendment with previous and proposed values, a reason, supporting uploaded evidence and independent approval. Approval revalidates the current schedule and commits schedule, public projections and audit records together. Stale amendments, reopening a closed submission period and rewriting completed opening dates are rejected.
 
-From `municipal_backend`, after configuring the target MySQL connection and backing it up:
+Bid submission enforces the exact approved deadline. A periodic service also closes expired submission periods and records deadline and closure events. Bid creation, security details, verification-ticket consumption and the audit event commit atomically, including under concurrent duplicate requests.
+
+## Roles, next actions and reporting
+
+BAC chair and vice-chair navigation includes Procurement Approvals; members can access BAC Decisions. The Secretariat retains preparation and publication duties. Status-dependent actions and dashboard tasks reflect permissions, personal committee decisions, approvals and outstanding prerequisites. Backend checks enforce the same rules.
+
+Procurement Settings manages signatories, quorum, applicable limits and the negotiated-document checklist. Defaults use five signatories (chair, vice-chair and three members), quorum three and an attending presiding officer. HoPE award approval remains separate from BAC recommendation.
+
+The existing detailed reports, exports and Decision Support Dashboard remain available. Evaluation reports include submission state, declarations and failure reasons. Timelines include approvals, amendments, failures, rebids and negotiated review. Report permissions retain department and supplier scope, private TWG drafts, blinded bidder identities and sealed prices.
+
+## Local database migration
+
+The configured local database was backed up before migration. The backup was first restored to an isolated loopback MySQL instance, where the additive migration was applied twice to verify repeatability and preservation.
+
+The migration was then applied successfully to the local application database on September 14, 2026. Verification matched all 655 original rows across 68 tables against the pre-migration checkpoint. The audit chain was intact at 160 entries, and `node migrate.js --check` reported the schema up to date. These counts describe the migration checkpoint; ordinary subsequent application activity may add records.
+
+The SQL backup, original-record checkpoint and verification results are retained at:
+
+`C:\Users\Gerald\AppData\Local\Temp\impbbms-procurement-backup-1789381757946`
+
+No remote deployment or Git push was performed.
+
+For another installation, back up its configured database and run from `municipal_backend` before starting the updated application:
 
 ```powershell
-npm run migrate:procurement
+npm.cmd run migrate:procurement
+node migrate.js --check
 ```
 
-Run during maintenance before starting the updated application. This dedicated migration adds missing workflow columns and new tables, then registers historical attempts. It can be rerun and does not drop or rename existing tables or rewrite past bids, evaluations, awards, resolutions or audit hashes. Existing completed/evaluated procurements retain their prior evaluation outcomes without a retroactive TWG requirement. Missing historical declarations and approvals are not invented. New and active procurements follow the updated rules.
-
-After migration, configure the municipality's approved signatories, quorum and applicable limits, then build the frontend with `npm run build` in `municipal-frontend`.
-
-The target application database was unavailable during implementation. No migration or deployment was performed against existing municipal data. Database verification used an isolated loopback MySQL instance and disposable schemas.
+The migration adds missing columns and tables and registers historical attempts. It does not drop or rename existing tables or fabricate historical declarations or approvals. Existing completed/evaluated procurements retain their outcomes. Missing prerequisites on active legacy records must be completed through the authorized workflow.
 
 ## Verification
 
+The final complete backend regression run passed 109 tests with zero failures or skips, including database integration and the authentication browser test.
+
+Frontend lint, the production build and the procurement browser walkthrough passed. The walkthrough covers consulting criteria, goods/infrastructure compliance failures, personal declarations, schedule approval permissions, failure preparation versus BAC action, report routes and mobile containment.
+
+Backend integration coverage includes permissions, immutable evaluation corrections, conflict exclusions, committee quorum and personal voting, failure review locks, two-failure negotiated eligibility, schedule amendment rollback and synchronization, direct and scheduled announcement validation, atomic bids and verification tickets, deadline closure, migration repeatability, record preservation, audit-chain integrity and scoped reports.
+
+Run procurement policy checks from `municipal_backend` (database suites skip unless explicitly enabled):
+
 ```powershell
-# Backend pure policy checks; database suites skip unless explicitly enabled.
-npm run test:procurement
-
-# Isolated MySQL tests: root with an empty password, loopback only.
-# Default test port is 33317. Each suite creates/drops its own random schema.
-$env:RUN_PROCUREMENT_DB_TESTS = '1'
-$env:PROCUREMENT_TEST_DB_PORT = '33317'
-npm run test:procurement
-
-# After the frontend build, with Chrome/Edge installed:
-npm run test:procurement:browser
+npm.cmd run test:procurement
 ```
 
-Integration coverage includes permission enforcement, mandatory failures, weighted ranking, independent review, quorum, transactional audit rollback, award issuance, two failed attempts and negotiated approval, effective limits, evidence immutability, migration idempotency, existing-record preservation, audit-chain verification and the existing integrity monitor's bulk/decimal regressions. Reports tests exercise all fourteen sources, source permissions, departmental/supplier scope, sealed-value protection and pending counts. Browser checks exercise TWG declaration, BAC attendance, settings, every report route and mobile report containment.
+For an isolated MySQL instance with a loopback-only root account and empty password:
+
+```powershell
+$env:RUN_PROCUREMENT_DB_TESTS = '1'
+$env:PROCUREMENT_TEST_DB_PORT = '33317'
+npm.cmd run test:procurement
+```
+
+Each database suite creates and removes only its own randomly named test schema. Build the frontend before browser checks:
+
+```powershell
+npm.cmd run build --prefix ../municipal-frontend
+npm.cmd run test:procurement:browser
+```
+
+Chrome/Edge must be permitted to start in the test environment. Browser-test cleanup now closes the fixture server even if browser startup fails.

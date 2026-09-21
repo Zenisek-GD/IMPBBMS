@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { EVALUATION_RUBRIC, saveTwgAssessment } from '../../api/bidding'
+import { saveTwgAssessment } from '../../api/bidding'
 import { fetchDocuments } from '../../api/documents'
 import Modal from '../../components/ui/Modal'
 import LargeFormPage from '../../components/ui/LargeFormPage'
@@ -8,74 +8,76 @@ import DocumentSlot from '../../components/ui/DocumentSlot'
 import BacAttendance from './BacAttendance'
 
 const inputClass = 'mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none'
-const complianceOptions = [['compliant', 'Compliant'], ['nonCompliant', 'Non-Compliant'], ['needsClarification', 'Needs Clarification']]
+const complianceOptions = [['compliant', 'Pass'], ['nonCompliant', 'Fail']]
+const failureReasons = [['missingDocument', 'Missing mandatory document'], ['technicalSpecification', 'Failed technical specification'], ['invalidEligibility', 'Invalid eligibility document'], ['nonResponsive', 'Non-responsive bid'], ['exceedsBudget', 'Bid amount exceeds allowed amount'], ['failedVerification', 'Failed required verification'], ['other', 'Other']]
 
-export function BidEvaluationModal({ bid, consulting, weights, onClose, onSubmit }) {
+export function BidEvaluationModal({ bid, rfq, plan, requirements = [], onClose, onSubmit }) {
+  const consulting = rfq.category === 'consulting'
+  const criteria = consulting ? (plan?.criteria ?? []).map((item) => ({ ...item, label: item.name })) : requirements
+  const previous = [...(bid.evaluations ?? [])].reverse().find((row) => row.status === 'returned')
   const [noConflict, setNoConflict] = useState(false)
-  const [scores, setScores] = useState(Object.fromEntries(EVALUATION_RUBRIC.map((criterion) => [criterion.key, ''])))
+  const [scores, setScores] = useState(Object.fromEntries(criteria.map((criterion) => [criterion.key, ''])))
+  const [requirementRemarks, setRequirementRemarks] = useState({})
+  const [verdict, setVerdict] = useState('')
+  const [failureReason, setFailureReason] = useState('')
+  const [failureExplanation, setFailureExplanation] = useState('')
   const [remarks, setRemarks] = useState('')
+  const [recommendation, setRecommendation] = useState('')
+  const [supportingDocuments, setSupportingDocuments] = useState([])
+  const [documents, setDocuments] = useState([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
-  const values = Object.values(scores)
-  const completed = values.every((value) => value !== '')
-  const quality = completed && consulting ? values.reduce((sum, value) => sum + Number(value), 0) / values.length : null
-  const verdict = values.every((value) => value === 'compliant') ? 'passed' : 'failed'
-  // Item 12: bid evaluation is a long workflow form — a full page with
-  // sections, not a scroll-heavy modal.
-  return (
-    <LargeFormPage
-      title={`${consulting ? 'Quality evaluation' : 'Compliance evaluation'} — ${bid.vendorName ?? bid.blindLabel}`}
-      purpose={consulting ? `Quality weight: ${weights.qualityWeight}%; financial weight: ${weights.financialWeight}%. Financial and combined scores are calculated after technical evaluation closes.` : 'All mandatory technical requirements must be compliant before a bidder advances to financial ranking. Needs Clarification prevents advancement until resolved.'}
-      onBack={onClose}
-      backLabel="Back to evaluation"
-      error={error}
-      actions={
-        <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="bid-evaluation-form" disabled={saving || !completed || !noConflict}>{saving ? 'Submitting…' : 'Submit final evaluation'}</Button>
-        </>
-      }
-    >
-      <form id="bid-evaluation-form" onSubmit={async (event) => {
-        event.preventDefault()
-        setSaving(true); setError('')
-        try {
-          const breakdown = consulting ? Object.fromEntries(Object.entries(scores).map(([key, value]) => [key, Number(value)])) : scores
-          await onSubmit(breakdown, remarks, consulting ? undefined : verdict)
-          onClose()
-        } catch (err) { setError(err.response?.data?.message ?? 'Could not submit the evaluation.') }
-        finally { setSaving(false) }
-      }}>
-        <div className="flex flex-col gap-4">
-          <LargeFormPage.Section
-            title="Criteria"
-            description="Review the Technical Working Group (TWG) assessment before submitting."
-          >
-            <div className="flex flex-col gap-3">
-              {EVALUATION_RUBRIC.map((criterion) => <label key={criterion.key} className="block text-xs text-text-secondary">{criterion.label}
-                {consulting ? <input type="number" min="0" max="100" step="0.01" required value={scores[criterion.key]} onChange={(event) => setScores({ ...scores, [criterion.key]: event.target.value })} className={inputClass} />
-                  : <select required value={scores[criterion.key]} onChange={(event) => setScores({ ...scores, [criterion.key]: event.target.value })} className={inputClass}>
-                    <option value="">Select compliance finding</option>{complianceOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>}
-              </label>)}
-            </div>
-          </LargeFormPage.Section>
-          <LargeFormPage.Section title="Findings">
-            <div className="flex flex-col gap-3">
-              <label className="block text-xs text-text-secondary">Evaluation findings / remarks
-                <textarea required={!consulting && verdict === 'failed'} rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} className={inputClass} />
-              </label>
-              {quality !== null && <p className="text-sm text-navy">Quality score: {quality.toFixed(2)} / 100 · Weighted quality contribution: {(quality * Number(weights.qualityWeight) / 100).toFixed(2)}</p>}
-              {!consulting && completed && <p className="text-sm text-navy">Technical result: {verdict === 'passed' ? 'Compliant; eligible for financial evaluation' : 'Not compliant; cannot advance to financial ranking'}</p>}
-            </div>
-          </LargeFormPage.Section>
-          <LargeFormPage.Section title="Declaration">
-            <label className="flex min-h-[44px] items-start gap-2 text-sm text-text-secondary"><input type="checkbox" required checked={noConflict} onChange={(event) => setNoConflict(event.target.checked)} />I declare that I have no conflict of interest with any bidder participating in this procurement.</label>
-          </LargeFormPage.Section>
+  useEffect(() => {
+    let active = true
+    fetchDocuments('rfq', rfq.id).then((data) => { if (active) setDocuments(data) }).catch(() => {})
+    return () => { active = false }
+  }, [rfq.id])
+  const completed = criteria.length > 0 && Object.values(scores).every((value) => value !== '')
+  const quality = completed && consulting ? criteria.reduce((sum, criterion) => sum + Number(scores[criterion.key]) / Number(criterion.maxScore) * Number(criterion.weight), 0) : null
+  return <LargeFormPage
+    title={`${consulting ? 'Quality and Price evaluation' : 'Compliance evaluation'} ? ${bid.vendorName ?? bid.blindLabel}`}
+    purpose={consulting ? `Approved quality weight: ${plan?.qualityWeight ?? 'pending'}%; price weight: ${plan?.financialWeight ?? 'pending'}%. Financial scores are calculated after technical evaluation closes.` : 'Check every mandatory requirement, select the final Pass or Fail result, and record your recommendation.'}
+    onBack={onClose} backLabel="Back to evaluation" error={error}
+    actions={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button type="submit" form="bid-evaluation-form" disabled={saving || !completed || !noConflict || (consulting && plan?.status !== 'approved')}>{saving ? 'Submitting?' : 'Submit final evaluation'}</Button></>}
+  >
+    <form id="bid-evaluation-form" onSubmit={async (event) => {
+      event.preventDefault(); setSaving(true); setError('')
+      try {
+        await onSubmit({ criteriaBreakdown: consulting ? Object.fromEntries(Object.entries(scores).map(([key, value]) => [key, Number(value)])) : scores, noConflictDeclared: noConflict, verdict: consulting ? undefined : verdict, remarks, requirementRemarks, failureReason, failureExplanation, recommendation, supportingDocuments })
+        onClose()
+      } catch (err) { setError(err.response?.data?.message ?? 'Could not submit the evaluation.') }
+      finally { setSaving(false) }
+    }} className="space-y-4">
+      <LargeFormPage.Section title="Bidder and procurement information">
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">{[['Bidder', bid.vendorName ?? bid.blindLabel], ['Bid reference', `${rfq.referenceNo} / Bid #${bid.id}`], ['Procurement project', rfq.title], ['Procurement type', consulting ? 'Consulting Services' : rfq.category === 'infrastructure' ? 'Infrastructure Projects' : 'Goods'], ['Bid amount', bid.totalBidPrice == null ? 'Financial envelope sealed' : `?${Number(bid.totalBidPrice).toLocaleString('en-PH')}`], ['Date submitted', bid.submittedAt ? new Date(bid.submittedAt).toLocaleString('en-PH') : 'Recorded at bid opening']].map(([key, value]) => <div key={key}><dt className="text-text-faint">{key}</dt><dd className="font-medium text-navy">{value}</dd></div>)}</dl>
+      </LargeFormPage.Section>
+      {previous && <p className="text-sm text-info">This is a correction of submission #{previous.id}. Its original scores and findings remain in the evaluation history.</p>}
+      <LargeFormPage.Section title={consulting ? 'Approved quality criteria' : 'Mandatory compliance checklist'} description="Review the submitted TWG assessment and supporting evidence before finalizing.">
+        {consulting && plan?.status !== 'approved' && <p role="alert" className="text-sm text-danger">Approved consulting criteria are missing. Evaluation is blocked until the authorized procurement process resolves the missing approval.</p>}
+        <div className="space-y-4">{criteria.map((criterion) => <div key={criterion.key} className="rounded border border-border-muted p-3">
+          <label className="block text-sm text-navy">{criterion.label}
+            {consulting ? <><span className="ml-2 text-xs text-text-faint">Maximum {criterion.maxScore}; weight {criterion.weight}%{criterion.minimumScore != null ? `; minimum ${criterion.minimumScore}` : ''}</span><input type="number" min="0" max={criterion.maxScore} step="0.01" required value={scores[criterion.key]} onChange={(event) => setScores({ ...scores, [criterion.key]: event.target.value })} className={inputClass} /></> : <select required value={scores[criterion.key]} onChange={(event) => setScores({ ...scores, [criterion.key]: event.target.value })} className={inputClass}><option value="">Select Pass or Fail</option>{complianceOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}
+          </label>
+          {criterion.description && <p className="mt-1 text-xs text-text-secondary">{criterion.description}</p>}
+          <label className="mt-2 block text-xs text-text-secondary">Criterion remarks<textarea rows={2} value={requirementRemarks[criterion.key] ?? ''} onChange={(event) => setRequirementRemarks({ ...requirementRemarks, [criterion.key]: event.target.value })} className={inputClass} /></label>
+        </div>)}</div>
+        {quality != null && <p className="mt-3 text-sm text-navy">Quality score: {quality.toFixed(2)} / 100. Weighted quality contribution: {(quality * Number(plan.qualityWeight) / 100).toFixed(2)}.</p>}
+      </LargeFormPage.Section>
+      <LargeFormPage.Section title="Final decision and recommendation">
+        <div className="space-y-3">
+          {!consulting && <label className="block text-sm">Final evaluation result<select required value={verdict} onChange={(event) => setVerdict(event.target.value)} className={inputClass}><option value="">Select final result</option><option value="passed">Pass</option><option value="failed">Fail</option></select></label>}
+          {!consulting && verdict === 'failed' && <><label className="block text-sm">Reason for Failure / Non-Compliance<select required value={failureReason} onChange={(event) => setFailureReason(event.target.value)} className={inputClass}><option value="">Select failure reason</option>{failureReasons.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>{failureReason === 'other' && <label className="block text-sm">Explain the Other failure reason<textarea required value={failureExplanation} onChange={(event) => setFailureExplanation(event.target.value)} className={inputClass} /></label>}</>}
+          <label className="block text-sm">Evaluation findings / remarks<textarea required={!consulting && verdict === 'failed'} rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} className={inputClass} /></label>
+          <label className="block text-sm">Evaluator recommendation<textarea required rows={2} value={recommendation} onChange={(event) => setRecommendation(event.target.value)} className={inputClass} /></label>
+          {documents.length > 0 && <fieldset className="space-y-2"><legend className="text-sm">Supporting procurement documents</legend>{documents.map((document) => <label key={document.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={supportingDocuments.some((item) => item.documentId === document.id)} onChange={(event) => setSupportingDocuments(event.target.checked ? [...supportingDocuments, { documentId: document.id }] : supportingDocuments.filter((item) => item.documentId !== document.id))} />{document.filename}</label>)}</fieldset>}
         </div>
-      </form>
-    </LargeFormPage>
-  )
+      </LargeFormPage.Section>
+      <LargeFormPage.Section title="Conflict-of-Interest Declaration">
+        <label className="flex min-h-[44px] items-start gap-2 text-sm text-text-secondary"><input type="checkbox" required checked={noConflict} onChange={(event) => setNoConflict(event.target.checked)} />I declare that I have no conflict of interest with any bidder participating in this procurement.</label>
+        <p className="text-xs text-text-faint">If you have a conflict, return to the evaluation workspace and record it for administrative reassignment.</p>
+      </LargeFormPage.Section>
+    </form>
+  </LargeFormPage>
 }
 
 export function TwgAssessmentModal({ bid, assessment, onClose, onSaved }) {
@@ -157,18 +159,20 @@ export function TwgAssessmentModal({ bid, assessment, onClose, onSaved }) {
   )
 }
 
-export function CommitteeActionModal({ title, description, onClose, onSubmit, resolution = false }) {
+export function CommitteeActionModal({ title, description, onClose, onSubmit, resolution = false, reasonRequired = false }) {
   const [attendance, setAttendance] = useState({ attendingMemberIds: [], presidingMemberId: '' })
+  const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   return <Modal title={title} onClose={onClose}><div className="space-y-4">
     <p className="text-sm text-text-secondary">{description}</p>
+    {reasonRequired && <label className="block text-sm">Reason for correction<textarea required value={reason} onChange={(event) => setReason(event.target.value)} className={inputClass} /></label>}
     <BacAttendance value={attendance} onChange={setAttendance} />
     {resolution && <p className="text-xs text-text-secondary">The participating members and their BAC positions are retained with the decision.</p>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-    <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={saving || attendance.attendingMemberIds.length === 0} onClick={async () => {
+    <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={saving || attendance.attendingMemberIds.length === 0 || (reasonRequired && !reason.trim())} onClick={async () => {
       setError(''); setSaving(true)
-      try { await onSubmit(attendance); onClose() } catch (err) { setError(err.response?.data?.message ?? 'Could not finalize the BAC action.') } finally { setSaving(false) }
+      try { await onSubmit({ ...attendance, ...(reasonRequired ? { reason } : {}) }); onClose() } catch (err) { setError(err.response?.data?.message ?? 'Could not finalize the BAC action.') } finally { setSaving(false) }
     }}>{saving ? 'Finalizing…' : 'Finalize BAC action'}</Button></div>
   </div></Modal>
 }

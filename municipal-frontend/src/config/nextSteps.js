@@ -138,14 +138,14 @@ export const budgetNext = (budget) => {
 
 // ── Solicitations ────────────────────────────────────────────────────────────
 const RFQ_NEXT = {
-  draft: { action: 'Complete the schedule and publish', owner: 'BAC Secretariat', after: 'Published — open for submission' },
-  published: { action: 'Close submission when the deadline passes', owner: 'BAC Secretariat', after: 'Bid opening and evaluation' },
+  draft: { action: 'Complete preparation and obtain schedule / criteria approval', owner: 'BAC Secretariat and authorized BAC officer', after: 'Approved for publication' },
+  published: { action: 'Accept bids until the approved deadline', owner: 'BAC Secretariat', after: 'Submission closed, then scheduled bid opening' },
   closed: { action: 'Open the bids', owner: 'BAC Secretariat', after: 'Evaluation' },
-  opened: { action: 'Evaluate the bids', owner: 'Bids and Awards Committee (BAC)', after: 'Award recommendation' },
-  evaluated: { action: 'Approve the award', owner: 'Mayor (Head of the Procuring Entity)', after: 'Contract drafting' },
+  opened: { action: 'Complete declared, type-specific evaluations and BAC review', owner: 'TWG and Bids and Awards Committee (BAC)', after: 'Financial ranking and post-qualification' },
+  evaluated: { action: 'Post-qualify the leading responsive bidder and recommend award', owner: 'Bids and Awards Committee (BAC)', after: 'HoPE award approval' },
   awarded: { action: 'Draft the contract', owner: 'BAC Secretariat', after: 'Signatures' },
-  failed: { action: 'Create a rebid', owner: 'BAC Secretariat', after: 'New solicitation' },
-  cancelled: { action: 'Create a rebid', owner: 'BAC Secretariat', after: 'New solicitation' },
+  failed: { action: 'Review the approved failure record and attempt history', owner: 'BAC Secretariat and BAC', after: 'Authorized rebid or Negotiated Procurement eligibility review' },
+  cancelled: { action: 'Review procurement preparation', owner: 'BAC Secretariat', after: 'New approved preparation' },
 }
 
 export const rfqNext = (rfq) => {
