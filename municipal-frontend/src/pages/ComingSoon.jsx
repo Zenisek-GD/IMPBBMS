@@ -22,7 +22,7 @@ export default function ComingSoon() {
   }, [])
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f9f9fe] px-6 text-center">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas px-6 text-center">
       <span className="text-lg font-bold text-navy">{systemName}</span>
       <h1 className="text-lg font-semibold text-navy">
         {user?.roleName ? `${user.roleName} workspace` : 'Your workspace'} is being built

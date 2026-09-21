@@ -4,6 +4,7 @@ import { MoreVertical, Menu, X, ArrowLeft, LogIn, LayoutDashboard, LogOut, FileC
 import { useAuth } from '../../context/useAuth'
 import { landingRouteForRole } from '../../config/roleLanding'
 import ThemeToggle from '../ui/ThemeToggle'
+import BrandMark from '../brand/BrandMark'
 
 // ── Header for the public portal ─────────────────────────────────────────────
 // A solid bar with the masthead left, sections in a pill on the true centre
@@ -114,7 +115,7 @@ export default function PublicHeader({ lguName, systemName }) {
           which takes it out of grid flow, and auto-placement then slid the
           right-hand controls into column 2 — stranding them mid-header. Explicit
           placement leaves column 2 empty instead. */}
-      <div className="mx-auto grid max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-3 sm:px-8">
+      <div className="mx-auto grid min-h-[58px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-3 sm:px-8">
         <div className="col-start-1 flex min-w-0 items-center gap-1.5">
           {showBack && (
             <button
@@ -127,11 +128,12 @@ export default function PublicHeader({ lguName, systemName }) {
             </button>
           )}
           <Link to="/" className="flex min-w-0 items-center">
+            <BrandMark priority className="mr-2.5 -translate-y-px size-9 sm:size-10" alt="" />
             <div className="min-w-0">
               <p className="truncate text-[16px] font-semibold tracking-[-0.015em] text-navy">
                 {systemName || 'ProcureNance'}
               </p>
-              <p className="truncate text-[11.5px] text-navy">
+              <p className="hidden truncate text-[11.5px] text-navy md:block">
                 {lguName ?? 'Municipal Transparency Portal'}
               </p>
             </div>
@@ -262,9 +264,12 @@ export default function PublicHeader({ lguName, systemName }) {
           />
           <aside className="absolute top-0 right-0 flex h-full max-h-screen w-72 max-w-[85vw] flex-col bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b border-border-muted px-4 py-3">
-              <div className="min-w-0">
-                <p className="truncate text-[15px] font-semibold text-navy">{systemName || 'ProcureNance'}</p>
-                <p className="truncate text-[11px] text-navy">{lguName ?? 'Transparency Portal'}</p>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <BrandMark className="size-8" alt="" />
+                <div className="min-w-0">
+                  <p className="truncate text-[15px] font-semibold text-navy">{systemName || 'ProcureNance'}</p>
+                  <p className="truncate text-[11px] text-navy">{lguName ?? 'Transparency Portal'}</p>
+                </div>
               </div>
               <button
                 type="button"

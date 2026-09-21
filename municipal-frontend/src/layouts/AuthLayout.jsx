@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Landmark } from 'lucide-react'
 import ThemeToggle from '../components/ui/ThemeToggle'
 import { fetchPublicBranding } from '../api/settings'
+import BrandMark from '../components/brand/BrandMark'
 
 // Shared shell for login / forgot-password / activate-account.
 //
@@ -52,9 +52,7 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
             that column gone, the page would otherwise open with no indication
             of what system is being signed in to. */}
         <Link to="/" className="mb-8 flex items-center justify-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-fg">
-            <Landmark size={18} />
-          </span>
+          <BrandMark priority className="size-11" alt="" />
           <span className="text-[16px] font-semibold tracking-[-0.01em] text-navy">{systemName}</span>
         </Link>
 

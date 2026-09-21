@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Search, Menu } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 import ThemeToggle from '../ui/ThemeToggle'
+import BrandMark from '../brand/BrandMark'
 
 // Shared top bar. Uses the `brand` tokens rather than `accent`, because this
 // strip stays dark in both themes — inverting it would leave the app with no
@@ -39,8 +40,9 @@ export default function TopNavBar({ sections = [], lguName, systemName, onOpenNa
   }
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-black/20 bg-brand px-5">
-      <div className="flex min-w-0 items-center gap-5">
+      <div className="flex min-w-0 items-center gap-3 sm:gap-5">
         <button type="button" aria-label="Open navigation" onClick={onOpenNavigation} className="flex h-9 w-9 shrink-0 items-center justify-center text-brand-fg md:hidden"><Menu size={20} /></button>
+        <BrandMark priority className="size-9 sm:size-10" alt="" />
         <div className="flex min-w-0 flex-col leading-tight">
           <span className="text-[17px] font-semibold tracking-[-0.01em] text-brand-fg">{systemName || 'ProcureNance'}</span>
           {lguName && (

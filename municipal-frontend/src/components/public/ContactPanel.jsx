@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Send, CheckCircle2, ShieldQuestion, Loader2 } from 'lucide-react'
 import { MESSAGE_CATEGORIES, sendPublicMessage } from '../../api/messages'
+import ResponsiveSelect from '../ui/ResponsiveSelect'
 
 // ── WRITING TO THE MUNICIPALITY ──────────────────────────────────────────────
 // The counterpart to publishing. Everything else on this portal is the
@@ -89,13 +90,14 @@ export default function ContactPanel() {
       <form onSubmit={submit} className="rounded-xl border border-border-strong bg-surface p-6 shadow-sm">
         <div className="flex flex-col gap-5">
           <Field label="What is this about?" hint={chosen?.hint}>
-            <select value={form.category} onChange={set('category')} className={inputClass}>
-              {MESSAGE_CATEGORIES.map((category) => (
-                <option key={category.key} value={category.key}>
-                  {category.label}
-                </option>
-              ))}
-            </select>
+            <ResponsiveSelect
+              title="What is this about?"
+              value={form.category}
+              onChange={(category) => setForm({ ...form, category })}
+              options={MESSAGE_CATEGORIES.map((category) => ({ value: category.key, label: category.label }))}
+              mobileClassName="rounded-md border border-border-strong bg-surface px-3.5 text-navy"
+              desktopClassName={inputClass}
+            />
           </Field>
 
           <Field label="Subject">
@@ -176,14 +178,14 @@ export default function ContactPanel() {
             </p>
           )}
 
-          <div className="flex items-center justify-between gap-4">
-            <p className="text-[12px] leading-relaxed text-navy">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <p className="text-[12px] leading-relaxed text-text-secondary">
               Leaving your email is optional. Without one there is no way to reply to you.
             </p>
             <button
               type="submit"
               disabled={sending}
-              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-60"
+              className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-60 sm:w-auto"
             >
               {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
               {sending ? 'Sending…' : 'Send message'}

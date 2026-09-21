@@ -61,7 +61,7 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
       // Clicking the backdrop dismisses; clicking inside the panel must not,
       // which is why the check is against the event target itself.
       onMouseDown={(event) => {
@@ -86,12 +86,12 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
         //
         // Scrolling belongs to the body below, not this element, so the header
         // stays pinned while the form moves under it.
-        className={`flex max-h-[calc(100dvh-2rem)] w-full ${WIDTHS[size]} flex-col overflow-hidden rounded-xl border border-border-muted bg-surface shadow-xl focus:outline-none`}
+        className={`flex max-h-[calc(100dvh-1rem)] w-full ${WIDTHS[size]} flex-col overflow-hidden rounded-t-xl border border-border-muted bg-surface shadow-xl focus:outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl`}
       >
         {/* `shrink-0` rather than `sticky top-0`: the scroll container is the
             body below, not this panel, so the header is already pinned by the
             flex layout and has nothing to stick to. */}
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border-muted px-5 py-4">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border-muted px-4 py-4 sm:px-5">
           <div className="min-w-0">
             <h2 className="text-[15px] font-semibold text-navy">{title}</h2>
             {subtitle && <p className="mt-1 text-[12.5px] leading-relaxed text-text-faint">{subtitle}</p>}
@@ -100,7 +100,7 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy"
+            className="-mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy sm:h-8 sm:w-8"
           >
             <X size={16} />
           </button>
@@ -109,7 +109,7 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
             `min-height: auto`, which refuses to shrink below its content, so
             `overflow-y-auto` would never engage and the clipping would come
             straight back. */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">{children}</div>
       </div>
     </div>
   )

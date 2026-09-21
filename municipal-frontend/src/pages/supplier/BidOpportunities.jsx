@@ -12,6 +12,7 @@ import Pagination from '../../components/ui/Pagination'
 import OtpInput from '../../components/ui/OtpInput'
 import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
+import EmptyState from '../../components/ui/EmptyState'
 import { useTableControls } from '../../components/ui/useTableControls'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
@@ -138,15 +139,15 @@ function BidModal({ rfq, onClose, onSubmitted }) {
           </button>
         </div>
 
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="secondary" className="w-full sm:w-auto" onClick={onClose}>
             Cancel
           </Button>
           <button
             type="button"
             disabled={saving || code.length !== 6}
             onClick={() => confirm(code)}
-            className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-[12px] font-medium text-accent-fg disabled:opacity-50"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-accent px-4 text-[12px] font-medium text-accent-fg disabled:opacity-50 sm:w-auto"
           >
             {saving ? (
               <>
@@ -206,15 +207,15 @@ function BidModal({ rfq, onClose, onSubmitted }) {
         </p>
       )}
 
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="secondary" className="w-full sm:w-auto" onClick={onClose}>
           Cancel
         </Button>
         <button
           type="button"
           disabled={saving || !price || Number(price) <= 0 || overAbc}
           onClick={requestCode}
-          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-[12px] font-medium text-accent-fg disabled:opacity-60"
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-accent px-4 text-[12px] font-medium text-accent-fg disabled:opacity-60 sm:w-auto"
         >
           {saving ? (
             <>
@@ -302,14 +303,49 @@ export default function BidOpportunities() {
           </div>
         )}
         {table.rows.length === 0 ? (
-          <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-            {table.totalBeforeFilters === 0
-              ? 'No opportunities are open right now.'
-              : 'No opportunities match your search or filters.'}
-          </p>
+          <EmptyState
+            title={table.totalBeforeFilters === 0 ? 'No opportunities are open right now' : 'No opportunities match these filters'}
+            description={table.totalBeforeFilters === 0 ? 'Check back when the municipality publishes its next opportunity.' : 'Try clearing a filter or changing your search.'}
+            action={table.totalBeforeFilters > 0 && (
+              <Button variant="secondary" size="sm" onClick={table.toolbarProps.onReset}>Clear filters</Button>
+            )}
+          />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
+          <>
+            <div className="divide-y divide-border-muted md:hidden">
+              {pageRows.map((rfq) => (
+                <article key={rfq.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-medium tracking-[0.04em] text-text-faint uppercase">{rfq.referenceNo}</p>
+                      <h3 className="mt-1 text-sm font-semibold leading-snug text-navy">{rfq.title}</h3>
+                    </div>
+                    <Badge tone={RFQ_STATUS_TONES[rfq.status]}>{RFQ_STATUS_LABELS[rfq.status]}</Badge>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-[12px]">
+                    <div>
+                      <dt className="text-text-faint">Mode</dt>
+                      <dd className="mt-0.5 font-medium text-text-secondary">{rfq.modeName}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-text-faint">Approved budget</dt>
+                      <dd className="mt-0.5 font-medium text-navy">{peso(rfq.abc)}</dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-text-faint">Closes</dt>
+                      <dd className="mt-0.5 font-medium text-text-secondary">{new Date(rfq.closingDate).toLocaleString()}</dd>
+                    </div>
+                  </dl>
+                  {rfq.status === 'published' && verified && (
+                    <Button className="mt-4 w-full" size="md" icon={Gavel} onClick={() => setBidding(rfq)}>
+                      Submit bid
+                    </Button>
+                  )}
+                </article>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('referenceNo')}>Reference</SortableTh>
@@ -348,8 +384,9 @@ export default function BidOpportunities() {
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+              </table>
+            </div>
+          </>
         )}
         <Pagination {...paginationProps} label="opportunities" />
       </Card>

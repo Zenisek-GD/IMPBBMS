@@ -36,56 +36,54 @@
 :root[data-text-size='extraLarge'] { zoom: 1.25; }
 
 .dark {
-  --color-canvas: #0c0f0d;
-  --color-surface: #141815;
-  --color-surface-raised: #1a1f1c;
-  --color-sidebar: #101413;
+  --color-canvas: #0e1013;
+  --color-surface: #15171b;
+  --color-surface-raised: #1b1e23;
+  --color-sidebar: #121419;
 
-  --color-border-muted: #262c28;
-  --color-border-strong: #363e39;
+  --color-border-muted: #292d33;
+  --color-border-strong: #3a3f47;
 
-  --color-navy: #f1f5f2;
-  --color-navy-tint: rgba(34, 197, 94, 0.14);
-  --color-text-primary: #f1f5f2;
-  --color-text-secondary: #b2bcb6;
+  --color-navy: #e6e8ec;
+  --color-navy-tint: rgba(148, 163, 184, 0.14);
+  --color-text-primary: #e6e8ec;
+  --color-text-secondary: #bcc2ca;
   /* Lifted for small text on near-black surfaces; the old value fell under
      4.5:1 against the dark card fills. */
-  --color-text-faint: #96a29c;
+  --color-text-faint: #a3aab4;
 
-  /* A filled control on a dark surface reads as light-on-dark, so accent and its
-     foreground swap rather than darkening further. The bright green stays bright
-     here: it is the one colour that has to survive both themes unchanged, since
-     it marks data rather than text. */
-  --color-accent: #e9efeb;
-  --color-accent-fg: #101512;
-  --color-eco: #22c55e;
-  --color-eco-soft: #14311f;
+  /* Darker action fills retain the municipal green without making the entire
+     theme feel green. They deliberately carry white labels at AA contrast. */
+  --color-accent: #277a44;
+  --color-accent-fg: #ffffff;
+  --color-eco: #7cbb90;
+  --color-eco-soft: #1b3022;
 
-  --color-brand: #141815;
-  --color-brand-fg: #f1f5f2;
-  --color-topnav-link: #8b958f;
-  --color-topnav-link-alt: #f1f5f2;
+  --color-brand: #101216;
+  --color-brand-fg: #e6e8ec;
+  --color-topnav-link: #a2a9b2;
+  --color-topnav-link-alt: #e6e8ec;
 
   /* Still green, but deepened. The light-mode green is too luminous to sit at
      the top of a near-black page — it glares. #14532d keeps the hue and lifts
      white text to 9.1:1. */
-  --color-header: #14532d;
-  --color-header-fg: #ffffff;
-  --color-header-muted: #c9e2d2;
+  --color-header: #15171b;
+  --color-header-fg: #f0f2f4;
+  --color-header-muted: #b6bcc5;
 
-  --color-chip: #1d2620;
-  --color-track: #29312c;
+  --color-chip: #1d2025;
+  --color-track: #2b3038;
 
   /* Lifted for the same reason as the status colours below — the light-mode
      slate blue disappears against a near-black surface. */
-  --color-info: #58b6e0;
-  --color-info-soft: #10303f;
+  --color-info: #86b8d4;
+  --color-info-soft: #182b38;
 
-  /* Lifted, not darkened: the status colours have to carry on a dark surface,
-     and the light-mode versions fail contrast against it. */
-  --color-success: #4ade80;
-  --color-warning: #fbbf24;
-  --color-danger: #f87171;
+  /* Solid status actions also use white text, so their fills are deep enough
+     to maintain contrast instead of relying on almost-black lettering. */
+  --color-success: #277a44;
+  --color-warning: #d6aa55;
+  --color-danger: #b44747;
 
   /* A black drop shadow is invisible on a dark canvas, so elevation is carried
      by a deeper, wider shadow rather than a tighter one. */
@@ -97,6 +95,10 @@
 
   color-scheme: dark;
 }
+
+/* Keep labels consistently light on solid semantic actions in dark mode. */
+.dark .bg-success.text-white,
+.dark .bg-danger.text-white { color: #ffffff; }
 
 /* ── ONE LEVEL OF INDIRECTION, NOT TWO ───────────────────────────────────────
    The utilities point straight at `--color-*`, and the light/dark blocks above
@@ -262,6 +264,15 @@ html {
   color: var(--color-text-secondary);
   font-family: var(--font-sans);
   font-synthesis: none;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-fg);
+}
+
+:where(input, textarea, [contenteditable='true']) {
+  caret-color: var(--color-navy);
 }
 
 body {

@@ -6,6 +6,7 @@ import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
+import EmptyState from '../../components/ui/EmptyState'
 import { dashboardFor } from './dashboardConfig'
 import { useDashboardData } from './useDashboardData'
 import { recentlyCompleted } from './queues'
@@ -145,9 +146,10 @@ export default function RoleWorkspace() {
               action={queue.length > 0 && <Badge tone="warning">{queue.length}</Badge>}
             >
               {queue.length === 0 ? (
-                <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-                  {failedSources.length ? 'Pending items could not be fully checked. Retry the dashboard or open the relevant page.' : 'Nothing is waiting on you right now.'}
-                </p>
+                <EmptyState
+                  title={failedSources.length ? 'Your queue could not be fully checked' : 'Nothing is waiting on you'}
+                  description={failedSources.length ? 'Retry the dashboard or open the relevant page to check your pending work.' : 'New work that needs your role will appear here.'}
+                />
               ) : (
                 <>
                   {[
@@ -218,9 +220,7 @@ export default function RoleWorkspace() {
             {showActivity && (
               <Card title="Recent system activity" icon={Activity} bodyClassName="">
                 {data.audit.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-                    No recorded activity yet.
-                  </p>
+                  <EmptyState title="No recorded activity yet" description="System activity will appear here as work is completed." />
                 ) : (
                   <ul className="divide-y divide-border-muted">
                     {data.audit.slice(0, 8).map((row) => (
@@ -280,7 +280,7 @@ export default function RoleWorkspace() {
             bodyClassName=""
           >
             {unreadNotifications.length === 0 ? (
-              <p className="px-4 py-7 text-center text-[13px] text-text-faint">No unread messages or updates.</p>
+              <EmptyState title="No unread messages" description="Updates that need your attention will appear here." />
             ) : (
               <ul className="divide-y divide-border-muted">
                 {unreadNotifications.slice(0, 5).map((notice) => (
@@ -300,9 +300,7 @@ export default function RoleWorkspace() {
 
           <Card title="Where to go next" icon={Compass} bodyClassName="">
             {quickLinks.length === 0 ? (
-              <p className="px-4 py-8 text-center text-[13px] text-text-faint">
-                No modules are configured for this role.
-              </p>
+              <EmptyState title="No modules are configured" description="Ask an administrator to review this role's workspace access." />
             ) : (
               <div className="grid gap-px bg-border-muted sm:grid-cols-2 lg:grid-cols-3">
                 {quickLinks.map((item) => (

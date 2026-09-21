@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import ResponsiveSelect from './ResponsiveSelect'
 
 // ── PAGINATION ───────────────────────────────────────────────────────────────
 // Client-side, because every list in this system is already fully loaded by the
@@ -39,8 +40,8 @@ export default function Pagination({
     'flex h-11 w-11 items-center justify-center rounded-md border border-border-muted bg-surface text-text-secondary transition-colors hover:border-border-strong hover:text-navy disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border-muted'
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-muted px-4 py-2">
-      <p className="text-[12px] text-text-faint">
+    <div className="flex flex-col items-stretch justify-between gap-3 border-t border-border-muted px-4 py-3 sm:flex-row sm:items-center">
+      <p className="text-center text-[12px] text-text-faint sm:text-left">
         {totalItems === 0 ? (
           `No ${label}`
         ) : (
@@ -52,27 +53,23 @@ export default function Pagination({
         )}
       </p>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
         {onPageSizeChange && totalItems > pageSizeOptions[0] && (
           <label className="flex items-center gap-1.5 text-[12px] text-text-faint">
             Rows
-            <select
+            <ResponsiveSelect
               value={pageSize}
-              onChange={(event) => onPageSizeChange(Number(event.target.value))}
-              aria-label="Rows per page"
-              className="rounded-md border border-border-muted bg-surface px-1.5 py-1 text-[12px] text-text-secondary focus:border-accent focus:outline-none"
-            >
-              {pageSizeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => onPageSizeChange(Number(value))}
+              title="Rows per page"
+              options={pageSizeOptions.map((option) => ({ value: option, label: String(option) }))}
+              mobileClassName="rounded-md border border-border-muted bg-surface px-3 text-text-secondary"
+              desktopClassName="rounded-md border border-border-muted bg-surface px-1.5 py-1 text-[12px] text-text-secondary focus:border-accent focus:outline-none"
+            />
           </label>
         )}
 
         {showControls && (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-center gap-1">
             <button
               type="button"
               onClick={() => onPageChange(page - 1)}

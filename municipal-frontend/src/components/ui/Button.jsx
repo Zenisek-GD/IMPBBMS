@@ -13,9 +13,9 @@ const VARIANTS = {
 // 32px dense-register control, `sm` is 36px for compact page actions, standard
 // actions are 40px, and the large variant remains 44px for touch-first work.
 const SIZES = {
-  table: 'h-8 gap-1 px-2.5 text-[11.5px]',
-  sm: 'h-9 gap-1.5 px-3 text-[12px]',
-  md: 'h-10 gap-2 px-4 text-sm',
+  table: 'h-10 gap-1 px-2.5 text-[11.5px] md:h-8',
+  sm: 'h-10 gap-1.5 px-3 text-[12px] md:h-9',
+  md: 'h-11 gap-2 px-4 text-sm md:h-10',
   lg: 'h-11 gap-2 px-5 text-[14px]',
 }
 

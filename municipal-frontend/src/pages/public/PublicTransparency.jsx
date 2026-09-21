@@ -25,6 +25,7 @@ import PublicFooter from '../../components/public/PublicFooter'
 import AnnouncementFeed from '../../components/public/AnnouncementFeed'
 import ContactPanel from '../../components/public/ContactPanel'
 import Pagination from '../../components/ui/Pagination'
+import ResponsiveSelect from '../../components/ui/ResponsiveSelect'
 import { usePagination } from '../../components/ui/usePagination'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1242,18 +1243,20 @@ export default function PublicTransparency() {
                 <label htmlFor="masthead-status" className="sr-only">
                   Filter projects by status
                 </label>
-                <select
+                <ResponsiveSelect
                   id="masthead-status"
+                  title="Filter projects by status"
                   value={tab}
-                  onChange={(event) => setTab(event.target.value)}
-                  className="shrink-0 rounded-full bg-transparent px-3.5 py-2 text-[13.5px] font-medium text-navy transition-colors hover:bg-sidebar focus:ring-2 focus:ring-accent/20 focus:outline-none"
-                >
-                  {TABS.map((item) => (
-                    <option key={item.key} value={item.key}>
-                      {item.key === 'all' ? `All projects (${tabCounts.all})` : `${item.label} (${tabCounts[item.key] ?? 0})`}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setTab}
+                  options={TABS.map((item) => ({
+                    value: item.key,
+                    label: item.key === 'all'
+                      ? `All projects (${tabCounts.all})`
+                      : `${item.label} (${tabCounts[item.key] ?? 0})`,
+                  }))}
+                  mobileClassName="rounded-md px-3.5 py-2 hover:bg-sidebar"
+                  desktopClassName="shrink-0 rounded-full bg-transparent px-3.5 py-2 text-[13.5px] font-medium text-navy transition-colors hover:bg-sidebar focus:ring-2 focus:ring-accent/20 focus:outline-none"
+                />
               </div>
 
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
@@ -1338,37 +1341,33 @@ export default function PublicTransparency() {
                       <label htmlFor="projects-status" className="sr-only">
                         Filter projects by status
                       </label>
-                      <select
+                      <ResponsiveSelect
                         id="projects-status"
+                        title="Filter projects by status"
                         value={tab}
-                        onChange={(event) => setTab(event.target.value)}
-                        className="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
-                      >
-                        {TABS.map((item) => (
-                          <option key={item.key} value={item.key}>
-                            {item.key === 'all' ? 'All projects' : item.label} ({tabCounts[item.key]}
-                            )
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setTab}
+                        options={TABS.map((item) => ({
+                          value: item.key,
+                          label: `${item.key === 'all' ? 'All projects' : item.label} (${tabCounts[item.key] ?? 0})`,
+                        }))}
+                        mobileClassName="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 hover:border-border-strong"
+                        desktopClassName="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                      />
                     </>
                   )}
 
                   <label htmlFor="sort-order" className="sr-only">
                     Sort projects
                   </label>
-                  <select
+                  <ResponsiveSelect
                     id="sort-order"
+                    title="Sort projects"
                     value={sort}
-                    onChange={(event) => setSort(event.target.value)}
-                    className="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
-                  >
-                    {SORT_OPTIONS.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setSort}
+                    options={SORT_OPTIONS.map((option) => ({ value: option.key, label: option.label }))}
+                    mobileClassName="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 hover:border-border-strong"
+                    desktopClassName="rounded-md border border-border-strong bg-surface px-3.5 py-1.5 text-[12.5px] font-medium text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                  />
 
                   <RecordViewSwitch view={recordView} onChange={setRecordView} />
 
@@ -1401,53 +1400,50 @@ export default function PublicTransparency() {
                     <label htmlFor="filter-fy" className="sr-only">
                       Filter by fiscal year
                     </label>
-                    <select
+                    <ResponsiveSelect
                       id="filter-fy"
+                      title="Filter by fiscal year"
                       value={fiscalYear}
-                      onChange={(event) => setFiscalYear(event.target.value)}
-                      className="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
-                    >
-                      <option value="">All fiscal years</option>
-                      {(filters?.fiscalYears ?? []).map((year) => (
-                        <option key={year} value={year}>
-                          FY {year}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setFiscalYear}
+                      options={[
+                        { value: '', label: 'All fiscal years' },
+                        ...(filters?.fiscalYears ?? []).map((year) => ({ value: String(year), label: `FY ${year}` })),
+                      ]}
+                      mobileClassName="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 hover:border-border-strong"
+                      desktopClassName="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                    />
 
                     <label htmlFor="filter-office" className="sr-only">
                       Filter by implementing office
                     </label>
-                    <select
+                    <ResponsiveSelect
                       id="filter-office"
+                      title="Filter by implementing office"
                       value={department}
-                      onChange={(event) => setDepartment(event.target.value)}
-                      className="max-w-[16rem] rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
-                    >
-                      <option value="">All offices</option>
-                      {(filters?.departments ?? []).map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setDepartment}
+                      options={[
+                        { value: '', label: 'All offices' },
+                        ...(filters?.departments ?? []).map((item) => ({ value: String(item.id), label: item.name })),
+                      ]}
+                      mobileClassName="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 hover:border-border-strong"
+                      desktopClassName="max-w-[16rem] rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                    />
 
                     <label htmlFor="filter-mode" className="sr-only">
                       Filter by procurement mode
                     </label>
-                    <select
+                    <ResponsiveSelect
                       id="filter-mode"
+                      title="Filter by procurement mode"
                       value={procMode}
-                      onChange={(event) => setProcMode(event.target.value)}
-                      className="max-w-[16rem] rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
-                    >
-                      <option value="">All procurement modes</option>
-                      {modeOptions.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {mode}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setProcMode}
+                      options={[
+                        { value: '', label: 'All procurement modes' },
+                        ...modeOptions.map((mode) => ({ value: mode, label: mode })),
+                      ]}
+                      mobileClassName="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 hover:border-border-strong"
+                      desktopClassName="max-w-[16rem] rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
+                    />
 
                     {(fiscalYear || department || procMode) && (
                       <button
