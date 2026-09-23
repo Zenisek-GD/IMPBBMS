@@ -125,14 +125,14 @@ function DepartmentFormModal({ title, defaultValues, members = [], onSubmit, onC
           </p>
         )}
 
-        <div className="mt-2 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+        <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>
             CANCEL
           </Button>
           <button
             type="submit"
             disabled={isSubmitting}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
+            className="min-h-11 w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60 sm:w-auto"
           >
             {isSubmitting ? 'SAVING...' : 'SAVE DEPARTMENT'}
           </button>

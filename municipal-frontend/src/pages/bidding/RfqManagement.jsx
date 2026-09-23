@@ -88,7 +88,7 @@ function CreateRfqModal({ onClose, onCreated }) {
           <select
             value={form.prHeaderId}
             onChange={(event) => setForm({ ...form, prHeaderId: event.target.value })}
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+            className="min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
           >
             <option value="">Select an approved requisition...</option>
             {prs.map((pr) => (
@@ -185,15 +185,15 @@ function AbstractOfBidsModal({ rfq, onClose }) {
 
       {data && (
         <>
-          <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded border border-border-muted bg-sidebar px-4 py-3 text-[12.5px]">
+          <dl className="mb-4 grid grid-cols-1 gap-x-4 gap-y-2 rounded border border-border-muted bg-sidebar px-4 py-3 text-[12.5px] sm:grid-cols-2">
             <dt className="text-text-secondary">Project</dt>
-            <dd className="text-right font-medium text-navy">{data.title}</dd>
+            <dd className="min-w-0 break-words font-medium text-navy sm:text-right">{data.title}</dd>
             <dt className="text-text-secondary">Approved Budget (ABC)</dt>
-            <dd className="text-right font-medium text-navy">{peso(data.abc)}</dd>
+            <dd className="font-medium text-navy sm:text-right">{peso(data.abc)}</dd>
             <dt className="text-text-secondary">Mode</dt>
-            <dd className="text-right text-navy">{data.mode ?? '—'}</dd>
+            <dd className="break-words text-navy sm:text-right">{data.mode ?? '—'}</dd>
             <dt className="text-text-secondary">Bids opened</dt>
-            <dd className="text-right text-navy">
+            <dd className="break-words text-navy sm:text-right">
               {data.openedAt ? new Date(data.openedAt).toLocaleString('en-PH') : 'Not yet opened'}
               {data.openedByName && (
                 <span className="block text-[11.5px] text-text-faint">by {data.openedByName}</span>
@@ -208,8 +208,8 @@ function AbstractOfBidsModal({ rfq, onClose }) {
             </p>
           )}
 
-          <div className="overflow-x-auto rounded border border-border-muted">
-            <table className="w-full text-left">
+          <div className="overflow-x-auto overscroll-x-contain rounded border border-border-muted" role="region" aria-label="Abstract of bids table" tabIndex={0}>
+            <table className="min-w-[34rem] w-full text-left">
               <thead className="bg-sidebar">
                 <tr>
                   <Th>Bidder</Th>
@@ -270,8 +270,8 @@ function AbstractOfBidsModal({ rfq, onClose }) {
               {data.witnesses.map((witness, index) => (
                 <li key={index} className="flex items-baseline justify-between gap-3 py-2">
                   <div className="min-w-0">
-                    <p className="text-[13px] text-navy">{witness.representative ?? '—'}</p>
-                    <p className="text-[11.5px] text-text-faint">{witness.organization}</p>
+                    <p className="break-words text-[13px] text-navy">{witness.representative ?? '—'}</p>
+                    <p className="break-words text-[11.5px] text-text-faint">{witness.organization}</p>
                     {witness.stagesAttended?.length > 0 && (
                       <p className="mt-0.5 text-[11px] text-text-faint">
                         Attended: {witness.stagesAttended.length} stage
@@ -523,10 +523,10 @@ export default function RfqManagement() {
             value={witnesses}
             onChange={(event) => setWitnesses(event.target.value)}
             placeholder="e.g. COA Representative, Private Sector Observer"
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+            className="min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
           />
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setOpening(null)}>
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button className="w-full sm:w-auto" variant="secondary" onClick={() => setOpening(null)}>
               CANCEL
             </Button>
             <button
@@ -537,7 +537,7 @@ export default function RfqManagement() {
                 setOpening(null)
                 setWitnesses('')
               }}
-              className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg"
+              className="min-h-11 w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg sm:w-auto"
             >
               OPEN BIDS
             </button>

@@ -88,7 +88,7 @@ export default function NotificationBell() {
         aria-expanded={open}
         // Same box and same icon size as the theme toggle beside it, so the two
         // read as one pair of controls rather than a primary and a lesser one.
-        className="relative flex h-9 w-9 items-center justify-center rounded-md text-topnav-link transition-colors hover:bg-white/10 hover:text-topnav-link-alt"
+        className="relative flex h-11 w-11 items-center justify-center rounded-md text-topnav-link transition-colors hover:bg-white/10 hover:text-topnav-link-alt md:h-9 md:w-9"
       >
         <Bell size={19} />
         {data.unreadCount > 0 && (
@@ -121,7 +121,7 @@ export default function NotificationBell() {
             )}
           </header>
 
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-[min(24rem,calc(100dvh-8rem))] overflow-y-auto overscroll-contain">
             {data.notifications.length === 0 ? (
               <p className="px-4 py-8 text-center text-[13px] text-text-faint">Nothing yet.</p>
             ) : (

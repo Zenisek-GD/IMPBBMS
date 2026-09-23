@@ -413,6 +413,12 @@ export const getPublicProject = async (id) => {
 // the list returns so the totals always agree with the rows beneath them.
 export const getPublicSummary = async () => {
   const projects = await listPublicProjects({});
+  const lastUpdatedAt = projects.reduce((latest, project) => {
+    const candidate = project.lastUpdatedAt;
+    if (!candidate || Number.isNaN(new Date(candidate).getTime())) return latest;
+    if (!latest || new Date(candidate).getTime() > new Date(latest).getTime()) return candidate;
+    return latest;
+  }, null);
 
   // Savings are only meaningful against the projects that actually reached a
   // contract. Comparing total contracted value to the budget of every project —
@@ -440,5 +446,6 @@ export const getPublicSummary = async () => {
     budgetOfContracted,
     contractedProjects: contractedProjects.length,
     totalDisbursed: projects.reduce((sum, project) => sum + project.financials.disbursedAmount, 0),
+    lastUpdatedAt,
   };
 };

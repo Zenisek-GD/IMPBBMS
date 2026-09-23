@@ -47,7 +47,7 @@ const itemClass = (collapsed, isActive) =>
     collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
   } ${isActive ? 'bg-navy-tint text-navy' : 'text-text-secondary hover:bg-navy-tint/60 hover:text-navy'}`
 
-export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle, onLogout, onNavigate }) {
+export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle, onLogout, onNavigate, navigationMode = 'desktop' }) {
   const { user } = useAuth()
 
   return (
@@ -70,16 +70,18 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
             <p className="truncate text-[12px] text-text-faint">{brandSubtitle}</p>
           </div>
         )}
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-expanded={!collapsed}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy"
-        >
-          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-        </button>
+        {navigationMode !== 'mobile' && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!collapsed}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy"
+          >
+            {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+          </button>
+        )}
       </div>
 
       <nav className="flex flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto p-2">

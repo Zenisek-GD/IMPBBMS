@@ -86,7 +86,7 @@ function SubmitInvoiceModal({ onClose, onSubmitted }) {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Amount (₱)
@@ -347,8 +347,8 @@ export default function Invoices() {
             onChange={(event) => setRemarks(event.target.value)}
             className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
           />
-          <div className="mt-4 flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setReturning(null)}>
+          <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button className="w-full sm:w-auto" variant="secondary" onClick={() => setReturning(null)}>
               CANCEL
             </Button>
             <button
@@ -358,7 +358,7 @@ export default function Invoices() {
                 setReturning(null)
                 setRemarks('')
               }}
-              className="rounded-sm bg-danger px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-white"
+              className="min-h-11 w-full rounded-sm bg-danger px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-white sm:w-auto"
             >
               RETURN INVOICE
             </button>

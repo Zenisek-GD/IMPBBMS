@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from 'react-router-dom'
-import { Globe, ArrowRight, AlertCircle, MailWarning } from 'lucide-react'
+import { Globe, ArrowLeft, ArrowRight, AlertCircle, MailWarning } from 'lucide-react'
 import { useAuth } from '../context/useAuth'
 import { landingRouteForRole } from '../config/roleLanding'
 import { loginSchema } from '../config/validation'
@@ -84,7 +84,14 @@ export default function Login() {
   }
 
   return (
-    <AuthLayout title="Sign in" subtitle="Use the account issued to you — there is no public sign-up.">
+    <AuthLayout title="Log in" subtitle="Use the account issued to you. There is no public sign-up.">
+      <Link
+        to="/"
+        className="mb-5 inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-[12.5px] font-medium text-text-secondary transition-colors hover:bg-sidebar hover:text-navy focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+      >
+        <ArrowLeft size={15} aria-hidden="true" />
+        Back to public records
+      </Link>
       {logoutWarning && (
         <p
           role="status"
@@ -158,7 +165,7 @@ export default function Login() {
           disabled={isSubmitting}
           className="mt-1 flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-2.5 text-[13px] font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-60"
         >
-          {isSubmitting ? 'Signing in…' : 'Sign in'}
+          {isSubmitting ? 'Logging in…' : 'Log in'}
           {!isSubmitting && <ArrowRight size={15} />}
         </button>
       </form>

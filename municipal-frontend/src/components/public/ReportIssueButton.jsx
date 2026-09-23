@@ -78,7 +78,7 @@ export default function ReportIssueButton({ project }) {
         onClick={openReport}
         title={`Report an issue with ${project.projectTitle}`}
         aria-label={`Report an issue with ${project.projectTitle}`}
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-danger/40 bg-danger/10 text-danger transition-colors hover:border-danger hover:bg-danger/15 focus:ring-2 focus:ring-danger/30 focus:outline-none"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-danger/40 bg-danger/10 text-danger transition-colors hover:border-danger hover:bg-danger/15 focus:ring-2 focus:ring-danger/30 focus:outline-none md:h-9 md:w-9"
       >
         <TriangleAlert size={17} aria-hidden="true" />
       </button>
@@ -97,7 +97,7 @@ export default function ReportIssueButton({ project }) {
               <button
                 type="button"
                 onClick={close}
-                className="rounded-md border border-border-muted bg-surface px-3 py-2 text-sm font-medium text-navy transition-colors hover:border-border-strong"
+                className="min-h-11 rounded-md border border-border-muted bg-surface px-3 py-2 text-sm font-medium text-navy transition-colors hover:border-border-strong"
               >
                 Done
               </button>
@@ -154,11 +154,11 @@ export default function ReportIssueButton({ project }) {
 
               {error && <p role="alert" className="rounded-md border border-danger/25 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
 
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={close} disabled={sending} className="rounded-md px-3 py-2 text-sm font-medium text-text-secondary hover:bg-sidebar hover:text-navy disabled:opacity-60">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button type="button" onClick={close} disabled={sending} className="min-h-11 w-full rounded-md px-3 py-2 text-sm font-medium text-text-secondary hover:bg-sidebar hover:text-navy disabled:opacity-60 sm:w-auto">
                   Cancel
                 </button>
-                <button type="submit" disabled={sending} className="inline-flex items-center gap-1.5 rounded-md bg-danger px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60">
+                <button type="submit" disabled={sending} className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md bg-danger px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60 sm:w-auto">
                   {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
                   {sending ? 'Sending...' : 'Send report'}
                 </button>

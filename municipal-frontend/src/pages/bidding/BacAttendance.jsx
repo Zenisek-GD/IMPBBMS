@@ -20,18 +20,18 @@ export default function BacAttendance({ value, onChange }) {
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {!data && !error && <p className="text-sm text-text-faint">Loading official signatories…</p>}
       {data?.committee.map((member) => (
-        <label key={member.id} className="flex items-center gap-2 text-sm text-navy">
+        <label key={member.id} className="flex min-h-11 items-center gap-2 text-sm text-navy">
           <input type="checkbox" checked={ids.includes(member.id)} onChange={(event) => {
             const next = event.target.checked ? [...ids, member.id] : ids.filter((id) => id !== member.id)
             onChange({ ...value, attendingMemberIds: next, presidingMemberId: next.includes(Number(value.presidingMemberId)) ? value.presidingMemberId : '' })
           }} />
-          <span>{member.position} — {member.name}</span>
-          <span className="ml-auto text-xs text-text-secondary">{ids.includes(member.id) ? 'Present' : 'Absent'}</span>
+          <span className="min-w-0 flex-1 break-words">{member.position} — {member.name}</span>
+          <span className="shrink-0 text-xs text-text-secondary">{ids.includes(member.id) ? 'Present' : 'Absent'}</span>
         </label>
       ))}
       {data && <>
         <label className="block text-xs text-text-secondary">Presiding officer
-          <select className="mt-1 w-full rounded border border-border-muted bg-surface p-2 text-sm text-navy" value={value.presidingMemberId ?? ''}
+          <select className="mt-1 min-h-11 w-full rounded border border-border-muted bg-surface p-2 text-sm text-navy" value={value.presidingMemberId ?? ''}
             onChange={(event) => onChange({ ...value, presidingMemberId: event.target.value ? Number(event.target.value) : '' })}>
             <option value="">Select the presiding officer</option>
             {data.committee.filter((member) => ids.includes(member.id) && /chair/i.test(member.position)).map((member) => <option key={member.id} value={member.id}>{member.position} — {member.name}</option>)}

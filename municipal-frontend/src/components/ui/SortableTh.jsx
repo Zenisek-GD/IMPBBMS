@@ -68,7 +68,7 @@ export default function SortableTh({
         // strength, so both used to resolve to the colour it now always has.
         // Sort state is carried by the chevron below — which direction it
         // points, and whether it is at full opacity — and by aria-sort.
-        className={`flex w-full items-center gap-1.5 ${PADDING} text-left uppercase`}
+        className={`flex min-h-11 w-full items-center gap-1.5 ${PADDING} text-left uppercase md:min-h-9`}
       >
         {children}
         <Icon

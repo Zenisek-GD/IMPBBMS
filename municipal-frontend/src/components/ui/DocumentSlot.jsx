@@ -67,11 +67,12 @@ export default function DocumentSlot({
             <button
               type="button"
               onClick={() => documentsApi.downloadDocument(existing.id, existing.filename)}
-              className="flex items-center gap-2 rounded-sm bg-success/10 px-3 py-2 text-[11px] font-medium tracking-[0.03em] text-success"
+              className="flex min-h-11 max-w-full items-center gap-2 rounded-sm bg-success/10 px-3 py-2 text-[11px] font-medium tracking-[0.03em] text-success"
             >
-              <Check size={12} /> {existing.filename}
-              <span className="opacity-70">({formatBytes(existing.sizeBytes)})</span>
-              <Download size={12} />
+              <Check size={12} className="shrink-0" />
+              <span className="min-w-0 break-all">{existing.filename}</span>
+              <span className="shrink-0 opacity-70">({formatBytes(existing.sizeBytes)})</span>
+              <Download size={12} className="shrink-0" />
             </button>
 
             {!disabled && (
@@ -80,7 +81,7 @@ export default function DocumentSlot({
                   type="button"
                   onClick={() => inputRef.current?.click()}
                   disabled={busy}
-                  className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                  className="min-h-11 px-2 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                 >
                   REPLACE
                 </button>
@@ -93,7 +94,7 @@ export default function DocumentSlot({
                     onChanged?.()
                   }}
                   aria-label="Remove document"
-                  className="text-text-faint hover:text-danger"
+                  className="flex min-h-11 min-w-11 items-center justify-center text-text-faint hover:text-danger"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -105,7 +106,7 @@ export default function DocumentSlot({
             type="button"
             onClick={() => inputRef.current?.click()}
             disabled={disabled || busy}
-            className="flex items-center gap-2 rounded-sm bg-accent px-3 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-50"
+            className="flex min-h-11 items-center gap-2 rounded-sm bg-accent px-3 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-50"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
             {busy ? `UPLOADING ${progress}%` : 'UPLOAD'}

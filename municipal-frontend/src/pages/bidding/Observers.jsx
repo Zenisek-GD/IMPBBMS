@@ -71,7 +71,7 @@ function InviteModal({ rfq, organizations, onClose, onDone }) {
       <WorkHoursDateTimeInput
         value={scheduledAt}
         onChange={(e) => setScheduledAt(e.target.value)}
-        className="mb-1 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+        className="mb-1 min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
       />
       {noticeDays !== null && (
         <p className={`mb-3 text-xs ${noticeShort ? 'text-danger' : 'text-text-secondary'}`}>
@@ -93,17 +93,19 @@ function InviteModal({ rfq, organizations, onClose, onDone }) {
         {organizations.map((organization) => (
           <label
             key={organization.id}
-            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-muted"
+            className="flex min-h-11 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-muted"
           >
             <input
               type="checkbox"
               checked={selected.includes(organization.id)}
               onChange={() => toggle(organization.id)}
             />
-            <span className="flex-1 text-navy">{organization.name}</span>
-            <Badge tone={OBSERVER_SECTOR_TONES[organization.sector]}>
-              {OBSERVER_SECTOR_LABELS[organization.sector]}
-            </Badge>
+            <span className="min-w-0 flex-1 break-words text-navy">{organization.name}</span>
+            <span className="shrink-0">
+              <Badge tone={OBSERVER_SECTOR_TONES[organization.sector]}>
+                {OBSERVER_SECTOR_LABELS[organization.sector]}
+              </Badge>
+            </span>
           </label>
         ))}
       </div>
@@ -336,9 +338,9 @@ export default function Observers() {
                 key={rfq.id}
                 className="flex flex-wrap items-center justify-between gap-3 rounded border border-border-muted px-3 py-2"
               >
-                <div>
-                  <p className="text-sm font-medium text-navy">{rfq.referenceNo}</p>
-                  <p className="text-xs text-text-secondary">{rfq.title}</p>
+                <div className="min-w-0">
+                  <p className="break-all text-sm font-medium text-navy">{rfq.referenceNo}</p>
+                  <p className="break-words text-xs text-text-secondary">{rfq.title}</p>
                 </div>
                 <Button variant="secondary" onClick={() => setInviting(rfq)}>
                   INVITE OBSERVERS
@@ -369,11 +371,11 @@ export default function Observers() {
           {invitationsTable.pageRows.map((invitation) => (
             <div key={invitation.id} className="rounded border border-border-muted px-3 py-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-medium text-navy">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-medium text-navy">
                     {invitation.referenceNo} — {invitation.stageLabel}
                   </p>
-                  <p className="text-xs text-text-secondary">
+                  <p className="break-words text-xs text-text-secondary">
                     {invitation.organizationName} · scheduled {dateTime(invitation.scheduledAt)} ·{' '}
                     {invitation.noticeDays} days&rsquo; notice
                   </p>

@@ -13,10 +13,10 @@ const VARIANTS = {
 // 32px dense-register control, `sm` is 36px for compact page actions, standard
 // actions are 40px, and the large variant remains 44px for touch-first work.
 const SIZES = {
-  table: 'h-10 gap-1 px-2.5 text-[11.5px] md:h-8',
-  sm: 'h-10 gap-1.5 px-3 text-[12px] md:h-9',
-  md: 'h-11 gap-2 px-4 text-sm md:h-10',
-  lg: 'h-11 gap-2 px-5 text-[14px]',
+  table: 'min-h-10 gap-1 px-2.5 text-[11.5px] md:min-h-8',
+  sm: 'min-h-10 gap-1.5 px-3 text-[12px] md:min-h-9',
+  md: 'min-h-11 gap-2 px-4 text-sm md:min-h-10',
+  lg: 'min-h-11 gap-2 px-5 text-[14px]',
 }
 
 export default function Button({
@@ -31,7 +31,7 @@ export default function Button({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center rounded-md font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${SIZES[size]} ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex max-w-full items-center justify-center rounded-md font-medium text-center leading-tight whitespace-normal transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${SIZES[size]} ${VARIANTS[variant]} ${className}`}
       {...props}
     >
       {Icon && <Icon size={iconSize} className="shrink-0" />}

@@ -60,7 +60,7 @@ function DraftModal({ onClose, onCreated }) {
           </select>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               PO reference
@@ -148,8 +148,8 @@ function DeliveryModal({ contract, onClose, onReported }) {
         className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
       />
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>
           CANCEL
         </Button>
         <button
@@ -163,7 +163,7 @@ function DeliveryModal({ contract, onClose, onReported }) {
               setError(err.response?.data?.message ?? 'Could not report the delivery.')
             }
           }}
-          className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg"
+          className="min-h-11 w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg sm:w-auto"
         >
           REPORT DELIVERY
         </button>
@@ -202,15 +202,15 @@ function VariationOrderModal({ contract, onClose, onIssued }) {
 
   return (
     <Modal title={`Variation order — ${contract.contractNo}`} onClose={onClose}>
-      <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded border border-border-muted bg-sidebar px-4 py-3 text-[12.5px]">
+      <dl className="mb-4 grid grid-cols-1 gap-x-4 gap-y-2 rounded border border-border-muted bg-sidebar px-4 py-3 text-[12.5px] sm:grid-cols-2">
         <dt className="text-text-secondary">Original contract price</dt>
-        <dd className="text-right font-medium text-navy">{peso(original)}</dd>
+        <dd className="break-all font-medium text-navy sm:text-right">{peso(original)}</dd>
         <dt className="text-text-secondary">Variations issued so far</dt>
-        <dd className="text-right font-medium text-navy">{peso(issued)}</dd>
+        <dd className="break-all font-medium text-navy sm:text-right">{peso(issued)}</dd>
         <dt className="text-text-secondary">Ceiling (10% of original)</dt>
-        <dd className="text-right font-medium text-navy">{peso(ceiling)}</dd>
+        <dd className="break-all font-medium text-navy sm:text-right">{peso(ceiling)}</dd>
         <dt className="font-medium text-navy">Remaining headroom</dt>
-        <dd className="text-right font-semibold text-accent">{peso(headroom)}</dd>
+        <dd className="break-all font-semibold text-accent sm:text-right">{peso(headroom)}</dd>
       </dl>
 
       <label className="mb-1.5 block text-[12.5px] font-medium text-text-secondary">
@@ -273,7 +273,7 @@ function VariationOrderModal({ contract, onClose, onIssued }) {
               setSaving(false)
             }
           }}
-          className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-11 w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
           {saving ? 'ISSUING…' : 'ISSUE VARIATION ORDER'}
         </button>
@@ -301,11 +301,11 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
 
   return (
     <Modal title={`Warranty security — ${contract.contractNo}`} onClose={onClose}>
-      <div className="mb-4 flex items-baseline justify-between rounded border border-border-muted bg-sidebar px-4 py-3">
-        <span className="text-[12.5px] text-text-secondary">
+      <div className="mb-4 flex flex-col gap-1 rounded border border-border-muted bg-sidebar px-4 py-3 sm:flex-row sm:items-baseline sm:justify-between">
+        <span className="break-words text-[12.5px] text-text-secondary">
           Required — 1% of {peso(contract.amount)}
         </span>
-        <span className="text-[15px] font-semibold text-navy">{peso(required)}</span>
+        <span className="break-all text-[15px] font-semibold text-navy sm:text-right">{peso(required)}</span>
       </div>
 
       <label className="mb-1.5 block text-[12.5px] font-medium text-text-secondary">
@@ -314,7 +314,7 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
       <select
         value={form}
         onChange={(event) => setForm(event.target.value)}
-        className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+        className="min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
       >
         {Object.entries(contractsApi.SECURITY_FORM_LABELS).map(([key, label]) => (
           <option key={key} value={key}>
@@ -332,7 +332,7 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
             value={referenceNo}
             onChange={(event) => setReferenceNo(event.target.value)}
             placeholder="Bond or receipt number"
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+            className="min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
           />
         </div>
         <div>
@@ -343,7 +343,7 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
             value={issuer}
             onChange={(event) => setIssuer(event.target.value)}
             placeholder="Bank or surety company"
-            className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+            className="min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
           />
         </div>
       </div>
@@ -356,13 +356,13 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
         min={1}
         value={warrantyMonths}
         onChange={(event) => setWarrantyMonths(event.target.value)}
-        className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+        className="min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
       />
 
       {error && <p className="mt-3 text-xs text-danger">{error}</p>}
 
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>
           CANCEL
         </Button>
         <button
@@ -385,7 +385,7 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
               setSaving(false)
             }
           }}
-          className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-50"
+          className="min-h-11 w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-50 sm:w-auto"
         >
           {saving ? 'POSTING…' : 'POST WARRANTY SECURITY'}
         </button>

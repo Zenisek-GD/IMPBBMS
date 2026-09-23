@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
   Search,
   ArrowRight,
@@ -57,6 +57,15 @@ const compactPeso = (value) => {
   if (n >= 1_000_000_000) return `₱${(n / 1_000_000_000).toFixed(2)}B`
   if (n >= 1_000_000) return `₱${(n / 1_000_000).toFixed(2)}M`
   return peso(n)
+}
+
+const formatPublicUpdate = (value) => {
+  if (!value || Number.isNaN(new Date(value).getTime())) return null
+  return new Intl.DateTimeFormat('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(value))
 }
 
 // `band` is the tinted strip across the head of a project card; `chip` is the
@@ -182,9 +191,9 @@ function SearchField({ value, onChange, className = '', bare = false, id = 'port
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Search by reference, title, office, or barangay"
+        placeholder="Search projects or office"
         aria-label="Search procurement records by reference, title, office, or barangay"
-        className={`w-full py-2.5 pr-4 pl-10 text-[14px] text-navy transition-colors placeholder:text-text-secondary focus:outline-none ${
+        className={`min-h-11 w-full py-2.5 pr-4 pl-10 text-[14px] text-navy transition-colors placeholder:text-text-secondary focus:outline-none ${
           bare
             ? 'rounded-md bg-transparent focus:ring-2 focus:ring-accent/15'
             : 'rounded-md border border-border-strong bg-surface shadow-sm focus:border-accent focus:ring-2 focus:ring-accent/15'
@@ -331,12 +340,12 @@ function LedgerStrip({ overview, savings, releaseRate }) {
         </div>
 
         {cells.map((cell) => (
-          <div key={cell.label} className="flex flex-col bg-surface p-4 sm:p-5">
+          <div key={cell.label} className="flex min-w-0 flex-col bg-surface p-4 break-words sm:p-5">
             <p className="text-[12px] font-medium tracking-[0.06em] text-navy uppercase">
               {cell.label}
             </p>
 
-            <p className="tabular-nums mt-2.5 text-[21px] leading-none font-semibold tracking-[-0.025em] text-navy sm:text-[26px]">
+            <p className="tabular-nums mt-2.5 text-[21px] leading-none font-semibold tracking-[-0.025em] break-words text-navy sm:text-[26px]">
               {cell.value}
             </p>
 
@@ -350,7 +359,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
             {/* Qualifying note is what makes a figure quotable rather than just
                 large. Always rendered now — on mobile it clamps to two lines
                 instead of vanishing, so numbers never appear unqualified. */}
-            <p className="mt-auto line-clamp-2 pt-2 text-[12px] leading-snug text-navy sm:pt-3">
+            <p className="mt-auto line-clamp-2 pt-2 text-[13px] leading-snug break-words text-navy sm:pt-3">
               {cell.note}
             </p>
           </div>
@@ -495,12 +504,14 @@ function AboutPanel({ overview }) {
 
 function RecordViewSwitch({ view, onChange }) {
   const optionClass = (key) =>
-    `min-h-9 px-3 text-[12px] font-medium transition-colors focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
+    `min-h-11 px-3 text-[12px] font-medium transition-colors focus-visible:relative focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
       view === key ? 'bg-surface text-navy shadow-sm' : 'text-text-secondary hover:text-navy'
     }`
 
+  // Table needs 860px min-width, so it is desktop-only. Hidden on mobile to
+  // avoid forcing horizontal scroll on a 360px viewport.
   return (
-    <div className="flex items-center gap-2" role="group" aria-label="Choose record layout">
+    <div className="hidden items-center gap-2 md:flex" role="group" aria-label="Choose record layout">
       <span className="text-[12px] font-medium text-text-secondary">View</span>
       <div className="flex overflow-hidden rounded-md border border-border-muted bg-sidebar">
         <button type="button" aria-pressed={view === 'grid'} onClick={() => onChange('grid')} className={optionClass('grid')}>
@@ -543,9 +554,9 @@ function LandingFaq({ managedItems }) {
   const items = Array.isArray(managedItems) ? managedItems : defaultItems
 
   return (
-    <section aria-labelledby="landing-faq-title" className="mt-6 overflow-hidden rounded-xl border border-border-strong bg-surface shadow-sm">
+    <section id="landing-faq" aria-labelledby="landing-faq-title" className="mt-6 scroll-mt-6 overflow-hidden rounded-xl border border-border-strong bg-surface shadow-sm">
       <div className="grid md:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)]">
-        <div className="flex min-h-80 flex-col border-b border-border-muted px-6 py-7 sm:px-8 sm:py-8 md:border-r md:border-b-0">
+        <div className="flex min-h-0 flex-col border-b border-border-muted px-6 py-7 sm:px-8 sm:py-8 md:min-h-80 md:border-r md:border-b-0">
           <div>
             <h2 id="landing-faq-title" className="max-w-xs text-[25px] leading-[1.08] font-semibold tracking-[-0.03em] text-navy sm:text-[29px]">
               Frequently asked questions
@@ -570,7 +581,7 @@ function LandingFaq({ managedItems }) {
         </div>
 
         <div
-          className="max-h-[32rem] overflow-y-auto overscroll-contain px-5 py-3 sm:px-7 sm:py-5"
+          className="px-5 py-3 sm:px-7 sm:py-5 md:max-h-[32rem] md:overflow-y-auto md:overscroll-contain"
           role="region"
           aria-label="Frequently asked questions"
           tabIndex={0}
@@ -807,11 +818,11 @@ function ProjectCard({ project, query = '' }) {
               </p>
             )}
 
-            <h3 className="mt-1.5 line-clamp-2 text-[15px] leading-snug font-semibold tracking-[-0.01em] text-navy decoration-1 underline-offset-2 group-hover:underline">
+            <h3 className="mt-1.5 line-clamp-2 text-[15px] leading-snug font-semibold tracking-[-0.01em] break-words text-navy decoration-1 underline-offset-2 group-hover:underline">
               <Highlighted text={project.projectTitle} query={query} />
             </h3>
 
-            <p className="mt-1 line-clamp-2 text-[12.5px] text-navy">
+            <p className="mt-1 line-clamp-2 text-[13px] break-words text-navy">
               {project.implementingUnit}
             </p>
           </div>
@@ -837,7 +848,7 @@ function ProjectCard({ project, query = '' }) {
 
         {/* Amount over its label: the figure is what the eye is looking for,
             and the label only qualifies it. */}
-        <div className="mt-auto flex items-end justify-between gap-3 pt-4">
+        <div className="mt-auto flex flex-col items-start gap-2 pt-4 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
           <div className="min-w-0">
             <p className="tabular-nums text-[17px] leading-none font-semibold tracking-[-0.015em] text-navy">
               {peso(headlineValue)}
@@ -847,10 +858,10 @@ function ProjectCard({ project, query = '' }) {
             </p>
           </div>
 
-          <div className="max-w-[12rem] shrink-0 text-right">
+          <div className="w-full text-left sm:w-auto sm:max-w-[12rem] sm:shrink-0 sm:text-right">
             {project.awardedTo ? (
-              <p className="flex items-center justify-end gap-1 text-[12px] text-success">
-                <CheckCircle2 size={12} className="shrink-0" aria-hidden="true" />
+              <p className="flex items-start gap-1 text-[12px] text-success sm:justify-end">
+                <CheckCircle2 size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
                 <span className="line-clamp-2">{project.awardedTo}</span>
               </p>
             ) : (
@@ -886,7 +897,7 @@ function ProjectRecordsTable({ projects, query }) {
             <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Public status</th>
             <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Updated</th>
             <th scope="col" className="px-4 py-3 text-right text-[12px] font-medium tracking-[0.035em] text-navy uppercase">Amount</th>
-            <th scope="col" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase"><span className="sr-only">Open record</span></th>
+            <th scope="col" aria-label="Open record" className="px-4 py-3 text-[12px] font-medium tracking-[0.035em] text-navy uppercase" />
           </tr>
         </thead>
         <tbody>
@@ -972,6 +983,7 @@ export default function PublicTransparency() {
   // now lives. Links to ?view=contact were shared before the move, and a URL a
   // citizen has bookmarked should not start returning the wrong page.
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const requested = searchParams.get('view')
   const normalised = requested === 'contact' ? 'about' : requested
   const view = ['announcements', 'about', 'officials', 'projects'].includes(normalised)
@@ -995,8 +1007,22 @@ export default function PublicTransparency() {
   const [procMode, setProcMode] = useState('')
   const [sort, setSort] = useState('newest')
   const [recordView, setRecordView] = useState('grid')
+  // Force cards on narrow screens even if table was picked on desktop before
+  // resizing. Table's min-width would otherwise force page-level sideways scroll.
+  const [isNarrow, setIsNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  )
   const [requestVersion, setRequestVersion] = useState(0)
   const [spotlight, setSpotlight] = useState([])
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 767px)')
+    const update = (event) => setIsNarrow(event.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  const effectiveRecordView = isNarrow ? 'grid' : recordView
 
   useEffect(() => {
     const lguName = overview?.lgu?.name
@@ -1018,14 +1044,14 @@ export default function PublicTransparency() {
   // Deep-link scrolling for `/?view=about#contact` and `/?view=about#bidder`:
   // react-router leaves the hash untouched, so scroll after the section renders.
   useEffect(() => {
-    const hash = window.location.hash
+    const hash = location.hash
     if (!hash) return
     const id = hash.slice(1)
     const timer = setTimeout(() => {
       document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 100)
     return () => clearTimeout(timer)
-  }, [view])
+  }, [view, location.hash])
 
   // Fetch branding for the public portal header and footer.
   useEffect(() => {
@@ -1188,6 +1214,7 @@ export default function PublicTransparency() {
     overview?.totalContracted > 0
       ? Math.round((overview.totalDisbursed / overview.totalContracted) * 100)
       : null
+  const lastUpdatedLabel = formatPublicUpdate(overview?.lastUpdatedAt)
 
   // `showSection` and `pillClass` went with the masthead's two CTA buttons and
   // the status pill row: sections are switched from the header, and status is a
@@ -1195,7 +1222,7 @@ export default function PublicTransparency() {
   // more, so neither helper has a caller.
 
   return (
-    <div className="public-portal flex min-h-screen flex-col bg-canvas">
+    <div className="public-portal flex min-h-[100svh] min-h-[100dvh] flex-col bg-canvas">
       <PublicHeader lguName={overview?.lgu?.name} systemName={branding?.systemName} />
 
       <main id="main-content" className="flex-1">
@@ -1210,23 +1237,34 @@ export default function PublicTransparency() {
             <div className="overflow-hidden rounded-2xl border border-border-strong bg-surface px-5 py-8 text-center shadow-sm sm:px-8 sm:py-10">
               <Link
                 to="/?view=about"
-                className="inline-flex items-center gap-1.5 rounded-full border border-border-strong bg-sidebar px-3 py-1 text-[12px] font-medium text-navy transition-colors hover:text-navy"
+                className="inline-flex min-h-10 max-w-full items-center justify-center gap-1.5 rounded-full border border-border-strong bg-sidebar px-4 py-2 text-center text-[11px] leading-snug font-medium text-navy transition-colors hover:text-navy sm:min-h-9 sm:px-3 sm:py-1 sm:text-[12px]"
               >
-                <ShieldCheck size={13} className="shrink-0 text-accent" aria-hidden="true" />
-                Official public record
-                {overview?.lgu?.name ? ` · ${overview.lgu.name}` : ''}
+                <ShieldCheck size={14} className="shrink-0 text-accent" aria-hidden="true" />
+                <span className="font-semibold">Official Public Record</span>
               </Link>
+              {lastUpdatedLabel && (
+                <p className="mt-1.5 flex items-center justify-center gap-1 text-[11px] text-navy sm:text-[11.5px]">
+                  <CalendarClock size={12} className="shrink-0 text-accent" aria-hidden="true" />
+                  <time dateTime={overview.lastUpdatedAt}>Last updated {lastUpdatedLabel}</time>
+                </p>
+              )}
 
-              <h1 className="mx-auto mt-4 max-w-3xl text-[27px] leading-[1.14] font-semibold tracking-[-0.03em] text-navy sm:text-[36px]">
+              <h1 className="mx-auto mt-4 max-w-3xl text-[clamp(24px,6vw,36px)] leading-[1.14] font-semibold tracking-[-0.03em] text-balance break-words text-navy">
                 {overview?.lgu?.name
                   ? `${overview.lgu.name} Procurement Record`
                   : 'Procurement Transparency Portal'}
               </h1>
 
               <p className="mx-auto mt-3 max-w-2xl text-[14px] leading-relaxed text-navy sm:text-[15px]">
-                Every procurement — plan, bidding, award, contract and payment — published
-                with the office that raised it and the officials who approved it, as required by RA
-                12009. No account required.
+                <span className="sm:hidden">
+                  Plans, bidding, awards, contracts and payments are public under RA 12009. No account
+                  required.
+                </span>
+                <span className="hidden sm:inline">
+                  Every procurement, from planning and bidding through award, contract and payment, is
+                  published with the office that raised it and the officials who approved it, as required
+                  by RA 12009. No account required.
+                </span>
               </p>
 
               {/* Search and scope in one bar. Two controls on one surface read
@@ -1254,23 +1292,24 @@ export default function PublicTransparency() {
                       ? `All projects (${tabCounts.all})`
                       : `${item.label} (${tabCounts[item.key] ?? 0})`,
                   }))}
-                  mobileClassName="rounded-md px-3.5 py-2 hover:bg-sidebar"
+                  mobileClassName="rounded-md border border-border-strong bg-surface px-3.5 py-2 hover:border-border-strong"
                   desktopClassName="shrink-0 rounded-full bg-transparent px-3.5 py-2 text-[13.5px] font-medium text-navy transition-colors hover:bg-sidebar focus:ring-2 focus:ring-accent/20 focus:outline-none"
                 />
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <div className="mt-4 grid grid-cols-[6.5rem_minmax(0,1fr)] items-stretch gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-center">
                 <a
                   href="#records"
-                  className="inline-flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-[13px] font-medium text-accent-fg transition-opacity hover:opacity-90"
+                  className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md bg-accent px-1 py-2 text-[10px] font-medium whitespace-nowrap text-accent-fg transition-opacity hover:opacity-90 sm:gap-1.5 sm:px-4 sm:text-[13px]"
                 >
-                  Find a project <ArrowDownRight size={14} aria-hidden="true" />
+                  Find a project <ArrowDownRight size={13} aria-hidden="true" />
                 </a>
                 <Link
                   to="/?view=about#bidder"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border-strong px-4 py-2 text-[13px] font-medium text-navy transition-colors hover:bg-sidebar"
+                  className="inline-flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md border border-border-strong px-1.5 py-2 text-center text-[11px] leading-tight font-medium text-navy transition-colors hover:bg-sidebar sm:w-auto sm:px-4 sm:text-left sm:text-[13px] sm:leading-normal"
                 >
-                  How to become a bidder <ArrowRight size={14} aria-hidden="true" />
+                  <span className="leading-[1.1] sm:whitespace-nowrap">How to become a bidder</span>{' '}
+                  <ArrowRight size={14} className="shrink-0" aria-hidden="true" />
                 </Link>
               </div>
             </div>
@@ -1329,7 +1368,7 @@ export default function PublicTransparency() {
                     bar, so all that is left here is Refine. On the Projects
                     section, which has no masthead, they reappear here rather
                     than being unreachable. */}
-                <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+                <div className="mt-5 flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                   {!showsIntro && (
                     <>
                       <SearchField
@@ -1375,7 +1414,7 @@ export default function PublicTransparency() {
                     type="button"
                     onClick={() => setRefineOpen((open) => !open)}
                     aria-expanded={refineOpen}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors focus:ring-2 focus:ring-accent/20 focus:outline-none ${
+                    className={`inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors focus:ring-2 focus:ring-accent/20 focus:outline-none sm:w-auto sm:justify-start ${
                       refineOpen || fiscalYear || department || procMode
                         ? 'border-accent/40 bg-chip text-navy'
                         : 'border-border-strong text-navy hover:text-navy'
@@ -1535,7 +1574,7 @@ export default function PublicTransparency() {
                         </p>
                       )}
 
-                      {recordView === 'grid' ? (
+                      {effectiveRecordView === 'grid' ? (
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                           {pageProjects.map((project) => (
                             <ProjectCard key={project.id} project={project} query={search} />

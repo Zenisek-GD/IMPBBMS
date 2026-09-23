@@ -117,11 +117,11 @@ export default function LargeFormPage({
       <div className="flex flex-col gap-4">{children}</div>
 
       {actions && (
-        <div className="sticky bottom-0 -mx-1 flex flex-col gap-3 border-t border-border-muted bg-canvas/95 px-1 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <div className="sticky bottom-0 -mx-1 flex flex-col gap-3 border-t border-border-muted bg-canvas/95 px-1 py-3 backdrop-blur min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
           <p className="max-w-xl text-[12px] leading-relaxed text-text-secondary">
             <span className="font-medium text-navy">Review before you continue.</span> Required information and any validation message should be resolved before the primary action.
           </p>
-          <div className="flex w-full flex-col-reverse gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">{actions}</div>
+          <div className="flex w-full flex-col-reverse gap-2 min-[480px]:w-auto min-[480px]:flex-row min-[480px]:flex-wrap min-[480px]:items-center min-[480px]:justify-end">{actions}</div>
         </div>
       )}
     </div>

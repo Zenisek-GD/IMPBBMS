@@ -9,7 +9,7 @@ import Button from '../../components/ui/Button'
 import Pagination from '../../components/ui/Pagination'
 import fontFaces from '../../styles/fonts.css?inline'
 
-const fieldClass = 'w-full rounded-md border border-border-muted bg-surface px-3 py-2 text-[13px] text-text-primary focus:border-accent focus:outline-none'
+const fieldClass = 'min-h-11 w-full rounded-md border border-border-muted bg-surface px-3 py-2 text-[13px] text-text-primary focus:border-accent focus:outline-none'
 const FILTER_LABELS = { year: 'Year', category: 'Procurement category', method: 'Procurement method', status: 'Status', department: 'Office / department', bidder: 'Bidder', action: 'BAC action', attempt: 'Procurement attempt', outcome: 'Outcome' }
 const label = (value) => String(value ?? '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (letter) => letter.toUpperCase())
 const display = (value, column) => {

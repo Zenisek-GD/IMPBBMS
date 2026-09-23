@@ -1,4 +1,4 @@
-const inputClass = 'mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none'
+const inputClass = 'mt-1 min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none'
 const milestones = [['procurementStartAt', 'Procurement start'], ['publicationStartAt', 'Publication start'], ['publicationEndAt', 'Publication end'], ['evaluationStartAt', 'Evaluation start'], ['evaluationEndAt', 'Evaluation end'], ['postQualificationStartAt', 'Post-qualification start'], ['postQualificationEndAt', 'Post-qualification end'], ['expectedAwardAt', 'Expected award']]
 
 export default function ScheduleFields({ form, setForm, disabled = false }) {

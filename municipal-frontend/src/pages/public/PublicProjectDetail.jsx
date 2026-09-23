@@ -65,7 +65,7 @@ function Field({ label, value, mono }) {
   return (
     <div>
       <p className="text-[11px] tracking-[0.03em] text-navy uppercase">{label}</p>
-      <p className={`mt-0.5 text-[13px] text-navy ${mono ? 'font-mono text-xs' : ''}`}>{value ?? '—'}</p>
+      <p className={`mt-0.5 break-words text-[13px] text-navy ${mono ? 'font-mono text-xs break-all' : ''}`}>{value ?? '—'}</p>
     </div>
   )
 }
@@ -112,8 +112,13 @@ function RecordTable({ columns, rows, empty }) {
     })
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left">
+    <div
+      className="overflow-x-auto overscroll-x-contain"
+      role="region"
+      aria-label="Project records table. Scroll horizontally to view all columns."
+      tabIndex={0}
+    >
+      <table className="w-full min-w-[44rem] text-left">
         <thead className="bg-sidebar">
           <tr>
             {columns.map(([label, , sortable]) =>
@@ -231,7 +236,7 @@ export default function PublicProjectDetail() {
 
   if (status === 'loading') {
     return (
-      <div className="public-portal flex min-h-screen flex-col bg-canvas">
+      <div className="public-portal flex min-h-[100svh] min-h-[100dvh] flex-col bg-canvas">
         <PublicHeader systemName={branding?.systemName} />
         <main id="main-content" className="flex-1 px-8 py-16 text-center text-[13px] text-navy">Loading project…</main>
         <PublicFooter transparencyFooter={branding?.transparencyFooter} systemName={branding?.systemName} />
@@ -241,7 +246,7 @@ export default function PublicProjectDetail() {
 
   if (status !== 'ready') {
     return (
-      <div className="public-portal flex min-h-screen flex-col bg-canvas">
+      <div className="public-portal flex min-h-[100svh] min-h-[100dvh] flex-col bg-canvas">
         <PublicHeader systemName={branding?.systemName} />
         <main id="main-content" className="mx-auto w-full max-w-3xl flex-1 px-6 py-16 text-center">
           <FileWarning size={26} className="mx-auto text-navy" />
@@ -269,13 +274,13 @@ export default function PublicProjectDetail() {
   const { financials, records } = project
 
   return (
-    <div className="public-portal flex min-h-screen flex-col bg-canvas">
+    <div className="public-portal flex min-h-[100svh] min-h-[100dvh] flex-col bg-canvas">
       <PublicHeader systemName={branding?.systemName} />
 
       <main id="main-content" className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-8">
         <Link
           to="/?view=projects#records"
-          className="inline-flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-navy hover:text-navy"
+          className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[12px] font-medium tracking-[0.02em] text-navy hover:text-navy"
         >
           <ArrowLeft size={14} /> Back to procurement records
         </Link>
@@ -292,7 +297,7 @@ export default function PublicProjectDetail() {
                 FY {project.fiscalYear}
               </span>
               {project.referenceNo && (
-                <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 font-mono text-[11px] text-navy">
+              <span className="max-w-full break-all rounded-sm border border-border-muted bg-surface px-2 py-0.5 font-mono text-[11px] text-navy">
                   {project.referenceNo}
                 </span>
               )}
@@ -300,10 +305,10 @@ export default function PublicProjectDetail() {
             <ReportIssueButton project={project} />
           </div>
 
-          <h1 className="mt-3 max-w-4xl text-lg leading-tight font-bold tracking-[-0.02em] text-navy sm:text-[22px]">
+          <h1 className="mt-3 max-w-4xl break-words text-lg leading-tight font-bold tracking-[-0.02em] text-navy sm:text-[22px]">
             {project.projectTitle}
           </h1>
-          <p className="mt-1.5 text-sm text-navy">
+          <p className="mt-1.5 break-words text-sm text-navy">
             {project.implementingUnit}
             {project.procurementMode && ` · ${project.procurementMode}`}
           </p>
@@ -350,14 +355,14 @@ export default function PublicProjectDetail() {
           </ol>
         </section>
 
-        <nav className="mt-6 inline-flex items-center gap-0.5 rounded-full border border-border-muted bg-surface p-1 shadow-sm" aria-label="Project sections">
+        <nav className="mt-6 grid w-full grid-cols-3 gap-1 rounded-xl border border-border-muted bg-surface p-1 shadow-sm sm:inline-flex sm:w-auto sm:gap-0.5 sm:rounded-full" aria-label="Project sections">
           {TABS.map((item) => (
             <button
               key={item.key}
               type="button"
               onClick={() => setTab(item.key)}
               aria-pressed={tab === item.key}
-              className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors ${
+              className={`flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-center text-[11px] font-medium transition-colors sm:min-h-0 sm:gap-2 sm:rounded-full sm:px-4 sm:py-1.5 sm:text-[13px] sm:whitespace-nowrap ${
                 tab === item.key
                   ? 'bg-accent text-accent-fg shadow-sm'
                   : 'text-navy hover:bg-navy-tint hover:text-navy'
@@ -564,11 +569,11 @@ export default function PublicProjectDetail() {
                       className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
                     >
                       <div className="min-w-0">
-                        <p className="flex items-center gap-2 text-[13px] font-medium text-navy">
+                        <p className="flex min-w-0 items-start gap-2 text-[13px] font-medium text-navy">
                           <FileText size={14} className="shrink-0 text-navy" />
-                          {document.label ?? document.filename}
+                          <span className="min-w-0 break-words">{document.label ?? document.filename}</span>
                         </p>
-                        <p className="mt-0.5 text-[11px] text-navy">
+                        <p className="mt-0.5 break-words text-[11px] text-navy">
                           {document.filename} · {Math.max(1, Math.round(document.sizeBytes / 1024))} KB ·
                           attached to {document.attachedTo} · {shortDate(document.uploadedAt)}
                         </p>
@@ -581,7 +586,7 @@ export default function PublicProjectDetail() {
                       </div>
                       <a
                         href={publicApi.projectDocumentUrl(project.id, document.id)}
-                        className="flex shrink-0 items-center gap-1.5 rounded border border-navy px-3 py-1.5 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:bg-accent hover:text-accent-fg"
+                        className="flex min-h-11 shrink-0 items-center gap-1.5 rounded border border-navy px-3 py-1.5 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:bg-accent hover:text-accent-fg sm:min-h-0"
                       >
                         <Download size={13} /> Download
                       </a>

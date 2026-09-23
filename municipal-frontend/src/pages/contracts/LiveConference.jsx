@@ -64,7 +64,7 @@ function ScheduleModal({ onClose, onScheduled }) {
           </select>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Purpose
@@ -382,7 +382,7 @@ function EndSessionForm({ session, onDone }) {
             setBusy(false)
             onDone()
           }}
-          className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
+          className="min-h-11 max-w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
         >
           {busy ? 'SAVING...' : 'END SESSION & ARCHIVE'}
         </button>

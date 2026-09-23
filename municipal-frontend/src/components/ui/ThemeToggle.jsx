@@ -14,7 +14,7 @@ export default function ThemeToggle({ tone = 'default', className = '' }) {
 
   const tones = {
     default:
-      'border border-border-muted bg-surface text-text-secondary hover:text-navy hover:border-border-strong',
+      'text-navy hover:bg-navy-tint hover:text-navy',
     brand: 'text-topnav-link hover:bg-white/10 hover:text-topnav-link-alt',
     header: 'text-header-muted hover:bg-white/15 hover:text-header-fg',
   }
@@ -29,7 +29,7 @@ export default function ThemeToggle({ tone = 'default', className = '' }) {
       title={isDark ? 'Light theme' : 'Dark theme'}
       // Sized to match the notification bell beside it on the top bar. These two
       // sat at 15px and 20px, which read as a primary control and a lesser one.
-      className={`flex h-9 w-9 items-center justify-center rounded-md transition-colors ${tones[tone]} ${className}`}
+      className={`flex h-11 w-11 items-center justify-center rounded-full transition-colors focus:ring-2 focus:ring-accent/40 focus:outline-none md:h-9 md:w-9 ${tones[tone]} ${className}`}
     >
       {isDark ? <Sun size={19} /> : <Moon size={19} />}
     </button>

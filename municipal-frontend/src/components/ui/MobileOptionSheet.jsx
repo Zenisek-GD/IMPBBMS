@@ -7,12 +7,39 @@ import { Check, X } from 'lucide-react'
 // tap targets stay part of the system rather than reverting to a bright chooser.
 export default function MobileOptionSheet({ open, title, options, value, onChange, onClose }) {
   const firstOptionRef = useRef(null)
+  const panelRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) return undefined
     const previousOverflow = document.body.style.overflow
+    const previousFocus = document.activeElement
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const controls = [...(panelRef.current?.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]'
+      ) ?? [])].filter((element) => element.getClientRects().length > 0)
+      const first = controls[0]
+      const last = controls.at(-1)
+      if (!first) {
+        event.preventDefault()
+      } else if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', onKeyDown)
@@ -20,8 +47,9 @@ export default function MobileOptionSheet({ open, title, options, value, onChang
     return () => {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', onKeyDown)
+      if (previousFocus?.isConnected) previousFocus.focus()
     }
-  }, [onClose, open])
+  }, [open])
 
   if (!open || typeof document === 'undefined') return null
 
@@ -35,6 +63,8 @@ export default function MobileOptionSheet({ open, title, options, value, onChang
         onClick={onClose}
       />
       <section
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -46,12 +76,12 @@ export default function MobileOptionSheet({ open, title, options, value, onChang
             type="button"
             onClick={onClose}
             aria-label="Close options"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-sidebar hover:text-navy"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-sidebar hover:text-navy"
           >
             <X size={17} aria-hidden="true" />
           </button>
         </header>
-        <div role="listbox" aria-label={title} className="max-h-[min(55dvh,26rem)] overflow-y-auto p-2">
+        <div role="listbox" aria-label={title} className="max-h-[min(60dvh,26rem)] overflow-y-auto overscroll-contain p-2">
           {options.map((option, index) => {
             const selected = String(option.value) === String(value)
             return (
@@ -69,7 +99,7 @@ export default function MobileOptionSheet({ open, title, options, value, onChang
                   selected ? 'bg-chip text-navy' : 'text-text-secondary hover:bg-sidebar hover:text-navy'
                 }`}
               >
-                <span className="min-w-0 flex-1">{option.label}</span>
+                <span className="min-w-0 flex-1 break-words">{option.label}</span>
                 {selected && <Check size={17} className="shrink-0 text-accent" aria-hidden="true" />}
               </button>
             )

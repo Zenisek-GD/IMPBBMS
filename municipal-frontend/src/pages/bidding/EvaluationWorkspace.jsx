@@ -101,7 +101,7 @@ export default function EvaluationWorkspace() {
       <TableToolbar {...rfqTable.toolbarProps} searchPlaceholder="Search reference or title…" />
       <div className="mt-3 flex flex-wrap gap-2">
         {rfqTable.rows.length === 0 && <p className="text-sm text-text-faint">No procurements match the current evaluation queue.</p>}
-        {rfqTable.pageRows.map((rfq) => <button key={rfq.id} type="button" onClick={() => { setSelectedId(rfq.id); setBidData(null); setTwg(null); setActionError(''); setMessage(''); setDeclaring(false) }} className={`rounded border px-4 py-2 text-left text-xs ${selectedId === rfq.id ? 'border-navy bg-accent text-accent-fg' : 'border-border-muted bg-surface text-text-secondary'}`}>{rfq.referenceNo}<span className="ml-2 opacity-70">{RFQ_STATUS_LABELS[rfq.status]}</span></button>)}
+        {rfqTable.pageRows.map((rfq) => <button key={rfq.id} type="button" onClick={() => { setSelectedId(rfq.id); setBidData(null); setTwg(null); setActionError(''); setMessage(''); setDeclaring(false) }} className={`min-h-11 max-w-full rounded border px-4 py-2 text-left text-xs ${selectedId === rfq.id ? 'border-navy bg-accent text-accent-fg' : 'border-border-muted bg-surface text-text-secondary'}`}>{rfq.referenceNo}<span className="ml-2 opacity-70">{RFQ_STATUS_LABELS[rfq.status]}</span></button>)}
       </div>
       <Pagination {...rfqTable.paginationProps} label="procurements" />
     </Card>
@@ -111,7 +111,7 @@ export default function EvaluationWorkspace() {
       {(canTwg || canEvaluate) && evaluationOpen && <Card title="Conflict-of-interest declaration">
         {administration?.declaration?.noConflictDeclared === false ? <p role="alert" className="text-sm text-danger">You reported a conflict of interest. Evaluation is blocked and administrative reassignment is required.</p> : (administration?.declaration ?? twg?.declaration)?.noConflictDeclared ? <p className="text-sm text-success">No conflict of interest declared by {user?.name} on {new Date((administration?.declaration ?? twg.declaration).declaredAt).toLocaleString('en-PH')}. You may prepare your evaluation.</p> : <div className="space-y-3">
           <p className="text-sm text-text-secondary">I confirm that I have no conflict of interest with any bidder participating in this procurement.</p>
-          <label className="flex items-center gap-2 text-sm text-navy"><input type="checkbox" checked={declaring} onChange={(event) => setDeclaring(event.target.checked)} />I declare that I have no conflict of interest.</label>
+          <label className="flex min-h-11 items-center gap-2 text-sm text-navy"><input type="checkbox" checked={declaring} onChange={(event) => setDeclaring(event.target.checked)} />I declare that I have no conflict of interest.</label>
           <Button disabled={!declaring} onClick={() => run(() => biddingApi.declareEvaluatorConflict(selected.id, true), 'Declaration recorded. You may now prepare your evaluation.').catch((err) => setActionError(err.response?.data?.message ?? 'Could not record the declaration.'))}>Record declaration</Button>
         </div>}
         {administration?.declaration?.noConflictDeclared !== false && <div className="mt-3 space-y-2"><p className="text-xs text-text-secondary">If you have a conflict with any participating bidder, record it here. Your participation will be blocked for reassignment.</p><Button variant="secondary" onClick={() => run(() => biddingApi.declareEvaluatorConflict(selected.id, false), 'Conflict recorded; reassignment required.').catch((err) => setActionError(err.response?.data?.message ?? 'Could not record the conflict.'))}>I have a conflict of interest</Button></div>}
@@ -155,14 +155,14 @@ export default function EvaluationWorkspace() {
       </Card>
       <Card title="BAC evaluation breakdown">
         {bidData.bids.flatMap((bid) => (bid.evaluations ?? []).map((evaluation) => <details key={evaluation.id} className="border-b border-border-muted py-3 last:border-0">
-          <summary className="cursor-pointer text-sm font-medium text-navy">{bid.vendorName ?? bid.blindLabel} · {evaluation.evaluatorName ?? `Evaluator #${evaluation.evaluatorId}`} · {consulting ? `Quality ${score(evaluation.score)} / 100` : Number(evaluation.score) === 100 ? 'Compliant' : 'Non-Compliant'}</summary>
-          <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">{Object.entries(evaluation.criteriaBreakdown?.requirementsExamined ?? evaluation.criteriaBreakdown ?? {}).filter(([key]) => key !== 'verdict').map(([key, value]) => <div key={key}><dt className="text-text-faint">{key.replace(/([a-z])([A-Z])/g, '$1 $2')}</dt><dd>{String(value)}</dd></div>)}</dl>
+          <summary className="cursor-pointer break-words text-sm font-medium text-navy">{bid.vendorName ?? bid.blindLabel} · {evaluation.evaluatorName ?? `Evaluator #${evaluation.evaluatorId}`} · {consulting ? `Quality ${score(evaluation.score)} / 100` : Number(evaluation.score) === 100 ? 'Compliant' : 'Non-Compliant'}</summary>
+          <dl className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2 [&_dd]:break-words">{Object.entries(evaluation.criteriaBreakdown?.requirementsExamined ?? evaluation.criteriaBreakdown ?? {}).filter(([key]) => key !== 'verdict').map(([key, value]) => <div key={key}><dt className="text-text-faint">{key.replace(/([a-z])([A-Z])/g, '$1 $2')}</dt><dd>{String(value)}</dd></div>)}</dl>
           {evaluation.remarks && <p className="mt-2 text-sm text-text-secondary">Remarks: {evaluation.remarks}</p>}
           <p className="mt-2 text-xs text-text-faint">Status: {evaluation.status ?? 'submitted'}; submitted {new Date(evaluation.submittedAt).toLocaleString('en-PH')}. Conflict declaration: {evaluation.noConflictDeclared ? new Date(evaluation.declaredAt).toLocaleString('en-PH') : 'Missing'}.</p>
           {evaluation.failureReason && <p className="mt-2 text-sm text-danger">Failure: {evaluation.failureReason}. {evaluation.failureExplanation}</p>}
           {evaluation.recommendation && <p className="mt-2 text-sm">Recommendation: {evaluation.recommendation}</p>}
           {Object.entries(evaluation.requirementRemarks ?? {}).filter(([, value]) => value).map(([key, value]) => <p key={key} className="mt-1 text-xs">{key}: {value}</p>)}
-          {(evaluation.supportingDocuments ?? []).map((document, index) => <a key={index} className="mr-3 text-xs text-info underline" href={document.url} target="_blank" rel="noreferrer">{document.name}</a>)}
+          {(evaluation.supportingDocuments ?? []).map((document, index) => <a key={index} className="mr-3 inline-block max-w-full break-all text-xs text-info underline" href={document.url} target="_blank" rel="noreferrer">{document.name}</a>)}
           {canChair && evaluationOpen && evaluation.status === 'submitted' && evaluation.evaluatorId !== user?.id && <Button size="table" variant="secondary" onClick={() => setModal({ type: 'return', kind: 'bac', evaluation })}>Return evaluation for correction</Button>}
         </details>))}
         {!bidData.bids.some((bid) => bid.evaluations?.length) && <p className="text-sm text-text-faint">Submitted BAC evaluations and their criterion results will appear here.</p>}

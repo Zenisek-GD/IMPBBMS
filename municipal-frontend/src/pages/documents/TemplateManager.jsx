@@ -276,7 +276,7 @@ function TemplateEditor({ template, options, onBack, onSaved }) {
           </Card>
         </div>
 
-        <Card title="Available fields" icon={Braces} bodyClassName="p-3" className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)]">
+        <Card title="Available fields" icon={Braces} bodyClassName="p-3" className="lg:sticky lg:top-4 lg:max-h-[calc(100dvh-8rem)]">
           <PlaceholderPalette groups={placeholderGroups} onInsert={insertToken} />
         </Card>
       </div>
@@ -439,14 +439,14 @@ function ImportTemplateModal({ options, onClose, onImported }) {
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             className="mt-1 block w-full rounded-md border border-border-muted bg-surface px-3 py-2 text-[12px] text-navy file:mr-3 file:rounded file:border-0 file:bg-navy-tint file:px-2 file:py-1 file:text-[11px] file:font-medium file:text-navy"
           />
-          <span className="mt-1 block text-[11.5px] text-text-faint">
+          <span className="mt-1 block break-all text-[11.5px] text-text-faint">
             {file ? `${file.name} · ${(file.size / 1024).toFixed(1)} KB` : 'One file, up to 2 MB.'}
           </span>
         </label>
         {error && <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" icon={Upload} disabled={!file || !name.trim() || submitting}>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button className="w-full sm:w-auto" type="submit" icon={Upload} disabled={!file || !name.trim() || submitting}>
             {submitting ? 'Importing…' : 'Import draft'}
           </Button>
         </div>

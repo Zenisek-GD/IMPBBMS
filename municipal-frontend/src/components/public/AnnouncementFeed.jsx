@@ -141,22 +141,22 @@ function SolicitationFacts({ entry, compact = false }) {
   return (
     <dl
       className={`mt-4 grid gap-3 border-t border-border-muted pt-4 ${
-        compact ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'
+        compact ? 'grid-cols-1 min-[380px]:grid-cols-2' : 'grid-cols-1 min-[380px]:grid-cols-2 sm:grid-cols-3'
       }`}
     >
-      <div>
+      <div className="min-w-0">
         <dt className="text-[10.5px] tracking-[0.05em] text-navy uppercase">Mode</dt>
-        <dd className="mt-1 text-[13px] text-navy">{entry.mode ?? '—'}</dd>
+        <dd className="mt-1 text-[13px] break-words text-navy">{entry.mode ?? '—'}</dd>
       </div>
-      <div>
+      <div className="min-w-0">
         <dt className="text-[10.5px] tracking-[0.05em] text-navy uppercase">Budget (ABC)</dt>
-        <dd className="tabular-nums mt-1 text-[13.5px] font-semibold text-navy">
+        <dd className="tabular-nums mt-1 text-[13.5px] font-semibold break-words text-navy">
           {peso(entry.abc)}
         </dd>
       </div>
-      <div className={compact ? 'col-span-2' : ''}>
+      <div className={`min-w-0 ${compact ? 'min-[380px]:col-span-2' : ''}`}>
         <dt className="text-[10.5px] tracking-[0.05em] text-navy uppercase">Bids close</dt>
-        <dd className="tabular-nums mt-1 text-[13px] text-navy">
+        <dd className="tabular-nums mt-1 text-[13px] break-words text-navy">
           {shortDate(entry.closingDate)}
           {entry.closingInDays !== null && entry.closingInDays >= 0 && (
             <span className="text-navy"> · in {entry.closingInDays}d</span>
@@ -173,12 +173,12 @@ function LeadArticle({ entry }) {
     <article className="border-b border-border-muted pb-8">
       <Kicker entry={entry} />
 
-      <h3 className="mt-3 max-w-3xl text-[24px] leading-[1.2] font-semibold tracking-[-0.025em] text-navy sm:text-[28px]">
+      <h3 className="mt-3 max-w-3xl text-[clamp(20px,5.5vw,28px)] leading-[1.2] font-semibold tracking-[-0.025em] break-words text-navy">
         {entry.title}
       </h3>
 
       {entry.projectTitle && (
-        <p className="mt-2 text-[13.5px] text-navy">
+        <p className="mt-2 text-[13.5px] break-words text-navy">
           {entry.implementingUnit ? `${entry.implementingUnit} · ` : ''}
           {entry.projectTitle}
         </p>
@@ -190,13 +190,13 @@ function LeadArticle({ entry }) {
           enough — the paragraphs an officer typed survive without the form ever
           having accepted markup. */}
       {entry.body && (
-        <p className="mt-4 max-w-3xl text-[15px] leading-relaxed whitespace-pre-line text-navy">
+        <p className="mt-4 max-w-3xl text-[15px] leading-relaxed break-words whitespace-pre-line text-navy">
           {entry.body}
         </p>
       )}
 
       {entry.referenceNo && (
-        <p className="mt-4 font-mono text-[12px] text-navy">Ref. {entry.referenceNo}</p>
+        <p className="mt-4 font-mono text-[12px] break-words text-navy">Ref. {entry.referenceNo}</p>
       )}
 
       {entry.source === 'solicitation' && <SolicitationFacts entry={entry} />}

@@ -273,7 +273,7 @@ export default function TransparencyBrowser({ renderHeader }) {
             key={item.key}
             type="button"
             onClick={() => setTab(item.key)}
-            className={`flex items-center gap-2 rounded border px-4 py-2 text-[11px] font-medium tracking-[0.03em] ${
+            className={`flex min-h-11 items-center gap-2 rounded border px-4 py-2 text-[11px] font-medium tracking-[0.03em] md:min-h-9 ${
               tab === item.key
                 ? 'border-navy bg-accent text-accent-fg'
                 : 'border-border-muted bg-surface text-text-secondary'

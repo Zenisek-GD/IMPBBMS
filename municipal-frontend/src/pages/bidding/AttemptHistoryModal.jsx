@@ -14,15 +14,15 @@ import ScheduleFields from './ScheduleFields'
 import { localDateTime, schedulePayload } from './schedulePayload'
 import ProcurementTimeline from './ProcurementTimeline'
 
-const inputClass = 'mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none'
+const inputClass = 'mt-1 min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none'
 const dateTime = (value) => value ? new Date(value).toLocaleString('en-PH') : 'Not recorded'
 const failureLabels = { draft: 'Draft Failure', submitted: 'Waiting for BAC Review', reviewed: 'Waiting for BAC Approval', approved: 'Approved - Failure of Bidding', rejected: 'Failure declaration rejected' }
 const actionTitles = { schedule: 'Update draft schedule', prepare: 'Save draft failure documents', submitFailure: 'Submit failure documents to BAC', failureReview: 'Complete BAC failure review', failureVote: 'Record my BAC decision', failureDecision: 'Finalize BAC failure decision', rebid: 'Start Rebid', review: 'Submit negotiated procurement eligibility review', negotiatedReview: 'Complete BAC eligibility review', negotiatedVote: 'Record my eligibility decision', decision: 'Finalize BAC eligibility decision', negotiated: 'Start approved negotiated procurement' }
 
 function EvidenceDocuments({ documents = [], onError }) {
   return <div className="mt-2 flex flex-wrap gap-3">{documents.map((doc, index) => doc.documentId
-    ? <button key={index} type="button" className="text-xs text-info underline" onClick={() => downloadDocument(doc.documentId, doc.name).catch((error) => onError(error.response?.data?.message ?? 'Could not download the supporting record.'))}>{doc.requirementKey ? `${doc.requirementKey}: ` : ''}{doc.name}</button>
-    : /^https:\/\//i.test(doc.url ?? '') ? <a key={index} href={doc.url} target="_blank" rel="noreferrer" className="text-xs text-info underline">{doc.name}</a> : null)}</div>
+    ? <button key={index} type="button" className="max-w-full break-all text-left text-xs text-info underline" onClick={() => downloadDocument(doc.documentId, doc.name).catch((error) => onError(error.response?.data?.message ?? 'Could not download the supporting record.'))}>{doc.requirementKey ? `${doc.requirementKey}: ` : ''}{doc.name}</button>
+    : /^https:\/\//i.test(doc.url ?? '') ? <a key={index} href={doc.url} target="_blank" rel="noreferrer" className="max-w-full break-all text-xs text-info underline">{doc.name}</a> : null)}</div>
 }
 
 function CommitteeRecord({ record }) {
@@ -106,8 +106,8 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
       {message && <p role="status" className="rounded border border-success/20 bg-success/5 p-3 text-sm text-success">{message}</p>}
       {!data && !error && <p className="text-sm text-text-faint">Loading attempt records...</p>}
       {(data?.attempts ?? []).map((attempt) => <details key={attempt.id} open={attempt.rfqId === rfq.id} className="rounded border border-border-muted p-4">
-        <summary className="cursor-pointer text-sm font-semibold text-navy">Attempt #{attempt.attemptNumber} - {attempt.referenceNo} <Badge tone={attempt.status === 'failed' ? 'danger' : attempt.status === 'successful' ? 'success' : 'info'}>{attempt.statusLabel ?? attempt.status}</Badge></summary>
-        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+        <summary className="cursor-pointer break-words text-sm font-semibold text-navy">Attempt #{attempt.attemptNumber} - {attempt.referenceNo} <Badge tone={attempt.status === 'failed' ? 'danger' : attempt.status === 'successful' ? 'success' : 'info'}>{attempt.statusLabel ?? attempt.status}</Badge></summary>
+        <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 text-xs sm:grid-cols-[auto_minmax(0,1fr)] [&_dd]:min-w-0 [&_dd]:break-words">
           <dt className="text-text-faint">Procurement project</dt><dd>{attempt.title}</dd>
           <dt className="text-text-faint">Procurement method</dt><dd>{attempt.method}</dd>
           <dt className="text-text-faint">Started</dt><dd>{dateTime(attempt.startedAt)}</dd>
@@ -120,7 +120,7 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
           <dt className="text-text-faint">TWG recommendation</dt><dd>{attempt.twgRecommendations?.map((row) => `Bid #${row.bidId}: ${row.recommendation}`).join('; ') || 'Not recorded'}</dd>
           <dt className="text-text-faint">Next action</dt><dd>{attempt.nextAction || 'Continue current procurement stage'}</dd>
         </dl>
-        {(attempt.failureRecords ?? []).map((record) => <section key={record.id} className="mt-3 rounded border border-border-muted p-3 text-xs">
+        {(attempt.failureRecords ?? []).map((record) => <section key={record.id} className="mt-3 break-words rounded border border-border-muted p-3 text-xs">
           <p className="font-semibold">Failure No. {record.failureNumber} - {failureLabels[record.status] ?? record.status}</p>
           <p className="mt-2">Category: {record.category}. Reason: {record.reason}</p><p>{record.explanation}</p>
           {record.twgRecommendation && <p>TWG recommendation: {record.twgRecommendation}</p>}
@@ -129,7 +129,7 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
           <EvidenceDocuments documents={record.supportingDocuments} onError={setError} />
           <CommitteeRecord record={record} />
         </section>)}
-        {(attempt.supportingDocuments ?? []).map((doc, index) => doc.documentId ? <button key={index} type="button" className="mr-3 mt-3 text-xs text-info underline" onClick={() => downloadDocument(doc.documentId, doc.name).catch((err) => setError(err.response?.data?.message ?? 'Could not download the supporting record.'))}>{doc.name}</button> : /^https:\/\//i.test(doc.url ?? '') ? <a key={index} href={doc.url} target="_blank" rel="noreferrer" className="mr-3 mt-3 inline-block text-xs text-info underline">{doc.name}</a> : null)}
+        {(attempt.supportingDocuments ?? []).map((doc, index) => doc.documentId ? <button key={index} type="button" className="mr-3 mt-3 max-w-full break-all text-left text-xs text-info underline" onClick={() => downloadDocument(doc.documentId, doc.name).catch((err) => setError(err.response?.data?.message ?? 'Could not download the supporting record.'))}>{doc.name}</button> : /^https:\/\//i.test(doc.url ?? '') ? <a key={index} href={doc.url} target="_blank" rel="noreferrer" className="mr-3 mt-3 inline-block max-w-full break-all text-xs text-info underline">{doc.name}</a> : null)}
       </details>)}
       {status === 'failed' && <div className="space-y-2 rounded border border-warning/20 bg-warning/5 p-3 text-xs">
         <p className="font-medium text-navy">Negotiated Procurement requirements</p>
@@ -176,7 +176,7 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
           <label className="block text-xs text-text-secondary">{action.endsWith('Vote') ? 'My personal BAC decision' : 'Final BAC decision'}<select value={form.decision} onChange={(event) => setForm({ ...form, decision: event.target.value })} className={inputClass}><option value="approved">Approve</option><option value="rejected">Reject</option>{action.endsWith('Vote') && <option value="abstained">Abstain</option>}</select></label>{field('remarks', 'Decision remarks')}
           {action.endsWith('Vote') && <p className="text-xs text-text-secondary">This decision is recorded under your account and is locked after submission.</p>}
         </>}
-        <div className="flex justify-end gap-2"><Button variant="secondary" onClick={() => setAction('')}>Cancel action</Button><Button type="submit" disabled={saving}>{saving ? 'Saving...' : actionTitles[action]}</Button></div>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Button className="w-full sm:w-auto" variant="secondary" onClick={() => setAction('')}>Cancel action</Button><Button className="w-full sm:w-auto" type="submit" disabled={saving}>{saving ? 'Saving...' : actionTitles[action]}</Button></div>
       </form>}
       {error && <p role="alert" className="rounded border border-danger/20 bg-danger/10 p-3 text-sm text-danger">{error}</p>}
     </div>

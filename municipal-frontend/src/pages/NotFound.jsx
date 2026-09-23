@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 
 export default function NotFound() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas px-6 text-center text-navy">
+    <main className="flex min-h-[100svh] min-h-[100dvh] flex-col items-center justify-center gap-4 bg-canvas px-6 text-center text-navy">
       <p className="text-sm text-text-secondary">Page not found · 404</p>
       <h1 className="text-2xl font-semibold">This page is not available</h1>
       <p className="max-w-md text-sm text-text-secondary">Check the address or return to the transparency portal.</p>

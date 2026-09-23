@@ -254,7 +254,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
             />
           </div>
 
-          <div className="grid grid-cols-2 items-end gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end">
             <div>
               <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
                 Date required
@@ -321,41 +321,42 @@ function PrFormModal({ existing, onClose, onSaved }) {
               const assetClass = previewAssetClass(line, threshold)
               return (
                 <div key={index} className="rounded border border-border-muted/70 p-2">
-                  <div className="grid grid-cols-12 items-center gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
                     <input
                       placeholder="Description"
                       value={line.description}
                       onChange={(event) => updateLine(index, 'description', event.target.value)}
-                      className="col-span-5 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                      className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-5"
                     />
                     <input
                       placeholder="Unit"
                       value={line.unit ?? ''}
                       onChange={(event) => updateLine(index, 'unit', event.target.value)}
-                      className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                      className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-2"
                     />
                     <input
                       type="number"
                       placeholder="Qty"
                       value={line.quantity}
                       onChange={(event) => updateLine(index, 'quantity', event.target.value)}
-                      className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                      className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-2"
                     />
                     <input
                       type="number"
                       placeholder="Unit cost"
                       value={line.unitCost}
                       onChange={(event) => updateLine(index, 'unitCost', event.target.value)}
-                      className="col-span-2 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                      className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-2"
                     />
                     <button
                       type="button"
                       onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                       disabled={lines.length === 1}
                       aria-label="Remove line"
-                      className="col-span-1 flex min-h-[44px] min-w-[44px] items-center justify-center text-text-faint hover:text-danger disabled:opacity-30"
+                      className="flex min-h-11 w-full items-center justify-start gap-2 rounded border border-border-muted px-3 text-text-faint hover:text-danger disabled:opacity-30 sm:col-span-1 sm:w-auto sm:justify-center sm:gap-0 sm:rounded-none sm:border-0 sm:px-0"
                     >
                       <Trash2 size={14} />
+                      <span className="sm:hidden">Remove line</span>
                     </button>
                   </div>
 
@@ -579,8 +580,8 @@ function ReturnModal({ pr, onClose, onConfirm }) {
         className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
       />
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>
           CANCEL
         </Button>
         <button
@@ -593,7 +594,7 @@ function ReturnModal({ pr, onClose, onConfirm }) {
               setError(err.response?.data?.message ?? 'Could not return it.')
             }
           }}
-          className="rounded-sm bg-danger px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-white"
+          className="min-h-11 w-full rounded-sm bg-danger px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-white sm:w-auto"
         >
           RETURN
         </button>

@@ -36,7 +36,7 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
   }, [])
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center bg-canvas px-5 py-12">
+    <div className="relative flex min-h-[100svh] min-h-[100dvh] flex-col items-center justify-center bg-canvas px-5 py-12">
       {/* Available before sign-in, because someone reading in the dark should
           not have to authenticate to turn the lights down. */}
       <div className="absolute top-5 right-5">
@@ -51,9 +51,9 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
             hidden on desktop, because the brand column carried it there — with
             that column gone, the page would otherwise open with no indication
             of what system is being signed in to. */}
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2.5">
+        <Link to="/" className="mb-8 flex min-w-0 items-center justify-center gap-2.5">
           <BrandMark priority className="size-11" alt="" />
-          <span className="text-[16px] font-semibold tracking-[-0.01em] text-navy">{systemName}</span>
+          <span className="min-w-0 break-words text-center text-[16px] font-semibold tracking-[-0.01em] text-navy">{systemName}</span>
         </Link>
 
         <div className="text-center">

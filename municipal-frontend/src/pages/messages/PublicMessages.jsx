@@ -34,7 +34,7 @@ function ProjectReportContext({ context, receivedAt }) {
           Linked project context
         </h3>
         {context.currentPage && (
-          <a href={context.currentPage} className="text-[12px] font-medium text-info hover:underline">
+          <a href={context.currentPage} className="inline-flex min-h-11 items-center text-[12px] font-medium text-info hover:underline">
             Open public record
           </a>
         )}
@@ -42,28 +42,28 @@ function ProjectReportContext({ context, receivedAt }) {
       <dl className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Project</dt>
-          <dd className="mt-0.5 text-[13px] font-medium text-navy">{context.projectTitle ?? 'Published project'}</dd>
+          <dd className="mt-0.5 break-words text-[13px] font-medium text-navy">{context.projectTitle ?? 'Published project'}</dd>
         </div>
         <div>
           <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Project ID</dt>
-          <dd className="mt-0.5 font-mono text-[13px] text-navy">#{context.projectId}</dd>
+          <dd className="mt-0.5 break-all font-mono text-[13px] text-navy">#{context.projectId}</dd>
         </div>
         {context.referenceNo && (
           <div>
             <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Reference</dt>
-            <dd className="mt-0.5 font-mono text-[13px] text-navy">{context.referenceNo}</dd>
+            <dd className="mt-0.5 break-all font-mono text-[13px] text-navy">{context.referenceNo}</dd>
           </div>
         )}
         {context.currentStatus && (
           <div>
             <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Status</dt>
-            <dd className="mt-0.5 text-[13px] text-navy">{context.currentStatus}</dd>
+            <dd className="mt-0.5 break-words text-[13px] text-navy">{context.currentStatus}</dd>
           </div>
         )}
         {context.currentPhaseLabel && (
           <div>
             <dt className="text-[10.5px] tracking-[0.04em] text-text-faint uppercase">Phase</dt>
-            <dd className="mt-0.5 text-[13px] text-navy">{context.currentPhaseLabel}</dd>
+            <dd className="mt-0.5 break-words text-[13px] text-navy">{context.currentPhaseLabel}</dd>
           </div>
         )}
         {context.implementingUnit && (

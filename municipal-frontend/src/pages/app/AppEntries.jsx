@@ -278,7 +278,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField
               label="ABC (₱)"
               type="number"
@@ -350,7 +350,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
         description="When it is needed and how it is tracked."
       >
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
                 Target start quarter
@@ -388,11 +388,11 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <FormField label="Fund source" registration={register('fundSource')} />
             <FormField label="Account code" registration={register('accountCode')} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField label="MFO ID" registration={register('mfoId')} />
             <FormField label="PAP code" registration={register('papCode')} />
             <FormField label="UACS code" registration={register('uacsCode')} />
@@ -420,8 +420,8 @@ function ReturnModal({ entry, onClose, onConfirm }) {
         placeholder="What needs to change?"
       />
       {error && <p className="mt-2 text-xs text-danger">{error}</p>}
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>
           CANCEL
         </Button>
         <button
@@ -434,7 +434,7 @@ function ReturnModal({ entry, onClose, onConfirm }) {
               setError(err.response?.data?.message ?? 'Could not return the entry.')
             }
           }}
-          className="rounded-sm bg-danger px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-white"
+          className="min-h-11 w-full rounded-sm bg-danger px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-white sm:w-auto"
         >
           RETURN ENTRY
         </button>

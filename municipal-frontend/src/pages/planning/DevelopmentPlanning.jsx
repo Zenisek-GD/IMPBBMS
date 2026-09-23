@@ -37,7 +37,7 @@ import { useTableControls } from '../../components/ui/useTableControls'
 const peso = (value) => `₱${Number(value ?? 0).toLocaleString('en-PH', { maximumFractionDigits: 0 })}`
 
 const inputClass =
-  'w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none'
+  'min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none'
 
 function PlanForm({ sectors, onClose, onSaved }) {
   const thisYear = new Date().getFullYear()
@@ -107,7 +107,7 @@ function PlanForm({ sectors, onClose, onSaved }) {
             Title
             <input value={title} onChange={(e) => setTitle(e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="text-xs text-text-secondary">
               Start year
               <input
@@ -537,7 +537,7 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
         description="How much it costs, when it runs, and how it is coded."
       >
         <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="text-xs text-text-secondary">
               Expense class
               <select value={values.expenseClass} onChange={(e) => set('expenseClass', e.target.value)} className={`mt-1 ${inputClass}`}>
@@ -560,7 +560,7 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
             </label>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <label className="text-xs text-text-secondary">
               Estimated cost
               <input
@@ -1293,8 +1293,13 @@ function DevelopmentPlansTable({
                               {goalCount(plan) === 0 ? (
                                 <p className="mt-2 text-[13px] text-text-faint">No goals recorded yet. Add the first goal before recording adoption.</p>
                               ) : (
-                                <div className="mt-2 max-h-[30rem] overflow-y-auto rounded-lg border border-border-muted bg-surface">
-                                  <table className="w-full text-left">
+                                <div
+                                  className="mt-2 max-h-[30rem] overflow-x-auto overflow-y-auto overscroll-x-contain rounded-lg border border-border-muted bg-surface"
+                                  role="region"
+                                  aria-label="Goals in this plan"
+                                  tabIndex={0}
+                                >
+                                  <table className="min-w-[34rem] w-full text-left">
                                     <thead className="sticky top-0 bg-sidebar">
                                       <tr>
                                         <Th>Goal</Th>
@@ -1305,9 +1310,9 @@ function DevelopmentPlansTable({
                                     <tbody>
                                       {(plan.goals ?? []).map((goal) => (
                                         <tr key={goal.id} className="border-t border-border-muted">
-                                          <td className="px-4 py-2.5 text-[13px] text-navy">
+                                          <td className="px-4 py-2.5 text-[13px] text-navy break-words">
                                             {goal.title}
-                                            {goal.subsector && <p className="mt-0.5 text-[11.5px] text-text-faint">{goal.subsector}</p>}
+                                            {goal.subsector && <p className="mt-0.5 break-words text-[11.5px] text-text-faint">{goal.subsector}</p>}
                                           </td>
                                           <td className="px-4 py-2.5"><Badge tone="neutral">{goal.sectorLabel ?? goal.sector}</Badge></td>
                                           <td className="px-4 py-2.5 text-[12px] text-text-secondary">

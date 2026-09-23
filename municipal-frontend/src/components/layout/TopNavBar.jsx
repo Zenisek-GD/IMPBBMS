@@ -39,19 +39,19 @@ export default function TopNavBar({ sections = [], lguName, systemName, onOpenNa
     else setNoMatch(true)
   }
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-black/20 bg-brand px-5">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-black/20 bg-brand px-3 sm:gap-4 sm:px-5">
       <div className="flex min-w-0 items-center gap-3 sm:gap-5">
-        <button type="button" aria-label="Open navigation" onClick={onOpenNavigation} className="flex h-9 w-9 shrink-0 items-center justify-center text-brand-fg md:hidden"><Menu size={20} /></button>
+        <button type="button" aria-label="Open navigation" onClick={onOpenNavigation} className="flex h-11 w-11 shrink-0 items-center justify-center text-brand-fg md:h-9 md:w-9"><Menu size={20} /></button>
         <BrandMark priority className="size-9 sm:size-10" alt="" />
         <div className="flex min-w-0 flex-col leading-tight">
-          <span className="text-[17px] font-semibold tracking-[-0.01em] text-brand-fg">{systemName || 'ProcureNance'}</span>
+          <span title={systemName || 'ProcureNance'} className="truncate text-[17px] font-semibold tracking-[-0.01em] text-brand-fg">{systemName || 'ProcureNance'}</span>
           {lguName && (
             <span className="truncate text-[11px] tracking-[0.02em] text-topnav-link">{lguName}</span>
           )}
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <form onSubmit={findPage} className="relative hidden lg:block">
           <Search
             size={15}

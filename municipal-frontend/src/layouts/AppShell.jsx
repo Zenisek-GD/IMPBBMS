@@ -32,6 +32,19 @@ export default function AppShell() {
   const [pending, setPending] = useState({ userId: null, counts: {} })
   const canViewReports = user?.permissions?.some((permission) => ['app.view', 'app.viewPublished', 'bidding.view', 'bidding.evaluate', 'bidding.technicalInput', 'contract.view', 'contract.viewPublished', 'delivery.submitInvoice', 'audit.viewAll', 'audit.viewLogs'].includes(permission))
 
+  // A mobile navigation modal cannot stay open after its desktop rail becomes
+  // visible: rotation would otherwise leave the desktop UI covered with no
+  // mobile trigger available to dismiss it.
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 768px)')
+    const closeOnDesktop = () => {
+      if (desktop.matches) setMobileNavLocation(null)
+    }
+    closeOnDesktop()
+    desktop.addEventListener('change', closeOnDesktop)
+    return () => desktop.removeEventListener('change', closeOnDesktop)
+  }, [])
+
   // Merge admin-set shortcut overrides onto the static nav config for this role.
   // If no overrides have been fetched yet, the static defaults are used.
   const effectiveSections = useMemo(() => {
@@ -154,7 +167,7 @@ export default function AppShell() {
   }, [])
 
   return (
-    <div className="flex h-screen flex-col bg-canvas">
+    <div className="flex min-h-[100svh] h-[100dvh] flex-col bg-canvas">
       <TopNavBar sections={effectiveSections} lguName={lguName} systemName={systemName} onOpenNavigation={() => setMobileNavLocation(location.key)} />
       <div className="flex flex-1 overflow-hidden">
         <div className="hidden h-full md:block">
@@ -176,7 +189,7 @@ export default function AppShell() {
           <div className="flex h-[60dvh] justify-center">
             <Sidebar brandTitle={nav.brandTitle} brandSubtitle={nav.brandSubtitle}
               sections={effectiveSections} collapsed={false}
-              onToggle={() => setMobileNavLocation(null)}
+              navigationMode="mobile"
               onNavigate={() => setMobileNavLocation(null)}
               onLogout={() => { setMobileNavLocation(null); setConfirmingLogout(true) }} />
           </div>

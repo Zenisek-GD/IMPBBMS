@@ -13,12 +13,12 @@ export default function Card({ title, icon: Icon, action, children, className = 
       className={`overflow-hidden rounded-lg border border-border-muted bg-surface shadow-sm ${className}`}
     >
       {title && (
-        <header className="flex items-center justify-between gap-3 border-b border-border-muted px-5 py-4">
-          <h2 className="ui-card-title flex items-center gap-2.5 text-navy">
-            {Icon && <Icon size={15} className="shrink-0 text-text-faint" />}
-            {title}
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border-muted px-5 py-4">
+          <h2 className="ui-card-title flex min-w-0 flex-1 items-start gap-2.5 text-navy">
+            {Icon && <Icon size={15} className="mt-px shrink-0 text-text-faint" />}
+            <span className="min-w-0 break-words">{title}</span>
           </h2>
-          {action}
+          {action && <div className="max-w-full shrink-0">{action}</div>}
         </header>
       )}
       <div className={bodyClassName}>{children}</div>

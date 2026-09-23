@@ -5,7 +5,7 @@ import { useAuth } from '../../context/useAuth'
 import Button from '../../components/ui/Button'
 import BacAttendance from './BacAttendance'
 
-const input = 'mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm'
+const input = 'mt-1 min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm'
 const initial = { qualityWeight: 75, financialWeight: 25, passingScore: 60, financialMethod: 'lowestResponsivePrice', criteria: [
   { key: 'experience', name: 'Experience', description: '', maxScore: 100, weight: 30, minimumScore: '' },
   { key: 'personnel', name: 'Qualification of personnel', description: '', maxScore: 100, weight: 30, minimumScore: '' },
@@ -69,7 +69,7 @@ export default function ApprovedEvaluationCriteria({ rfq, onChanged }) {
       <label className="block text-xs">Amendment reason<textarea value={amendmentReason} onChange={(event) => setAmendmentReason(event.target.value)} className={input} /></label>
       <label className="block text-xs">Supporting document title<input value={documentName} onChange={(event) => setDocumentName(event.target.value)} className={input} /></label>
       <label className="block text-xs">Supporting document HTTPS link<input type="url" value={documentUrl} onChange={(event) => setDocumentUrl(event.target.value)} className={input} /></label>
-      <div className="flex gap-2"><Button variant="secondary" onClick={() => { setAmending(false); setPlan(saved) }}>Cancel amendment</Button><Button disabled={busy || !amendmentReason.trim() || !documentName.trim() || !documentUrl.trim()} onClick={() => act(() => requestCriteriaAmendment(rfq.id, { plan, reason: amendmentReason, supportingDocuments: [{ name: documentName, url: documentUrl }] }))}>Submit amendment to BAC</Button></div>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="w-full sm:w-auto" variant="secondary" onClick={() => { setAmending(false); setPlan(saved) }}>Cancel amendment</Button><Button className="w-full sm:w-auto" disabled={busy || !amendmentReason.trim() || !documentName.trim() || !documentUrl.trim()} onClick={() => act(() => requestCriteriaAmendment(rfq.id, { plan, reason: amendmentReason, supportingDocuments: [{ name: documentName, url: documentUrl }] }))}>Submit amendment to BAC</Button></div>
     </div>}
     {!locked && saved && permissions.has('bidding.chairEvaluation') && saved.preparedById !== user?.id && <div className="space-y-3 border-t border-border-muted pt-4">
       <p className="text-sm text-text-secondary">Approval applies to the saved criteria above.</p>
@@ -82,7 +82,7 @@ export default function ApprovedEvaluationCriteria({ rfq, onChanged }) {
       <summary className="cursor-pointer text-sm font-medium">Criteria amendment #{amendment.id} — {amendment.status}</summary>
       <p className="mt-2 text-sm">{amendment.reason}</p>
       {amendment.approvalReference && <p className="text-xs">Approval: {amendment.approvalReference}; {new Date(amendment.approvedAt).toLocaleString('en-PH')}.</p>}
-      {(amendment.supportingDocuments ?? []).map((document, index) => <a key={index} href={document.url} target="_blank" rel="noreferrer" className="mr-3 text-xs text-info underline">{document.name}</a>)}
+      {(amendment.supportingDocuments ?? []).map((document, index) => <a key={index} href={document.url} target="_blank" rel="noreferrer" className="mr-3 inline-block max-w-full break-all text-xs text-info underline">{document.name}</a>)}
       <p className="text-xs">Previous quality / price weights: {amendment.previousPlan.qualityWeight}% / {amendment.previousPlan.financialWeight}%. Proposed: {amendment.proposedPlan.qualityWeight}% / {amendment.proposedPlan.financialWeight}%.</p>
       <div className="mt-2 grid gap-3 sm:grid-cols-2">{[['Previous criteria', amendment.previousPlan.criteria], ['Proposed criteria', amendment.proposedPlan.criteria]].map(([label, criteria]) => <div key={label}><p className="text-sm font-medium">{label}</p>{criteria.map((criterion) => <p key={criterion.key} className="text-xs">{criterion.name}: maximum {criterion.maxScore}, weight {criterion.weight}%, minimum {criterion.minimumScore ?? 'none'}</p>)}</div>)}</div>
       {amendment.status === 'submitted' && permissions.has('bidding.chairEvaluation') && amendment.requestedById !== user?.id && <div className="mt-3 space-y-3">

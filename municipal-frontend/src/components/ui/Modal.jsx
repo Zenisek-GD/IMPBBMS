@@ -93,14 +93,14 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
             flex layout and has nothing to stick to. */}
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border-muted px-4 py-4 sm:px-5">
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-navy">{title}</h2>
+            <h2 className="break-words text-[15px] font-semibold text-navy">{title}</h2>
             {subtitle && <p className="mt-1 text-[12.5px] leading-relaxed text-text-faint">{subtitle}</p>}
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy sm:h-8 sm:w-8"
+            className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy sm:h-10 sm:w-10"
           >
             <X size={16} />
           </button>

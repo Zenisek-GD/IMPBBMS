@@ -181,17 +181,17 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
           <div className="flex flex-col gap-2">
             {lines.map((line, index) => (
               <div key={index} className="rounded border border-border-muted/70 p-2">
-                <div className="grid grid-cols-12 items-center gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
                   <input
                     placeholder="What the office is asking for"
                     value={line.title}
                     onChange={(event) => updateLine(index, 'title', event.target.value)}
-                    className="col-span-6 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                    className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-6"
                   />
                   <select
                     value={line.expenseClass}
                     onChange={(event) => updateLine(index, 'expenseClass', event.target.value)}
-                    className="col-span-2 rounded border border-border-muted px-2 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                    className="min-h-11 rounded border border-border-muted px-2 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-2"
                   >
                     <option value="mooe">MOOE</option>
                     <option value="capitalOutlay">Capital Outlay</option>
@@ -202,16 +202,17 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
                     placeholder="Amount"
                     value={line.proposedAmount}
                     onChange={(event) => updateLine(index, 'proposedAmount', event.target.value)}
-                    className="col-span-3 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                    className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-3"
                   />
                   <button
                     type="button"
                     onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                     disabled={lines.length === 1}
                     aria-label="Remove line"
-                    className="col-span-1 flex min-h-[44px] min-w-[44px] items-center justify-center text-text-faint hover:text-danger disabled:opacity-30"
+                    className="flex min-h-11 w-full items-center justify-start gap-2 rounded border border-border-muted px-3 text-text-faint hover:text-danger disabled:opacity-30 sm:col-span-1 sm:w-auto sm:justify-center sm:gap-0 sm:rounded-none sm:border-0 sm:px-0"
                   >
                     <Trash2 size={14} />
+                    <span className="sm:hidden">Remove line</span>
                   </button>
                 </div>
 
@@ -221,7 +222,7 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
                 <select
                   value={line.aipEntryId ?? ''}
                   onChange={(event) => updateLine(index, 'aipEntryId', event.target.value)}
-                  className="mt-2 w-full rounded border border-border-muted px-3 py-1.5 text-xs text-navy focus:border-navy focus:outline-none"
+                  className="mt-2 min-h-11 w-full rounded border border-border-muted px-3 py-1.5 text-xs text-navy focus:border-navy focus:outline-none"
                 >
                   <option value="">No investment programme project (standing cost)</option>
                   {aipEntries.map((entry) => (
@@ -313,9 +314,9 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
       <LargeFormPage.Section title="Figures">
         <div className="flex flex-col gap-3">
           {proposal.lines.map((line) => (
-            <div key={line.id} className="grid grid-cols-12 items-center gap-2">
-              <span className="col-span-6 text-[13px] text-navy">{line.title}</span>
-              <span className="col-span-3 text-right text-xs text-text-faint">
+            <div key={line.id} className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
+              <span className="min-w-0 break-words text-[13px] text-navy sm:col-span-6">{line.title}</span>
+              <span className="text-left text-xs text-text-faint sm:col-span-3 sm:text-right">
                 asked {peso(line.proposedAmount)}
               </span>
               <input
@@ -324,7 +325,7 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
                 onChange={(event) =>
                   setAmounts((current) => ({ ...current, [line.id]: event.target.value }))
                 }
-                className="col-span-3 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+                className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-3"
               />
             </div>
           ))}
@@ -454,8 +455,8 @@ function StageForm({ budget, stage, options, onClose, onConfirm }) {
         )}
 
         {error && <p className="text-xs text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>
             CANCEL
           </Button>
           <button
@@ -469,7 +470,7 @@ function StageForm({ budget, stage, options, onClose, onConfirm }) {
                 setError(err.response?.data?.message ?? 'Could not complete that stage.')
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg"
+            className="min-h-11 w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg sm:w-auto"
           >
             {stage.actionLabel}
           </button>
@@ -899,26 +900,26 @@ export default function BudgetPreparation() {
                 <NextStep next={budgetNext(budget)} tone={BUDGET_STATUS_TONES[budget.status]} />
               </div>
 
-              <div className="mb-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+              <div className="mb-4 grid grid-cols-1 gap-3 text-xs min-[400px]:grid-cols-2 sm:grid-cols-4">
                 <div>
                   <p className="text-text-faint">Estimated income</p>
-                  <p className="text-sm font-medium text-navy">
+                  <p className="break-all text-sm font-medium text-navy">
                     {budget.estimatedIncome === null ? '—' : peso(budget.estimatedIncome)}
                   </p>
                 </div>
                 <div>
                   <p className="text-text-faint">Expenditure ceiling</p>
-                  <p className="text-sm font-medium text-navy">
+                  <p className="break-all text-sm font-medium text-navy">
                     {budget.expenditureCeiling === null ? '—' : peso(budget.expenditureCeiling)}
                   </p>
                 </div>
                 <div>
                   <p className="text-text-faint">Proposed</p>
-                  <p className="text-sm font-medium text-navy">{peso(budget.totals.proposed)}</p>
+                  <p className="break-all text-sm font-medium text-navy">{peso(budget.totals.proposed)}</p>
                 </div>
                 <div>
                   <p className="text-text-faint">Final</p>
-                  <p className="text-sm font-medium text-navy">{peso(budget.totals.final)}</p>
+                  <p className="break-all text-sm font-medium text-navy">{peso(budget.totals.final)}</p>
                 </div>
               </div>
 

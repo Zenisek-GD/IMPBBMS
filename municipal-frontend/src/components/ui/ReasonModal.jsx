@@ -61,11 +61,11 @@ export default function ReasonModal({
             {error}
           </p>
         )}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button className="w-full sm:w-auto" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant={danger ? 'danger' : 'primary'} disabled={busy} onClick={submit}>
+          <Button className="w-full sm:w-auto" variant={danger ? 'danger' : 'primary'} disabled={busy} onClick={submit}>
             {busy ? 'Working…' : confirmLabel}
           </Button>
         </div>

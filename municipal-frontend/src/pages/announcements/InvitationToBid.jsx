@@ -86,15 +86,15 @@ function AttachmentPanel({ announcementId, onError }) {
         <p className="text-xs text-text-faint">Nothing attached yet.</p>
       ) : (
         files.map((file) => (
-          <div key={file.id} className="flex items-center gap-2 rounded border border-border-muted px-3 py-2">
+          <div key={file.id} className="flex min-w-0 items-center gap-2 rounded border border-border-muted px-3 py-2">
             <Paperclip size={13} className="shrink-0 text-text-faint" />
-            <span className="flex-1 truncate text-[13px] text-navy">{file.label || file.filename}</span>
-            <span className="text-[11px] text-text-faint">{Math.ceil(file.sizeBytes / 1024)} KB</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] text-navy" title={file.label || file.filename}>{file.label || file.filename}</span>
+            <span className="shrink-0 text-[11px] text-text-faint">{Math.ceil(file.sizeBytes / 1024)} KB</span>
             <button
               type="button"
               aria-label={`Remove ${file.filename}`}
               onClick={() => setRemoving(file)}
-              className="text-text-faint hover:text-danger"
+              className="flex min-h-11 min-w-11 items-center justify-center text-text-faint hover:text-danger"
             >
               <Trash2 size={13} />
             </button>
@@ -102,7 +102,7 @@ function AttachmentPanel({ announcementId, onError }) {
         ))
       )}
 
-      <label className="flex w-fit cursor-pointer items-center gap-2 rounded border border-border-muted px-3 py-1.5 text-[11px] font-medium tracking-[0.03em] text-navy hover:bg-chip">
+      <label className="flex min-h-11 w-fit cursor-pointer items-center gap-2 rounded border border-border-muted px-3 py-1.5 text-[11px] font-medium tracking-[0.03em] text-navy hover:bg-chip">
         <Upload size={13} />
         {busy ? 'UPLOADING…' : 'ATTACH FILE'}
         <input
@@ -488,9 +488,9 @@ function PreviewModal({ notice, onClose }) {
             ]
               .filter(([, value]) => value && value !== '—')
               .map(([label, value]) => (
-                <div key={label} className="flex gap-2">
-                  <dt className="text-text-faint">{label}:</dt>
-                  <dd className="text-navy">{value}</dd>
+                <div key={label} className="flex min-w-0 gap-2">
+                  <dt className="shrink-0 text-text-faint">{label}:</dt>
+                  <dd className="min-w-0 break-words text-navy">{value}</dd>
                 </div>
               ))}
           </dl>
@@ -510,8 +510,9 @@ function PreviewModal({ notice, onClose }) {
                 Downloads
               </p>
               {data.attachments.map((file) => (
-                <p key={file.id} className="flex items-center gap-2 text-[12.5px] text-navy">
-                  <Paperclip size={12} /> {file.label || file.filename}
+                <p key={file.id} className="flex min-w-0 items-start gap-2 text-[12.5px] text-navy">
+                  <Paperclip size={12} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-all">{file.label || file.filename}</span>
                 </p>
               ))}
             </div>

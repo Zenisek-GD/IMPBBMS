@@ -214,7 +214,7 @@ export default function ProjectTimeline({ events, disclosure, phases }) {
         <button
           type="button"
           onClick={() => setOpenKeys(allOpen ? [] : groups.map((group) => group.key))}
-          className="rounded-full border border-border-muted px-3 py-1 text-[12px] font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-navy"
+          className="min-h-11 rounded-full border border-border-muted px-3 py-1 text-[12px] font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-navy md:min-h-9"
         >
           {allOpen ? 'Collapse all' : 'Expand all'}
         </button>

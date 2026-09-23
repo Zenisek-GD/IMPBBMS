@@ -54,13 +54,23 @@ const snapshotProjects = (url) => {
   });
 };
 
+const snapshotOverview = () => {
+  const lastUpdatedAt = publicDemoSnapshot.projects.reduce((latest, project) => {
+    const candidate = project.lastUpdatedAt;
+    if (!candidate || Number.isNaN(new Date(candidate).getTime())) return latest;
+    if (!latest || new Date(candidate).getTime() > new Date(latest).getTime()) return candidate;
+    return latest;
+  }, null);
+  return { ...publicDemoSnapshot.overview, lastUpdatedAt };
+};
+
 const publicSnapshotResponse = (request) => {
   if (request.method !== "GET") return null;
   const url = new URL(request.url);
   const { pathname } = url;
 
   if (pathname === "/api/public/branding") return snapshotJson(demoBranding);
-  if (pathname === "/api/public/projects/overview") return snapshotJson(publicDemoSnapshot.overview);
+  if (pathname === "/api/public/projects/overview") return snapshotJson(snapshotOverview());
   if (pathname === "/api/public/projects/filters") return snapshotJson(publicDemoSnapshot.filters);
   if (pathname === "/api/public/projects") return snapshotJson(snapshotProjects(url));
 

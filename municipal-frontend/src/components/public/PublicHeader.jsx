@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
-import { MoreVertical, Menu, X, ArrowLeft, LogIn, LayoutDashboard, LogOut, FileCheck2 } from 'lucide-react'
+import { MoreVertical, Menu, X, ArrowLeft, LogIn, LayoutDashboard, LogOut } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
 import { landingRouteForRole } from '../../config/roleLanding'
 import ThemeToggle from '../ui/ThemeToggle'
 import BrandMark from '../brand/BrandMark'
 
 // ── Header for the public portal ─────────────────────────────────────────────
-// A solid bar with the masthead left, sections in a pill on the true centre
-// (desktop), and theme + menu controls on the right. Sign-in lives inside the
-// menu/drawer only — no standalone button.
+// The landing page carries its navigation as one floating glass rail: masthead
+// left, sections at the true centre (desktop), and theme + menu controls on the
+// right. Project records retain the conventional full-width header because a
+// reader needs the back path and record context to stay visually stable there.
 //
 // Mobile uses a burger that opens a sidebar drawer (sections + sign-in at the
 // bottom). Desktop keeps the centred pill plus a three-dot menu for account
@@ -21,12 +22,16 @@ const SECTIONS = [
   { key: 'officials', label: 'Officials', to: '/?view=officials' },
   { key: 'about', label: 'About', to: '/?view=about' },
 ]
+const LANDING_DRAWER_SECTIONS = [
+  ...SECTIONS,
+  { key: 'faq', label: 'FAQs', to: '/?view=home#landing-faq' },
+]
 // Contact is no longer a section of its own: writing to the municipality is
 // something a reader decides to do *after* reading what the portal is and who
 // runs it, so the form now sits at the foot of About rather than competing with
 // it in the nav. `?view=contact` still resolves — it redirects into About.
 
-export default function PublicHeader({ lguName, systemName }) {
+export default function PublicHeader({ systemName }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -40,7 +45,18 @@ export default function PublicHeader({ lguName, systemName }) {
   const onLanding = ['/', '/public/transparency'].includes(location.pathname)
   const view = searchParams.get('view')
   const activeSection = onLanding ? (view ?? 'home') : null
+  const activeDrawerSection = location.hash === '#landing-faq' ? 'faq' : activeSection
+  const drawerSections = onLanding ? LANDING_DRAWER_SECTIONS : SECTIONS
   const showBack = !onLanding
+  const headerClassName = onLanding
+    ? 'sticky top-3 z-30 mx-auto mt-3 w-[calc(100%-1.5rem)] max-w-4xl rounded-full bg-surface/75 shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur-xl transition-[background-color,box-shadow] supports-[backdrop-filter]:bg-surface/65 dark:shadow-[0_14px_34px_rgba(0,0,0,0.28)] sm:w-[calc(100%-3rem)]'
+    : 'sticky top-0 z-30 border-b border-border-muted bg-surface md:bg-surface/95 md:backdrop-blur-md md:supports-[backdrop-filter]:bg-surface/80'
+  const headerInnerClass = onLanding
+    ? 'mx-auto grid min-h-[50px] max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 md:grid-cols-[1fr_auto_1fr] sm:gap-4 sm:px-4'
+    : 'mx-auto grid min-h-[58px] max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4 py-3 md:grid-cols-[1fr_auto_1fr] sm:gap-4 sm:px-8'
+  const desktopNavClass = onLanding
+    ? 'col-start-2 hidden items-center gap-0.5 md:flex'
+    : 'glass col-start-2 hidden items-center gap-0.5 rounded-full border border-border-muted/80 p-1 shadow-sm md:flex'
 
   // The drawer/dropdown closes via link onClick, overlay click and Escape —
   // no route-change effect, so no cascading render.
@@ -70,6 +86,16 @@ export default function PublicHeader({ lguName, systemName }) {
     }
   }, [open])
 
+  // One state controls two different menus. Close it whenever the breakpoint
+  // changes so a portrait drawer cannot survive rotation as a hidden scroll
+  // lock, and a desktop dropdown cannot turn into an unlocked mobile drawer.
+  useEffect(() => {
+    const breakpoint = window.matchMedia('(min-width: 768px)')
+    const closeOnBreakpointChange = () => setOpen(false)
+    breakpoint.addEventListener('change', closeOnBreakpointChange)
+    return () => breakpoint.removeEventListener('change', closeOnBreakpointChange)
+  }, [])
+
   // Lock body scroll only while the mobile drawer is actually showing — never
   // for the desktop dropdown.
   useEffect(() => {
@@ -93,12 +119,22 @@ export default function PublicHeader({ lguName, systemName }) {
     else navigate('/', { replace: true })
   }
 
+  // Query-string navigation keeps this route mounted, so browsers preserve the
+  // previous scroll position by default. Reset it before closing the mobile
+  // drawer so every section opens at its own beginning instead of at the
+  // footer position the visitor left behind. Hash links still land on their
+  // target once the new section has rendered.
+  const handleDrawerNavigation = () => {
+    setOpen(false)
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }
+
   const itemClass =
-    'flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[13px] text-navy transition-colors hover:bg-sidebar hover:text-navy'
+    'flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] text-navy transition-colors hover:bg-sidebar hover:text-navy'
 
   return (
     <>
-    <header className="sticky top-0 z-30 border-b border-border-muted bg-surface/95 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
+    <header className={headerClassName}>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-full focus:bg-accent focus:px-4 focus:py-2 focus:text-[13px] focus:font-medium focus:text-accent-fg"
@@ -115,26 +151,27 @@ export default function PublicHeader({ lguName, systemName }) {
           which takes it out of grid flow, and auto-placement then slid the
           right-hand controls into column 2 — stranding them mid-header. Explicit
           placement leaves column 2 empty instead. */}
-      <div className="mx-auto grid min-h-[58px] max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-3 sm:px-8">
+      <div className={headerInnerClass}>
         <div className="col-start-1 flex min-w-0 items-center gap-1.5">
           {showBack && (
             <button
               type="button"
               onClick={handleBack}
               aria-label="Go back"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-navy transition-colors hover:bg-navy-tint hover:text-navy focus:ring-2 focus:ring-accent/40 focus:outline-none"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-navy transition-colors hover:bg-navy-tint hover:text-navy focus:ring-2 focus:ring-accent/40 focus:outline-none md:h-9 md:w-9"
             >
               <ArrowLeft size={19} />
             </button>
           )}
-          <Link to="/" className="flex min-w-0 items-center">
-            <BrandMark priority className="mr-2.5 -translate-y-px size-9 sm:size-10" alt="" />
+          <Link to="/" className="flex min-h-11 min-w-0 items-center md:min-h-0">
+            <BrandMark
+              priority
+              className={`mr-2.5 -translate-y-px ${onLanding ? 'size-8 sm:size-9' : 'size-9 sm:size-10'}`}
+              alt=""
+            />
             <div className="min-w-0">
               <p className="truncate text-[16px] font-semibold tracking-[-0.015em] text-navy">
                 {systemName || 'ProcureNance'}
-              </p>
-              <p className="hidden truncate text-[11.5px] text-navy md:block">
-                {lguName ?? 'Municipal Transparency Portal'}
               </p>
             </div>
           </Link>
@@ -143,10 +180,7 @@ export default function PublicHeader({ lguName, systemName }) {
         {/* ── Desktop section pill ───────────────────────────────────────────
             Centred on the header's true midpoint. Hidden on mobile — the burger
             drawer carries the sections there instead. */}
-        <nav
-          className="glass col-start-2 hidden items-center gap-0.5 rounded-full border border-border-muted/80 p-1 shadow-sm md:flex"
-          aria-label="Portal sections"
-        >
+        <nav className={desktopNavClass} aria-label="Portal sections">
           {SECTIONS.map((section) => {
             const active = activeSection === section.key
             return (
@@ -170,7 +204,7 @@ export default function PublicHeader({ lguName, systemName }) {
             public page too, and their choice is remembered in this browser —
             there is no account to hang it on. Sign-in lives in the menu (desktop)
             / drawer (mobile) only. */}
-        <div className="col-start-3 flex shrink-0 items-center justify-end gap-1">
+        <div className="col-start-2 flex shrink-0 items-center justify-end gap-1 md:col-start-3">
           <ThemeToggle />
 
           <div className="relative">
@@ -181,7 +215,7 @@ export default function PublicHeader({ lguName, systemName }) {
               aria-haspopup="menu"
               aria-expanded={open}
               aria-label={open ? 'Close menu' : 'Open menu'}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-navy transition-colors hover:bg-navy-tint hover:text-navy focus:ring-2 focus:ring-accent/40 focus:outline-none"
+              className="flex h-11 w-11 items-center justify-center rounded-full text-navy transition-colors hover:bg-navy-tint hover:text-navy focus:ring-2 focus:ring-accent/40 focus:outline-none md:h-9 md:w-9"
             >
               <span className="md:hidden">{open ? <X size={20} /> : <Menu size={20} />}</span>
               <span className="hidden md:block">
@@ -195,7 +229,7 @@ export default function PublicHeader({ lguName, systemName }) {
               <div
                 ref={menuRef}
                 role="menu"
-                className="absolute right-0 mt-2 hidden w-64 overflow-hidden rounded-lg border border-border-muted bg-surface py-1 shadow-lg md:block"
+                className="absolute right-0 mt-2 hidden w-56 overflow-hidden rounded-2xl bg-surface/90 p-1.5 shadow-[0_14px_34px_rgba(15,23,42,0.16)] backdrop-blur-xl dark:shadow-[0_14px_34px_rgba(0,0,0,0.32)] md:block"
               >
                 {user ? (
                   <>
@@ -218,27 +252,12 @@ export default function PublicHeader({ lguName, systemName }) {
                 ) : (
                   <>
                     <Link to="/login" role="menuitem" onClick={() => setOpen(false)} className={itemClass}>
-                      <LogIn size={15} /> Sign in
+                      <LogIn size={15} /> Log in
                     </Link>
-                    <p className="px-4 pt-1 pb-2 text-[11.5px] leading-relaxed text-navy">
+                    <p className="px-3 pt-1 pb-2 text-[11.5px] leading-relaxed text-navy">
                       For authorised officials, administrators and accredited bidders. Browsing these
                       records needs no account.
                     </p>
-
-                    {/* Information, not a link. A prospective bidder needs to
-                        know where to go — and that where is an office, not a
-                        page. There is nothing to click because there is nothing
-                        to submit online. */}
-                    <div className="border-t border-border-muted px-4 pt-2.5 pb-3">
-                      <p className="flex items-center gap-2 text-[12.5px] font-medium text-navy">
-                        <FileCheck2 size={14} /> Want to become a bidder?
-                      </p>
-                      <p className="mt-1 text-[11.5px] leading-relaxed text-navy">
-                        Submit your eligibility requirements in person at the BAC Secretariat office.
-                        The BAC determines eligibility and Admin/IT issues your account — there is no
-                        online submission or sign-up.
-                      </p>
-                    </div>
                   </>
                 )}
               </div>
@@ -260,37 +279,36 @@ export default function PublicHeader({ lguName, systemName }) {
             type="button"
             aria-label="Close menu"
             onClick={() => setOpen(false)}
-            className="absolute inset-0 h-full w-full cursor-default bg-black/40"
+            className="absolute inset-0 h-full w-full cursor-default bg-black/35 backdrop-blur-[2px]"
           />
-          <aside className="absolute top-0 right-0 flex h-full max-h-screen w-72 max-w-[85vw] flex-col bg-surface shadow-xl">
-            <div className="flex items-center justify-between border-b border-border-muted px-4 py-3">
+          <aside className="absolute top-2 right-2 bottom-2 flex h-auto max-h-[calc(100dvh-1rem)] w-[min(20rem,calc(100vw-1rem))] max-w-none flex-col rounded-3xl bg-surface/90 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_18px_44px_rgba(15,23,42,0.24)] backdrop-blur-xl dark:shadow-[0_18px_44px_rgba(0,0,0,0.42)] [padding-top:env(safe-area-inset-top)]">
+            <div className="flex items-center justify-between px-4 py-3">
               <div className="flex min-w-0 items-center gap-2.5">
-                <BrandMark className="size-8" alt="" />
+                <BrandMark className="size-7" alt="" />
                 <div className="min-w-0">
                   <p className="truncate text-[15px] font-semibold text-navy">{systemName || 'ProcureNance'}</p>
-                  <p className="truncate text-[11px] text-navy">{lguName ?? 'Transparency Portal'}</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close menu"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-navy hover:bg-navy-tint hover:text-navy focus:ring-2 focus:ring-accent/40 focus:outline-none"
+                className="flex h-11 w-11 items-center justify-center rounded-full text-navy hover:bg-navy-tint hover:text-navy focus:ring-2 focus:ring-accent/40 focus:outline-none"
               >
                 <X size={20} />
               </button>
             </div>
 
-            <nav className="flex-1 overflow-y-auto px-2 py-3" aria-label="Portal sections">
-              {SECTIONS.map((section) => {
-                const active = activeSection === section.key
+            <nav className="flex-1 overflow-y-auto px-3 py-2" aria-label="Portal sections">
+              {drawerSections.map((section) => {
+                const active = activeDrawerSection === section.key
                 return (
                   <Link
                     key={section.key}
                     to={section.to}
                     aria-current={active ? 'page' : undefined}
-                    onClick={() => setOpen(false)}
-                    className={`block rounded-lg px-3 py-2.5 text-[14px] font-medium transition-colors ${
+                    onClick={handleDrawerNavigation}
+                    className={`flex min-h-11 items-center rounded-xl px-3 py-2.5 text-[14px] font-medium transition-colors ${
                       active ? 'bg-accent text-accent-fg' : 'text-navy hover:bg-sidebar hover:text-navy'
                     }`}
                   >
@@ -300,7 +318,7 @@ export default function PublicHeader({ lguName, systemName }) {
               })}
             </nav>
 
-            <div className="border-t border-border-muted p-3">
+            <div className="mx-3 border-t border-border-muted pt-3">
               {user ? (
                 <>
                   <div className="px-2 pt-1 pb-2">
@@ -309,15 +327,15 @@ export default function PublicHeader({ lguName, systemName }) {
                   </div>
                   <Link
                     to={landingRouteForRole(user.role)}
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-2.5 rounded-lg bg-accent px-3 py-2.5 text-[14px] font-medium text-accent-fg"
+                    onClick={handleDrawerNavigation}
+                    className="flex min-h-11 items-center gap-2.5 rounded-xl bg-accent px-3 py-2.5 text-[14px] font-medium text-accent-fg"
                   >
                     <LayoutDashboard size={16} /> Go to my dashboard
                   </Link>
                   <button
                     type="button"
                     onClick={handleSignOut}
-                    className="mt-1.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[14px] text-navy hover:bg-sidebar hover:text-navy"
+                    className="mt-1.5 flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[14px] text-navy hover:bg-sidebar hover:text-navy"
                   >
                     <LogOut size={16} /> Sign out
                   </button>
@@ -326,10 +344,10 @@ export default function PublicHeader({ lguName, systemName }) {
                 <>
                   <Link
                     to="/login"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-[14px] font-medium text-accent-fg"
+                    onClick={handleDrawerNavigation}
+                    className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-[14px] font-medium text-accent-fg"
                   >
-                    <LogIn size={16} /> Sign in
+                    <LogIn size={16} /> Log in
                   </Link>
                   <p className="px-1 pt-2 text-[11.5px] leading-relaxed text-navy">
                     For officials and accredited bidders. Records need no account.

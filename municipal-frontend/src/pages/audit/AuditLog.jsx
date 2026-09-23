@@ -315,7 +315,7 @@ export default function AuditLog() {
                 <p className="text-text-secondary">{inspecting.summary}</p>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">Actor</p>
                 <p className="text-text-secondary">{inspecting.actorName ?? '—'}</p>
@@ -323,13 +323,13 @@ export default function AuditLog() {
               {inspecting.ipAddress && (
                 <div>
                   <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">Network address</p>
-                  <p className="font-mono text-text-secondary">{inspecting.ipAddress}</p>
+                  <p className="min-w-0 break-all font-mono text-text-secondary">{inspecting.ipAddress}</p>
                 </div>
               )}
             </div>
 
             {(inspecting.beforeState || inspecting.afterState) && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <p className="text-[11px] tracking-[0.03em] text-text-faint uppercase">Before</p>
                   <pre className="overflow-x-auto rounded bg-sidebar p-2 text-[11px] text-text-secondary">
