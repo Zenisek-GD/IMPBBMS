@@ -1,6 +1,6 @@
 // Procurement monetary ceilings, transcribed from the Implementing Rules and
-// Regulations of RA No. 12009, 1st Edition (as of March 30, 2026):
-// https://www.gppb.gov.ph/wp-content/uploads/2026/05/IRR-of-RA-12009-1st-Edition.pdf
+// Regulations of RA No. 12009 approved by the GPPB in February 2025:
+// https://www.officialgazette.gov.ph/downloads/2025/02feb/20250210-IRR-RA-12009-FRM.pdf
 //
 // IMPORTANT: the ProcureNance design document quotes a ₱2,000,000 Small Value
 // Procurement ceiling. That is the figure for National Government Agencies

@@ -106,7 +106,7 @@ export default function UnexpendedMonitor() {
               : `${mediumRiskLines} monitored line${mediumRiskLines === 1 ? '' : 's'}`,
           },
         ] : []}
-        actions={canDispatch && <Button icon={BellRing} onClick={dispatchAlerts}>SEND ALERTS</Button>}
+        actions={canDispatch && <Button variant="warning" icon={BellRing} onClick={dispatchAlerts}>Send alerts</Button>}
       />
 
       {notice && <p role={notice.tone === 'danger' ? 'alert' : 'status'} className={`rounded border px-4 py-3 text-sm ${noticeClass}`}>{notice.text}</p>}
@@ -114,7 +114,7 @@ export default function UnexpendedMonitor() {
       {loadError && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           <span>{loadError}</span>
-          <Button variant="secondary" size="sm" onClick={refresh}>RETRY</Button>
+          <Button variant="secondary" size="sm" onClick={refresh}>Retry</Button>
         </div>
       )}
 

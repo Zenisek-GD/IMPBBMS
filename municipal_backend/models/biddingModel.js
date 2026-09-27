@@ -12,6 +12,9 @@ export const Rfq = sequelize.define("Rfq", {
   referenceNo: { type: DataTypes.STRING, allowNull: false, unique: true },
   title: { type: DataTypes.STRING, allowNull: false },
   abc: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
+  // Fixed when an SVP request is created; suppliers price against these terms.
+  svpTechnicalSpecifications: { type: DataTypes.TEXT, allowNull: true },
+  svpEligibilityDueStage: { type: DataTypes.ENUM("offer", "evaluation", "beforeAward"), allowNull: true },
 
   // Drives which eligibility documents apply (IRR Sec. 54.2).
   category: {

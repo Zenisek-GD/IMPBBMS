@@ -155,8 +155,8 @@ export default function AdminSecuritySettings() {
               <div className="mb-4 flex flex-wrap gap-2">
                 <Button variant="secondary" onClick={() => setSelected(roles.map((role) => role.id))}>Select All</Button>
                 <Button variant="secondary" disabled={!selected.length} onClick={() => setSelected([])}>Clear Selection</Button>
-                <Button variant="secondary" disabled={!selected.length} onClick={() => stage(selected, true)}>Enable 2FA for Selected Roles</Button>
-                <Button variant="secondary" disabled={!selected.length} onClick={() => stage(selected, false)}>Disable 2FA for Selected Roles</Button>
+                <Button variant="success" disabled={!selected.length} onClick={() => stage(selected, true)}>Enable 2FA for Selected Roles</Button>
+                <Button variant="danger" disabled={!selected.length} onClick={() => stage(selected, false)}>Disable 2FA for Selected Roles</Button>
               </div>
               <div className="overflow-x-auto rounded-lg border border-border-muted">
                 <table className="w-full text-left text-sm">

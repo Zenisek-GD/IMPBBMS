@@ -258,47 +258,49 @@ export default function LiveConference() {
                       {new Date(session.scheduledAt).toLocaleString()}
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        type="button"
+                      <Button
+                        size="table"
+                        variant="info"
+                        icon={Users}
+                        aria-label={`View attendance (${session.attendanceCount})`}
                         onClick={() => setViewing(session)}
-                        className="flex items-center gap-1 text-[13px] text-navy hover:underline"
                       >
-                        <Users size={12} /> {session.attendanceCount}
-                      </button>
+                        {session.attendanceCount}
+                      </Button>
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={CONFERENCE_STATUS_TONES[session.status]}>{session.status}</Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
+                      <div className="flex w-max flex-wrap gap-2">
                         {['scheduled', 'inProgress'].includes(session.status) && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            icon={Video}
                             onClick={() => join(session)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <Video size={12} /> JOIN
-                          </button>
+                            Join
+                          </Button>
                         )}
                         {canSchedule && session.status === 'scheduled' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="success"
                             onClick={() =>
                               run(() => contractsApi.updateConference(session.id, { status: 'inProgress' }))
                             }
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            START
-                          </button>
+                            Start
+                          </Button>
                         )}
                         {canSchedule && session.status === 'inProgress' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="success"
                             onClick={() => setViewing(session)}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            END &amp; LOG
-                          </button>
+                            End &amp; log
+                          </Button>
                         )}
                       </div>
                     </td>

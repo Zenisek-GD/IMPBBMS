@@ -48,7 +48,7 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [action, setAction] = useState('')
-  const [form, setForm] = useState({ closingDate: localDateTime(rfq.closingDate), openingDate: localDateTime(rfq.openingDate), prebidAt: localDateTime(rfq.prebidAt), prebidRequired: rfq.prebidRequired ?? false, prebidVenue: rfq.prebidVenue ?? '', prebidRemarks: rfq.prebidRemarks ?? '', qualityWeight: rfq.qualityWeight ?? '', financialWeight: rfq.financialWeight ?? '', consultingPassingScore: rfq.consultingPassingScore ?? '', reason: '', category: 'noResponsiveBids', explanation: '', twgRecommendation: '', resolutionNo: '', resolutionDate: '', justification: '', legalBasis: '', remarks: '', decision: 'approved', attendingMemberIds: [], presidingMemberId: '' })
+  const [form, setForm] = useState({ closingDate: localDateTime(rfq.closingDate), openingDate: localDateTime(rfq.openingDate), prebidAt: localDateTime(rfq.prebidAt), prebidRequired: rfq.prebidRequired ?? false, prebidVenue: rfq.prebidVenue ?? '', prebidRemarks: rfq.prebidRemarks ?? '', qualityWeight: rfq.qualityWeight ?? '', financialWeight: rfq.financialWeight ?? '', consultingPassingScore: rfq.consultingPassingScore ?? '', svpTechnicalSpecifications: rfq.svpTechnicalSpecifications ?? '', svpEligibilityDueStage: rfq.svpEligibilityDueStage ?? '', reason: '', category: 'noResponsiveBids', explanation: '', twgRecommendation: '', resolutionNo: '', resolutionDate: '', justification: '', legalBasis: '', remarks: '', decision: 'approved', attendingMemberIds: [], presidingMemberId: '' })
   const canPrepare = permissions.has('bidding.publish') || permissions.has('bidding.chairEvaluation')
   const isBac = ['bacChairperson', 'bacViceChairperson', 'bacMember'].includes(user?.role) && permissions.has('bidding.evaluate')
   const canFinalize = ['bacChairperson', 'bacViceChairperson'].includes(user?.role) && permissions.has('bidding.chairEvaluation')
@@ -88,7 +88,7 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
       if (action === 'failureReview') result = await governanceApi.reviewFailure(rfq.id, meeting)
       if (action === 'failureVote') result = await governanceApi.voteFailure(rfq.id, decision)
       if (action === 'failureDecision') result = await governanceApi.finalizeFailure(rfq.id, decision)
-      if (action === 'rebid') result = await biddingApi.createRebid(rfq.id, schedulePayload(form, undefined))
+      if (action === 'rebid') result = await biddingApi.createRebid(rfq.id, { ...schedulePayload(form, undefined), ...(rfq.modeKey === 'smallValueProcurement' ? { svpTechnicalSpecifications: form.svpTechnicalSpecifications, svpEligibilityDueStage: form.svpEligibilityDueStage } : {}) })
       if (action === 'review') result = await biddingApi.submitNegotiatedReview(rfq.id, { justification: form.justification, legalBasis: form.legalBasis, supportingDocuments: applicableRequirements.flatMap((item) => { const document = documentFor(`negotiated_${item.key}`); return document ? [{ documentId: document.id, requirementKey: item.key }] : [] }) })
       if (action === 'negotiatedReview') result = await governanceApi.reviewNegotiated(rfq.id, meeting)
       if (action === 'negotiatedVote') result = await governanceApi.voteNegotiated(rfq.id, decision)
@@ -116,10 +116,20 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
           <dt className="text-text-faint">Participating bidders</dt><dd>{attempt.participatingBidders?.map((bid) => `${bid.name} (${bid.status})`).join(', ') || 'No bidders recorded'}</dd>
           <dt className="text-text-faint">Evaluation result</dt><dd>{attempt.evaluationResult?.map((row) => `Bid #${row.bidId}: ${row.status}`).join('; ') || 'Pending / no completed evaluation'}</dd>
           <dt className="text-text-faint">Failure reason</dt><dd>{attempt.failureReason || 'Not recorded'}</dd>
+          {attempt.status === 'cancelled' && <><dt className="text-text-faint">Withdrawal reason</dt><dd>{attempt.cancellationReason || 'Not recorded'}</dd></>}
           <dt className="text-text-faint">BAC resolution</dt><dd>{attempt.resolution ? `Resolution No. ${attempt.resolution.resolutionNo} - ${dateTime(attempt.resolution.resolvedAt)}` : 'Not recorded'}</dd>
           <dt className="text-text-faint">TWG recommendation</dt><dd>{attempt.twgRecommendations?.map((row) => `Bid #${row.bidId}: ${row.recommendation}`).join('; ') || 'Not recorded'}</dd>
           <dt className="text-text-faint">Next action</dt><dd>{attempt.nextAction || 'Continue current procurement stage'}</dd>
         </dl>
+        {attempt.status === 'cancelled' && attempt.cancellationDecision && <section className="mt-3 space-y-2 rounded border border-border-muted p-3 text-xs">
+          <h4 className="text-sm font-semibold text-navy">HoPE decision under Section 70(b)</h4>
+          <p>Decision reference: {attempt.cancellationDecision.decisionReference}</p>
+          <p>Recorded by {attempt.cancellationDecision.decidedByName} on {dateTime(attempt.cancellationDecision.decidedAt)}.</p>
+          <p>Procedural finding: {attempt.cancellationDecision.factualFinding}</p>
+          <p>{attempt.cancellationDecision.priorAssessments}</p>
+          <p>The withdrawal does not assign fault to suppliers. Quotations and the Abstract of Quotations remain in the official record.</p>
+          <EvidenceDocuments documents={attempt.cancellationDecision.supportingDocument ? [attempt.cancellationDecision.supportingDocument] : []} onError={setError} />
+        </section>}
         {(attempt.failureRecords ?? []).map((record) => <section key={record.id} className="mt-3 break-words rounded border border-border-muted p-3 text-xs">
           <p className="font-semibold">Failure No. {record.failureNumber} - {failureLabels[record.status] ?? record.status}</p>
           <p className="mt-2">Category: {record.category}. Reason: {record.reason}</p><p>{record.explanation}</p>
@@ -158,6 +168,12 @@ export default function AttemptHistoryModal({ rfq, onClose, onChanged }) {
       {action && <form onSubmit={submit} className="space-y-4 rounded border border-border-muted p-4">
         <h3 className="text-sm font-semibold text-navy">{actionTitles[action]}</h3>
         {['schedule', 'rebid', 'negotiated'].includes(action) && <ScheduleFields form={form} setForm={setForm} category={action === 'schedule' ? rfq.category : undefined} />}
+        {action === 'rebid' && rfq.modeKey === 'smallValueProcurement' && <div className="space-y-3 rounded border border-border-muted p-3">
+          <p className="text-sm font-medium text-navy">New RFQ requirements</p>
+          <label className="block text-xs text-text-secondary">Technical specifications, quantity, delivery terms and required eligibility documents<textarea required minLength={20} rows={5} value={form.svpTechnicalSpecifications} onChange={(event) => setForm({ ...form, svpTechnicalSpecifications: event.target.value })} className={inputClass} /></label>
+          <label className="block text-xs text-text-secondary">When are eligibility documents due?<select required value={form.svpEligibilityDueStage} onChange={(event) => setForm({ ...form, svpEligibilityDueStage: event.target.value })} className={inputClass}><option value="">Choose a stage</option><option value="offer">With the quotation</option><option value="evaluation">During evaluation</option><option value="beforeAward">Before award notice</option></select></label>
+          <p className="text-xs text-text-faint">These terms belong to the new RFQ. You can review and edit them while it is a draft; publication locks them.</p>
+        </div>}
         {action === 'prepare' && <>
           {field('reason', 'Failure reason')}
           <label className="block text-xs text-text-secondary">Failure category<select className={inputClass} value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}><option value="noBids">No bids received</option><option value="noResponsiveBids">No responsive bids received</option><option value="failedEligibility">Failed eligibility / technical requirements</option><option value="failedPostQualification">Failed post-qualification</option><option value="insufficientOffers">Insufficient offers under the approved procurement method</option><option value="other">Other</option></select></label>

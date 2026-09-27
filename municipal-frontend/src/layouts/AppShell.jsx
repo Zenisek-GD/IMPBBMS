@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { LogOut, ShieldCheck, FileText } from 'lucide-react'
 import Sidebar from '../components/layout/Sidebar'
@@ -20,6 +20,7 @@ export default function AppShell() {
   const location = useLocation()
   const [mobileNavLocation, setMobileNavLocation] = useState(null)
   const mobileNavOpen = mobileNavLocation === location.key
+  const mobileNavigationRef = useRef(null)
   const nav = ROLE_NAV[user?.role] ?? ROLE_NAV.departmentRequester
   const canManageTwoFactor = user?.role === 'systemAdministrator' || user?.permissions?.includes('manage_two_factor_authentication')
 
@@ -32,7 +33,7 @@ export default function AppShell() {
   const [pending, setPending] = useState({ userId: null, counts: {} })
   const canViewReports = user?.permissions?.some((permission) => ['app.view', 'app.viewPublished', 'bidding.view', 'bidding.evaluate', 'bidding.technicalInput', 'contract.view', 'contract.viewPublished', 'delivery.submitInvoice', 'audit.viewAll', 'audit.viewLogs'].includes(permission))
 
-  // A mobile navigation modal cannot stay open after its desktop rail becomes
+  // A mobile navigation drawer cannot stay open after its desktop rail becomes
   // visible: rotation would otherwise leave the desktop UI covered with no
   // mobile trigger available to dismiss it.
   useEffect(() => {
@@ -44,6 +45,51 @@ export default function AppShell() {
     desktop.addEventListener('change', closeOnDesktop)
     return () => desktop.removeEventListener('change', closeOnDesktop)
   }, [])
+
+  // Navigation is a drawer on a phone, but it still needs the protections of
+  // a dialog: focus enters it, stays inside it, returns to the menu trigger on
+  // close, Escape dismisses it, and the page does not scroll behind it.
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined
+
+    const drawer = mobileNavigationRef.current
+    const previousFocus = document.activeElement
+    const previousOverflow = document.body.style.overflow
+    const closeNavigation = () => setMobileNavLocation(null)
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeNavigation()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const controls = [...(drawer?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]') ?? [])]
+        .filter((element) => element.getClientRects().length > 0)
+      const first = controls[0]
+      const last = controls.at(-1)
+      if (!first) {
+        event.preventDefault()
+        return
+      }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    drawer?.focus()
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
+  }, [mobileNavOpen])
 
   // Merge admin-set shortcut overrides onto the static nav config for this role.
   // If no overrides have been fetched yet, the static defaults are used.
@@ -168,7 +214,13 @@ export default function AppShell() {
 
   return (
     <div className="flex min-h-[100svh] h-[100dvh] flex-col bg-canvas">
-      <TopNavBar sections={effectiveSections} lguName={lguName} systemName={systemName} onOpenNavigation={() => setMobileNavLocation(location.key)} />
+      <TopNavBar
+        sections={effectiveSections}
+        lguName={lguName}
+        systemName={systemName}
+        navigationOpen={mobileNavOpen}
+        onOpenNavigation={() => setMobileNavLocation(location.key)}
+      />
       <div className="flex flex-1 overflow-hidden">
         <div className="hidden h-full md:block">
         <Sidebar
@@ -185,15 +237,33 @@ export default function AppShell() {
         </main>
       </div>
       {mobileNavOpen && (
-        <Modal title="Navigation" size="sm" onClose={() => setMobileNavLocation(null)}>
-          <div className="flex h-[60dvh] justify-center">
-            <Sidebar brandTitle={nav.brandTitle} brandSubtitle={nav.brandSubtitle}
-              sections={effectiveSections} collapsed={false}
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+            onMouseDown={() => setMobileNavLocation(null)}
+          />
+          <div
+            ref={mobileNavigationRef}
+            id="mobile-navigation-drawer"
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+            className="absolute inset-y-0 left-0 flex h-full w-[min(20rem,calc(100vw-3rem))] outline-none shadow-xl"
+          >
+            <Sidebar
+              brandTitle={nav.brandTitle}
+              brandSubtitle={nav.brandSubtitle}
+              sections={effectiveSections}
+              collapsed={false}
               navigationMode="mobile"
+              onClose={() => setMobileNavLocation(null)}
               onNavigate={() => setMobileNavLocation(null)}
-              onLogout={() => { setMobileNavLocation(null); setConfirmingLogout(true) }} />
+              onLogout={() => { setMobileNavLocation(null); setConfirmingLogout(true) }}
+            />
           </div>
-        </Modal>
+        </div>
       )}
 
       {/* Signing out used to happen on the first click, which in a system where

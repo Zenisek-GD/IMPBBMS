@@ -234,8 +234,8 @@ function GoalForm({ plan, sectors, onClose, onSaved }) {
           <Button variant="secondary" onClick={onClose}>
             CANCEL
           </Button>
-          <button
-            type="button"
+          <Button
+            icon={Plus}
             onClick={async () => {
               setError('')
               try {
@@ -246,10 +246,9 @@ function GoalForm({ plan, sectors, onClose, onSaved }) {
                 setError(err.response?.data?.message ?? 'Could not add the goal.')
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg"
           >
-            ADD GOAL
-          </button>
+            Add goal
+          </Button>
         </div>
       </div>
     </Modal>
@@ -308,8 +307,8 @@ function PrioritiesForm({ plan, onClose, onSaved }) {
           <Button variant="secondary" onClick={onClose}>
             CANCEL
           </Button>
-          <button
-            type="button"
+          <Button
+            icon={Star}
             disabled={selected.length === 0}
             onClick={async () => {
               setError('')
@@ -321,10 +320,9 @@ function PrioritiesForm({ plan, onClose, onSaved }) {
                 setError(err.response?.data?.message ?? 'Could not set the priorities.')
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            SET PRIORITIES
-          </button>
+            Set priorities
+          </Button>
         </div>
       </div>
     </Modal>
@@ -355,8 +353,9 @@ function ResolutionForm({ title, label, onClose, onConfirm }) {
           <Button variant="secondary" onClick={onClose}>
             CANCEL
           </Button>
-          <button
-            type="button"
+          <Button
+            variant="success"
+            icon={Check}
             disabled={!resolutionNo.trim()}
             onClick={async () => {
               setError('')
@@ -367,10 +366,9 @@ function ResolutionForm({ title, label, onClose, onConfirm }) {
                 setError(err.response?.data?.message ?? 'Could not record it.')
               }
             }}
-            className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            RECORD
-          </button>
+            Record
+          </Button>
         </div>
       </div>
     </Modal>
@@ -1044,15 +1042,14 @@ export default function DevelopmentPlanning() {
                       {program.resolutionNo && (
                         <span className="text-xs text-text-faint">adopted under {program.resolutionNo}</span>
                       )}
-                      <div className="ml-auto flex flex-wrap gap-3">
+                      <div className="ml-auto flex flex-wrap gap-2">
                         {program.editable && canManageAip && (
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
                             onClick={() => setAddingEntryTo(program)}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            ADD PROJECT
-                          </button>
+                            Add project
+                          </Button>
                         )}
                         {canAdvance && (
                           <Button
@@ -1069,13 +1066,13 @@ export default function DevelopmentPlanning() {
                           </Button>
                         )}
                         {returnPermission && permissions.has(returnPermission) && (
-                          <button
-                            type="button"
+                          <Button
+                            size="sm"
+                            variant="warning"
                             onClick={() => setReturningProgram(program)}
-                            className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                           >
-                            RETURN
-                          </button>
+                            Return
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -1201,8 +1198,110 @@ function DevelopmentPlansTable({
             : 'No development plans match your search or filters.'}
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-left">
+        <>
+          <div className="divide-y divide-border-muted md:hidden">
+            {table.pageRows.map((plan) => {
+              const open = expandedId === plan.id
+              const priorities = (plan.goals ?? []).filter((goal) => goal.isMayorPriority)
+              return (
+                <article key={plan.id} className="space-y-3 px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="text-[15px] font-semibold leading-snug text-navy">{plan.title}</h3>
+                      {plan.resolutionNo && (
+                        <p className="mt-1 text-[12px] text-text-secondary">Resolution {plan.resolutionNo}</p>
+                      )}
+                    </div>
+                    <Badge tone={PLAN_STATUS_TONES[plan.status]}>{PLAN_STATUS_LABELS[plan.status] ?? plan.status}</Badge>
+                  </div>
+
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-y border-border-muted py-3">
+                    <div>
+                      <dt className="text-[10.5px] font-semibold tracking-[0.05em] text-text-faint uppercase">Period</dt>
+                      <dd className="mt-0.5 text-[13px] font-medium tabular-nums text-navy">
+                        {plan.startYear}–{plan.endYear}
+                        <span className="text-[11.5px] font-normal text-text-faint"> · {plan.horizonYears} years</span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10.5px] font-semibold tracking-[0.05em] text-text-faint uppercase">Goals</dt>
+                      <dd className="mt-0.5 text-[13px] font-medium text-navy">{goalCount(plan)}</dd>
+                      {priorities.length > 0 && (
+                        <p className="mt-0.5 flex items-center gap-1 text-[11.5px] text-warning">
+                          <Star size={11} fill="currentColor" aria-hidden="true" />
+                          {priorities.length} priority {priorities.length === 1 ? 'goal' : 'goals'}
+                        </p>
+                      )}
+                    </div>
+                  </dl>
+
+                  <div className="space-y-1.5">
+                    <NextInline next={planNext(plan)} />
+                    {plan.status === 'adopted' && <p className="text-[11.5px] text-success">Ready for priorities and AIP</p>}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="table"
+                      variant="secondary"
+                      className="flex-1"
+                      aria-expanded={open}
+                      aria-controls={`plan-details-mobile-${plan.id}`}
+                      onClick={() => setExpandedId((current) => (current === plan.id ? null : plan.id))}
+                    >
+                      {open ? 'Hide details' : 'Details'}
+                    </Button>
+                    {plan.status === 'draft' && canManageCdp && (
+                      <Button size="table" className="flex-1" icon={Plus} onClick={() => onAddGoal(plan)}>Add goal</Button>
+                    )}
+                    {plan.status === 'draft' && canAdopt && (
+                      <Button size="table" className="flex-1" variant="success" icon={Check} onClick={() => onAdopt(plan)}>Adopt</Button>
+                    )}
+                    {plan.status === 'adopted' && canPrioritise && (
+                      <Button size="table" className="flex-1" icon={Star} onClick={() => onPrioritise(plan)}>Set priorities</Button>
+                    )}
+                  </div>
+
+                  {open && (
+                    <div id={`plan-details-mobile-${plan.id}`} className="space-y-3 border-t border-border-muted pt-3">
+                      <div>
+                        <h4 className="text-[13px] font-semibold text-navy">Plan details</h4>
+                        {plan.vision ? (
+                          <p className="mt-1.5 text-[13px] leading-relaxed text-text-secondary">
+                            <span className="font-medium text-navy">Long-term direction: </span>{plan.vision}
+                          </p>
+                        ) : (
+                          <p className="mt-1.5 text-[13px] text-text-faint">No long-term direction was recorded for this plan.</p>
+                        )}
+                      </div>
+                      <div>
+                        <h4 className="text-[13px] font-semibold text-navy">Goals in this plan</h4>
+                        {goalCount(plan) === 0 ? (
+                          <p className="mt-1.5 text-[13px] text-text-faint">No goals recorded yet. Add the first goal before recording adoption.</p>
+                        ) : (
+                          <ul className="mt-1.5 divide-y divide-border-muted border-y border-border-muted">
+                            {(plan.goals ?? []).map((goal) => (
+                              <li key={goal.id} className="py-2.5">
+                                <p className="text-[13px] font-medium text-navy">{goal.title}</p>
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  <Badge tone="neutral">{goal.sectorLabel ?? goal.sector}</Badge>
+                                  {goal.isMayorPriority && <Badge tone="success">Mayor’s priority FY {goal.priorityFiscalYear}</Badge>}
+                                </div>
+                                {goal.subsector && <p className="mt-1 text-[11.5px] text-text-faint">{goal.subsector}</p>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </article>
+              )
+            })}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[68rem] text-left">
             <thead className="bg-sidebar">
               <tr>
                 <SortableTh {...table.sortProps('title')}>Plan</SortableTh>
@@ -1226,9 +1325,9 @@ function DevelopmentPlansTable({
                           <p className="mt-0.5 text-[11.5px] text-text-secondary">Resolution {plan.resolutionNo}</p>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-[13px] tabular-nums text-text-secondary">
+                      <td className="whitespace-nowrap px-4 py-3 text-[13px] tabular-nums text-text-secondary">
                         {plan.startYear}–{plan.endYear}
-                        <p className="mt-0.5 text-[11.5px] text-text-faint">{plan.horizonYears} years</p>
+                        <span className="text-[11.5px] text-text-faint"> · {plan.horizonYears} years</span>
                       </td>
                       <td className="px-4 py-3 text-[13px] text-navy">
                         {goalCount(plan)}
@@ -1261,10 +1360,10 @@ function DevelopmentPlansTable({
                             <Button size="table" icon={Plus} onClick={() => onAddGoal(plan)}>Add goal</Button>
                           )}
                           {plan.status === 'draft' && canAdopt && (
-                            <Button size="table" icon={Check} onClick={() => onAdopt(plan)}>Adopt</Button>
+                            <Button size="table" variant="success" icon={Check} onClick={() => onAdopt(plan)}>Adopt</Button>
                           )}
                           {plan.status === 'adopted' && canPrioritise && (
-                            <Button size="table" variant="secondary" onClick={() => onPrioritise(plan)}>Priorities</Button>
+                            <Button size="table" icon={Star} onClick={() => onPrioritise(plan)}>Set priorities</Button>
                           )}
                         </div>
                       </td>
@@ -1335,6 +1434,7 @@ function DevelopmentPlansTable({
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {table.rows.length > 0 && <Pagination {...table.paginationProps} label="development plans" />}

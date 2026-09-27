@@ -93,7 +93,7 @@ export function RecoveryCodeList({ codes, onAcknowledge, busy = false }) {
           {copied ? 'COPIED' : 'COPY'}
         </Button>
         <Button
-          variant="secondary"
+          variant="info"
           icon={Download}
           onClick={() => {
             const url = URL.createObjectURL(new Blob([asText], { type: 'text/plain' }))
@@ -248,13 +248,14 @@ export default function MfaEnrollment() {
                   <img src={enrollment.qrDataUri} alt="Enrolment QR code" width={220} height={220} className="h-auto max-w-full" />
                 </div>
 
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setShowSecret((v) => !v)}
-                  className="mt-3 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
+                  className="mt-3"
                 >
-                  {showSecret ? 'HIDE THE KEY' : "CAN'T SCAN? SHOW THE KEY"}
-                </button>
+                  {showSecret ? 'Hide setup key' : "Can't scan? Show setup key"}
+                </Button>
 
                 {showSecret && (
                   <div className="mt-2 rounded border border-border-muted bg-chip/40 p-3">

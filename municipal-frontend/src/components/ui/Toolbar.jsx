@@ -1,5 +1,6 @@
 import { Search, XCircle, List, LayoutGrid } from 'lucide-react'
 import ResponsiveSelect from './ResponsiveSelect'
+import Button from './Button'
 
 // ── FILTER TOOLBAR ───────────────────────────────────────────────────────────
 // The control strip from the reference: a search field with a leading icon,
@@ -53,15 +54,16 @@ export function FilterSelect({ value, onChange, options, placeholder, ariaLabel,
 
 export function ResetFilters({ onReset, disabled }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="secondary"
+      size="sm"
       onClick={onReset}
       disabled={disabled}
-      className="flex h-11 w-full items-center justify-center gap-1.5 rounded-md px-2.5 text-sm text-text-secondary transition-colors hover:text-navy disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto md:h-10"
+      icon={XCircle}
+      className="w-full sm:w-auto"
     >
-      <XCircle size={15} />
       Reset filters
-    </button>
+    </Button>
   )
 }
 

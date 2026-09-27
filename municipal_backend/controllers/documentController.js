@@ -1,12 +1,14 @@
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
-import { Bid, Rfq } from "../models/biddingModel.js";
+import { Bid, BidOpeningRecord, Rfq } from "../models/biddingModel.js";
+import { ProcurementMode } from "../models/procurementModeModel.js";
 import { TwgAssessment } from "../models/twgModel.js";
 import { EvaluationReturn, EvaluatorDeclaration } from "../models/evaluationWorkflowModel.js";
 import { Invoice } from "../models/paymentModel.js";
 import { User } from "../models/userModel.js";
 import { checksumOf, safeFilename, validateFileContent } from "../services/documentStore.js";
+import { svpQuotationsDisclosable } from "../services/svpDisclosure.js";
 import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
 import { actorAudit, workflowError } from "../services/workflowSupport.js";
 
@@ -16,7 +18,7 @@ import { actorAudit, workflowError } from "../services/workflowSupport.js";
 // Access is decided per attachment point rather than globally, because a
 // supplier must reach their own documents and nobody else's, while reviewers
 // need to reach everyone's. Returns { read, write } for the caller.
-export const accessFor = async (req, entityRef, entityId) => {
+export const accessFor = async (req, entityRef, entityId, { docType } = {}) => {
   const has = (permission) => req.permissions.has(permission);
 
   // The vendor profile belonging to this caller, if any.
@@ -27,7 +29,8 @@ export const accessFor = async (req, entityRef, entityId) => {
   switch (entityRef) {
     case "rfq": {
       const rfq = await Rfq.findByPk(entityId);
-      return { read: Boolean(rfq) && (has("bidding.view") || has("audit.viewAll")), write: Boolean(rfq) && !["awarded", "cancelled"].includes(rfq.status) && (has("bidding.publish") || has("bidding.chairEvaluation")) };
+      const hopeEvidence = docType === "rfqCancellationEvidence" && req.currentUser.Role?.key === "hope" && has("bidding.award");
+      return { read: Boolean(rfq) && (has("bidding.view") || has("audit.viewAll")), write: Boolean(rfq) && !["awarded", "cancelled"].includes(rfq.status) && (has("bidding.publish") || has("bidding.chairEvaluation") || hopeEvidence) };
     }
     case "twgAssessment": {
       const assessment = await TwgAssessment.findByPk(entityId, { include: [{ model: Bid, as: "bid", include: [{ model: Rfq, as: "rfq" }] }] });
@@ -78,13 +81,15 @@ export const accessFor = async (req, entityRef, entityId) => {
       // owner" means THIS bid's vendor, not any vendor. Checking only that the
       // caller has a vendor profile would let one bidder read, replace or delete
       // a competitor's bid documents, which are confidential until opening.
-      const bid = await Bid.findByPk(entityId, { include: [{ model: Rfq, as: "rfq" }] });
+      const bid = await Bid.findByPk(entityId, { include: [{ model: Rfq, as: "rfq", include: [{ model: ProcurementMode, as: "mode" }] }] });
       const isOwner = Boolean(ownVendor) && bid?.vendorId === ownVendor.id;
       // Raw attachments are neither redacted nor separated into envelopes.
       // They cannot be disclosed to reviewers while sealed or under blind scoring.
-      const disclosed = bid && !bid.financialSealed && ["evaluated", "awarded"].includes(bid.rfq?.status);
+      const opening = bid?.rfq?.mode?.key === "smallValueProcurement" ? await BidOpeningRecord.findOne({ where: { rfqId: bid.rfqId }, attributes: ["id", "openedAt"] }) : null;
+      const svpDisclosed = bid?.rfq?.mode?.key === "smallValueProcurement" && svpQuotationsDisclosable(bid.rfq, opening);
+      const disclosed = bid && ((!bid.financialSealed && ["evaluated", "awarded"].includes(bid.rfq?.status)) || svpDisclosed);
       return {
-        read: isOwner || (disclosed && (has("bidding.view") || has("bidding.evaluate") || has("bidding.technicalInput"))),
+        read: isOwner || (disclosed && (has("bidding.view") || has("bidding.evaluate") || has("bidding.technicalInput") || has("audit.viewAll"))),
         write: isOwner && !bid.submittedAt && bid.rfq?.status === "published" && new Date(bid.rfq.closingDate) > new Date(),
       };
     }
@@ -154,7 +159,7 @@ export const uploadDocument = async (req, res) => {
     return res.status(400).json({ message: "entityRef and entityId are required." });
   }
 
-  const access = await accessFor(req, entityRef, Number(entityId));
+  const access = await accessFor(req, entityRef, Number(entityId), { docType });
   if (!access.write) {
     // Section 2.2 requires denied actions to be recorded too.
     await auditFromRequest(req, {
@@ -172,7 +177,7 @@ export const uploadDocument = async (req, res) => {
 
   if (["rfq", "twgAssessment"].includes(entityRef)) {
     const document = await withAuditTransaction(async (transaction, audit) => {
-      await lockTechnicalAttachment(req, entityRef, Number(entityId), transaction);
+      await lockTechnicalAttachment(req, entityRef, Number(entityId), transaction, { docType });
       // New evidence is appended, never substituted for an official old file.
       const created = await Document.create({ filename, mimeType: req.file.mimetype, sizeBytes: req.file.size, content: req.file.buffer, checksum, entityRef, entityId: Number(entityId), docType: docType ?? null, label: label ?? null, uploadedById: req.currentUser.id, uploadedAt: new Date() }, { transaction });
       await audit(actorAudit(req, { actionType: "document.uploaded", entityRef, entityId: Number(entityId), summary: "Supporting procurement evidence uploaded.", afterState: { documentId: created.id, filename, checksum, docType: docType ?? null } }));
@@ -294,7 +299,7 @@ export const deleteDocument = async (req, res) => {
   res.json({ message: "Document removed." });
 };
 
-const lockTechnicalAttachment = async (req, entityRef, entityId, transaction) => {
+const lockTechnicalAttachment = async (req, entityRef, entityId, transaction, { docType } = {}) => {
   let assessment, rfqId = entityId;
   if (entityRef === "twgAssessment") {
     assessment = await TwgAssessment.findByPk(entityId, { include: [{ model: Bid, as: "bid" }], transaction });
@@ -307,5 +312,5 @@ const lockTechnicalAttachment = async (req, entityRef, entityId, transaction) =>
     await assessment.reload({ transaction });
     if (assessment.excludedForConflict || await EvaluatorDeclaration.findOne({ where: { rfqId: rfq.id, userId: req.currentUser.id, noConflictDeclared: false }, transaction })) throw workflowError("A reported conflict of interest prevents changes to this evaluation's documents.", 403);
     if (assessment.status !== "draft" || rfq.status !== "opened" || assessment.memberId !== req.currentUser.id || !req.permissions.has("bidding.technicalInput")) throw workflowError("Supporting files cannot be changed after TWG submission.", 403);
-  } else if (["awarded", "cancelled"].includes(rfq.status) || !["bidding.publish", "bidding.chairEvaluation"].some((permission) => req.permissions.has(permission))) throw workflowError("Supporting records cannot be changed at this procurement stage.", 403);
+  } else if (["awarded", "cancelled"].includes(rfq.status) || !(["bidding.publish", "bidding.chairEvaluation"].some((permission) => req.permissions.has(permission)) || (docType === "rfqCancellationEvidence" && req.currentUser.Role?.key === "hope" && req.permissions.has("bidding.award")))) throw workflowError("Supporting records cannot be changed at this procurement stage.", 403);
 };

@@ -1,5 +1,6 @@
 import { Op } from "sequelize";
-import { Rfq, Bid, Evaluation } from "../models/biddingModel.js";
+import { Rfq, Bid, BidOpeningRecord, Evaluation } from "../models/biddingModel.js";
+import { ProcurementMode } from "../models/procurementModeModel.js";
 import { TwgAssessment } from "../models/twgModel.js";
 import { EvaluatorDeclaration, EvaluationReturn } from "../models/evaluationWorkflowModel.js";
 import { withAuditTransaction } from "../services/auditLog.js";
@@ -10,7 +11,9 @@ import { recordEvaluatorDeclaration } from "./evaluationWorkflowController.js";
 import { normalizeSupportingDocuments, ensureProcurementAttempt, assertNoPendingFailure } from "../services/procurementGovernance.js";
 import { assertBacAction, committeeSnapshot } from "../services/procurementGovernance.js";
 import { Vendor } from "../models/vendorModel.js";
+import { Document } from "../models/documentModel.js";
 import { notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
+import { svpQuotationsDisclosable } from "../services/svpDisclosure.js";
 
 export const submitEvaluation = async (req, res) => {
   if (req.body.noConflictDeclared !== true) throw workflowError("Declare that you have no conflict of interest before evaluating this procurement.", 400);
@@ -18,6 +21,9 @@ export const submitEvaluation = async (req, res) => {
     const bid = await Bid.findByPk(req.params.bidId, { transaction });
     if (!bid) throw workflowError("Bid not found.", 404);
     const rfq = await Rfq.findByPk(bid.rfqId, { transaction, lock: transaction.LOCK.UPDATE });
+    const mode = await ProcurementMode.findByPk(rfq.procurementModeId, { transaction });
+    const opening = mode?.key === "smallValueProcurement" ? await BidOpeningRecord.findOne({ where: { rfqId: rfq.id }, attributes: ["id", "openedAt"], transaction }) : null;
+    const blindFlag = !(mode?.key === "smallValueProcurement" && svpQuotationsDisclosable(rfq, opening));
     await assertNoPendingFailure(rfq, { transaction });
     if (rfq.status !== "opened" || bid.status !== "opened") throw workflowError("Evaluation is not open for this procurement.");
     const twg = await TwgAssessment.findAll({ where: { bidId: bid.id, status: "submitted", excludedForConflict: false }, transaction });
@@ -27,19 +33,25 @@ export const submitEvaluation = async (req, res) => {
     if (previous && previous.status !== "returned") throw workflowError("You have already evaluated this bid. An authorized return for correction is required before resubmitting.");
     const plan = await assertApprovedEvaluationPlan(rfq, { transaction });
     if (["qualityWeight", "financialWeight", "evaluationMethod", "financialMethod", "criteria", "maxScore", "criterionWeight", "passingScore"].some((key) => Object.hasOwn(req.body, key))) throw workflowError("Approved criteria and weights cannot be changed during evaluation.", 400);
-    const error = evaluationError({ ...req.body, category: rfq.category, plan });
+    const error = evaluationError({ ...req.body, category: rfq.category, modeKey: mode?.key, plan });
     if (error) throw workflowError(error, 400);
+    const rated = rfq.category === "consulting";
+    if (mode?.key === "smallValueProcurement" && (rated || req.body.verdict === "passed")) {
+      if (blindFlag) throw workflowError("Open the quotations at their official scheduled time before recording a compliant SVP evaluation.");
+      const evidence = await Document.findAll({ where: { entityRef: "bid", entityId: bid.id, docType: { [Op.in]: ["svpTechnicalOffer", "svpEligibilityEvidence"] } }, attributes: ["docType"], transaction });
+      if (!evidence.some((document) => document.docType === "svpTechnicalOffer")) throw workflowError("The RFQ-specific technical offer is missing. This quotation cannot be marked compliant.");
+      if (rfq.svpEligibilityDueStage !== "beforeAward" && !evidence.some((document) => document.docType === "svpEligibilityEvidence")) throw workflowError("The eligibility evidence due for this RFQ is missing. This quotation cannot be marked compliant.");
+    }
     if (req.body.remarks != null && typeof req.body.remarks !== "string") throw workflowError("Evaluation remarks must be written text.", 400);
     if (req.body.requirementRemarks != null && (typeof req.body.requirementRemarks !== "object" || Array.isArray(req.body.requirementRemarks) || Object.entries(req.body.requirementRemarks).some(([key, value]) => !Object.hasOwn(req.body.criteriaBreakdown, key) || typeof value !== "string"))) throw workflowError("Record text remarks only for the requirements being evaluated.", 400);
     if (typeof req.body.recommendation !== "string" || !req.body.recommendation.trim()) throw workflowError("Record the evaluator recommendation before submitting.", 400);
     const declaration = await recordEvaluatorDeclaration(req, rfq, { transaction, audit, declared: true });
-    const rated = rfq.category === "consulting";
     const score = rated ? consultingQualityScore(req.body.criteriaBreakdown, plan) : req.body.verdict === "passed" ? 100 : 0;
     if (!rated && score === 100 && twg.some((row) => !assessmentCompliant(row))) throw workflowError("A bidder that fails mandatory TWG technical requirements cannot be declared compliant.");
     const supportingDocuments = await normalizeSupportingDocuments(req.body.supportingDocuments, rfq, { transaction });
     const attempt = await ensureProcurementAttempt(rfq, { transaction, actorId: req.currentUser.id });
     if (!previous) await audit(actorAudit(req, { actionType: "evaluation.started", entityRef: "bid", entityId: bid.id, summary: "Authorized BAC evaluator started the procurement-category evaluation.", afterState: { rfqId: rfq.id, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, evaluatorId: req.currentUser.id, category: rfq.category, evaluationPlanId: plan?.id ?? null } }));
-    const created = await Evaluation.create({ bidId: bid.id, evaluatorId: req.currentUser.id, criteriaBreakdown: rated ? req.body.criteriaBreakdown : { verdict: req.body.verdict, requirementsExamined: req.body.criteriaBreakdown }, score, blindFlag: true, remarks: req.body.remarks ?? null, noConflictDeclared: true, declaredAt: declaration.declaredAt, submittedAt: new Date(), status: "submitted", failureReason: req.body.verdict === "failed" ? req.body.failureReason : null, failureExplanation: req.body.verdict === "failed" ? req.body.failureExplanation ?? req.body.remarks : null, requirementRemarks: req.body.requirementRemarks ?? {}, recommendation: req.body.recommendation.trim(), supportingDocuments, evaluationPlanId: plan?.id ?? null }, { transaction });
+    const created = await Evaluation.create({ bidId: bid.id, evaluatorId: req.currentUser.id, criteriaBreakdown: rated ? req.body.criteriaBreakdown : { verdict: req.body.verdict, requirementsExamined: req.body.criteriaBreakdown }, score, blindFlag, remarks: req.body.remarks ?? null, noConflictDeclared: true, declaredAt: declaration.declaredAt, submittedAt: new Date(), status: "submitted", failureReason: req.body.verdict === "failed" ? req.body.failureReason : null, failureExplanation: req.body.verdict === "failed" ? req.body.failureExplanation ?? req.body.remarks : null, requirementRemarks: req.body.requirementRemarks ?? {}, recommendation: req.body.recommendation.trim(), supportingDocuments, evaluationPlanId: plan?.id ?? null }, { transaction });
     if (previous) {
       const correction = await EvaluationReturn.findOne({ where: { targetType: "evaluation", targetId: previous.id, correctedAt: null }, transaction });
       if (!correction) throw workflowError("The authorized correction record is missing; resubmission cannot proceed.");
@@ -50,7 +62,7 @@ export const submitEvaluation = async (req, res) => {
     await audit(actorAudit(req, { actionType: "evaluation.submitted", entityRef: "bid", entityId: bid.id, summary: "BAC evaluation submitted after review of the TWG assessment.", afterState: { ...created.toJSON(), rfqId: rfq.id, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, evaluationId: created.id, reviewedTwgIds: twg.map((row) => row.id), declarationId: declaration.id, declarationRole: declaration.role } }));
     return created;
   });
-  res.status(201).json({ id: evaluation.id, score: Number(evaluation.score), blindFlag: true, message: evaluation.failureReason ? "Evaluation submitted. The bid was marked as failed with its non-compliance reason. The BAC will review the completed evaluations." : "Evaluation submitted successfully and locked. The BAC may finalize the evaluation after all required reviews and quorum are complete." });
+  res.status(201).json({ id: evaluation.id, score: Number(evaluation.score), blindFlag: evaluation.blindFlag, message: evaluation.failureReason ? "Evaluation submitted. The bid was marked as failed with its non-compliance reason. The BAC will review the completed evaluations." : "Evaluation submitted successfully and locked. The BAC may finalize the evaluation after all required reviews and quorum are complete." });
 };
 
 export const closeEvaluation = async (req, res) => {

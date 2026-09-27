@@ -2,19 +2,21 @@ import { Op } from "sequelize";
 import { Rfq, Bid, Evaluation } from "../models/biddingModel.js";
 import { TwgAssessment } from "../models/twgModel.js";
 import { EvaluationPlan, EvaluatorDeclaration, EvaluationReturn, EvaluationCriteriaAmendment } from "../models/evaluationWorkflowModel.js";
+import { ProcurementMode } from "../models/procurementModeModel.js";
 import { User } from "../models/userModel.js";
 import { withAuditTransaction } from "../services/auditLog.js";
 import { actorAudit, workflowError } from "../services/workflowSupport.js";
-import { evaluationPlanError, COMPLIANCE_REQUIREMENTS } from "../services/evaluationPolicy.js";
+import { evaluationPlanError, complianceRequirementsFor } from "../services/evaluationPolicy.js";
 import { assertBacAction, committeeSnapshot, normalizeSupportingDocuments, assertNoPendingFailure } from "../services/procurementGovernance.js";
 
 export const getEvaluationPlan = async (req, res) => {
   const rfq = await Rfq.findByPk(req.params.id);
   if (!rfq) throw workflowError("Procurement not found.", 404);
+  const mode = await ProcurementMode.findByPk(rfq.procurementModeId);
   const plan = await EvaluationPlan.findOne({ where: { rfqId: rfq.id } });
   const amendments = await EvaluationCriteriaAmendment.findAll({ where: { rfqId: rfq.id }, order: [["id", "DESC"]] });
   const canAmend = ["draft", "published"].includes(rfq.status) && plan?.status === "approved" && await Bid.count({ where: { rfqId: rfq.id } }) === 0;
-  res.json({ category: rfq.category, plan, amendments, canAmend, requirements: COMPLIANCE_REQUIREMENTS[rfq.category] ?? [], locked: rfq.status !== "draft" || plan?.status === "approved" });
+  res.json({ category: rfq.category, plan, amendments, canAmend, requirements: complianceRequirementsFor(rfq.category, mode?.key), locked: rfq.status !== "draft" || plan?.status === "approved" });
 };
 
 const assertCriteriaAmendmentStage = async (rfq, transaction) => {

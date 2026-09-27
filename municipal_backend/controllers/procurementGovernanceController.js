@@ -8,13 +8,15 @@ import { withAuditTransaction } from "../services/auditLog.js";
 import { actorAudit, workflowError } from "../services/workflowSupport.js";
 import { normalizeResolutionNumber } from "../services/resolutionNumber.js";
 import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
-import { negotiatedEligibility, failureStatusLabel, validateAttemptSchedule, negotiatedDocumentChecklist, negotiatedReadiness } from "../services/attemptPolicy.js";
+import { negotiatedEligibility, eligibleFailedBiddingMode, failureStatusLabel, validateAttemptSchedule, negotiatedDocumentChecklist, negotiatedReadiness } from "../services/attemptPolicy.js";
 import { evaluateBacDecision } from "../services/bacCommittee.js";
 import { getBacContext, assertBacAction, committeeSnapshot, ensureProcurementAttempt,
   attemptsForProject, assertNegotiatedEligibility, findNegotiatedReview, lockProcurementProject,
   normalizeSupportingDocuments, snapshotAttemptOutcome, assertOfficialBacUser, votesForDecision, assertRecordedBacDecision } from "../services/procurementGovernance.js";
 import { procurementAmountError, requiresPrebidConference, postingExemptionFor } from "../services/procurementThresholds.js";
 import { normalizeSchedule } from "../services/procurementSchedulePolicy.js";
+import { svpRequirementsFrom } from "../services/svpRequirements.js";
+import { svpQuotationsDisclosable } from "../services/svpDisclosure.js";
 
 const rfqFor = async (id, transaction) => {
   const rfq = await Rfq.findByPk(id, { transaction });
@@ -60,7 +62,8 @@ export const listAttemptHistory = async (req, res) => {
   for (const attempt of attempts) {
     const record = attempt.rfq;
     const snapshot = attempt.status === "ongoing" ? { ...(attempt.outcomeSnapshot ?? {}), ...await snapshotAttemptOutcome(record) } : attempt.outcomeSnapshot ?? {};
-    const disclosed = ["evaluated", "awarded"].includes(record?.status) || snapshot.wasDisclosed === true;
+    const disclosed = ["evaluated", "awarded"].includes(record?.status) || snapshot.wasDisclosed === true ||
+      (record?.mode?.key === "smallValueProcurement" && svpQuotationsDisclosable(record, snapshot.actualOpeningAt ? { openedAt: snapshot.actualOpeningAt } : null));
     const bids = await Bid.findAll({ where: { rfqId: attempt.rfqId }, attributes: ["id", "vendorId", "blindLabel", "status"] });
     rows.push({ id: attempt.id, rfqId: attempt.rfqId, attemptNumber: attempt.attemptNumber,
       status: record?.status === "awarded" ? "successful" : record?.status === "cancelled" ? "cancelled" : attempt.status,
@@ -68,6 +71,8 @@ export const listAttemptHistory = async (req, res) => {
       referenceNo: record?.referenceNo, title: record?.title, category: record?.category, method: record?.mode?.name, modeKey: record?.mode?.key,
       startedAt: attempt.startedAt, closingDate: record?.closingDate, openingDate: record?.openingDate, completedAt: attempt.completedAt,
       failureReason: attempt.failureReason, nextAction: attempt.nextAction, responsibleUser: attempt.responsibleUser,
+      cancellationReason: snapshot.cancellationReason ?? record?.cancellationReason ?? null,
+      cancellationDecision: snapshot.cancellationDecision ?? null,
       failureRecords: await Promise.all((attempt.failureRecords ?? []).sort((a, b) => a.id - b.id).map(async (record) => {
         const votes = await votesForDecision("failure", record.id);
         return { ...record.get({ plain: true }), votes, decisionReadiness: evaluateBacDecision({ committeeReview: record.committeeReview, votes }) };
@@ -95,7 +100,8 @@ const assertFailureStage = async (rfq, transaction, { category } = {}) => {
   const bids = await Bid.findAll({ where: { rfqId: rfq.id, status: { [Op.ne]: "withdrawn" } }, transaction });
   if (bids.length && !["evaluated", "failed"].includes(rfq.status)) throw workflowError("Open received bids and complete the applicable technical evaluation and BAC decision before preparing Failure of Bidding.");
   const mode = await ProcurementMode.findByPk(rfq.procurementModeId, { transaction });
-  const insufficientOffers = category === "insufficientOffers" && bids.length < Number(mode?.minimumOffers ?? 1);
+  const minimumOffers = mode?.key === "smallValueProcurement" ? 1 : Number(mode?.minimumOffers ?? 1);
+  const insufficientOffers = category === "insufficientOffers" && bids.length < minimumOffers;
   if (category === "insufficientOffers" && !insufficientOffers) throw workflowError("The number of received offers meets the configured minimum; insufficient offers is not a valid failure ground.");
   if (!insufficientOffers && bids.some((bid) => ["submitted", "opened", "technicalPassed", "financialOpened", "postQualified", "awarded"].includes(bid.status))) throw workflowError("A responsive bidder remains. Complete its required evaluation or post-qualification decision before declaring failure.");
 };
@@ -223,8 +229,10 @@ export const declareFailureOfBidding = async (req, res) => {
     }
     const outcomeSnapshot = await snapshotAttemptOutcome(rfq, { transaction });
     const attempts = await attemptsForProject(rfq, { transaction });
-    const numberFailed = attempts.filter((row) => row.id === attempt.id || row.failureRecords?.some((failure) => failure.status === "approved")).length;
-    const nextAction = numberFailed >= Math.max(2, bac.policy.requiredFailedAttempts) ? "Negotiated Procurement Eligibility Review" : "Rebid";
+    const numberFailed = attempts.filter((row) => eligibleFailedBiddingMode(row) && (row.id === attempt.id || row.failureRecords?.some((failure) => failure.status === "approved"))).length;
+    const currentAttempt = attempts.find((row) => row.id === attempt.id);
+    const mayReviewForNegotiated = Boolean(currentAttempt && eligibleFailedBiddingMode(currentAttempt) && numberFailed >= Math.max(2, bac.policy.requiredFailedAttempts));
+    const nextAction = mayReviewForNegotiated ? "Negotiated Procurement Eligibility Review" : "Rebid";
     await record.update({ nextAction }, { transaction });
     await attempt.update({ status: "failed", failureReason: record.reason, bacResolutionId: resolution.id, supportingDocuments: record.supportingDocuments, completedAt: new Date(),
       nextAction, responsibleUserId: req.currentUser.id, outcomeSnapshot: { ...outcomeSnapshot, bacDecision: "Failed", failureRecordId: record.id, resolution: resolution.get({ plain: true }), quorum: bac.quorum } }, { transaction });
@@ -235,10 +243,10 @@ export const declareFailureOfBidding = async (req, res) => {
       await audit(actorAudit(req, { actionType, entityRef: "rfq", entityId: rfq.id, summary: `${record.failureNumber}: attempt #${attempt.attemptNumber} officially declared failed`, beforeState, afterState }));
     }
     return { id: rfq.id, status: "failed", statusLabel: failureStatusLabel(attempt.attemptNumber), failureNumber: record.failureNumber, failureRecord: record, mayNegotiate: false,
-      eligibleForReview: numberFailed >= Math.max(2, bac.policy.requiredFailedAttempts), nextAction,
-      message: numberFailed >= Math.max(2, bac.policy.requiredFailedAttempts)
+      eligibleForReview: mayReviewForNegotiated, nextAction,
+      message: mayReviewForNegotiated
         ? "The required bidding attempts have been officially declared failed. The procurement may now proceed to Negotiated Procurement eligibility review."
-        : "The first bidding attempt has been officially declared failed. A rebid may now be prepared." };
+        : "This procurement attempt has been officially declared failed. A new solicitation may now be prepared under its approved mode." };
   });
   res.json(result);
 };
@@ -263,6 +271,10 @@ const createFollowingRfq = async (req, source, mode, transaction) => {
   const rfq = await Rfq.create({
     referenceNo: await nextSequenceNo(Rfq, "referenceNo", mode.key === "competitiveBidding" ? "ITB" : "RFQ", new Date().getFullYear(), { transaction }),
     title: source.title, abc: source.abc, category: source.category, ...schedule, schedulePreparedById: req.currentUser.id,
+    ...svpRequirementsFrom({
+      svpTechnicalSpecifications: req.body?.svpTechnicalSpecifications ?? source.svpTechnicalSpecifications,
+      svpEligibilityDueStage: req.body?.svpEligibilityDueStage ?? source.svpEligibilityDueStage,
+    }, mode.key),
     postingRequired: mode.key !== "smallValueProcurement" || Number(source.abc) > postingExemptionFor(lgu, source.category),
     isEarlyProcurement: source.isEarlyProcurement, prHeaderId: source.prHeaderId, appEntryId: source.appEntryId,
     procurementModeId: mode.id, status: "draft", qualityWeight: source.qualityWeight, financialWeight: source.financialWeight,
@@ -288,7 +300,7 @@ export const createRebid = async (req, res) => {
     const { rfq, attempt } = await createFollowingRfq(req, source, mode, transaction);
     await audit(actorAudit(req, { actionType: "bidding.rebid.created", entityRef: "rfq", entityId: rfq.id,
       summary: `${rfq.referenceNo}: procurement attempt #${attempt.attemptNumber} created`,
-      beforeState: { sourceRfqId: source.id, sourceAttemptId: sourceAttempt.id }, afterState: { rfqId: rfq.id, projectKey: attempt.projectKey, attemptNumber: attempt.attemptNumber, status: "draft", closingDate: rfq.closingDate, openingDate: rfq.openingDate } }));
+      beforeState: { sourceRfqId: source.id, sourceAttemptId: sourceAttempt.id }, afterState: { rfqId: rfq.id, projectKey: attempt.projectKey, attemptNumber: attempt.attemptNumber, status: "draft", closingDate: rfq.closingDate, openingDate: rfq.openingDate, ...(mode.key === "smallValueProcurement" ? { svpTechnicalSpecifications: rfq.svpTechnicalSpecifications, svpEligibilityDueStage: rfq.svpEligibilityDueStage } : {}) } }));
     return { id: rfq.id, referenceNo: rfq.referenceNo, status: rfq.status, attemptNumber: attempt.attemptNumber,
       message: `Rebid / Procurement Attempt #${attempt.attemptNumber} created as a draft. Review the schedule and publish the new invitation.` };
   });

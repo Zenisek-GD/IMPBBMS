@@ -217,41 +217,41 @@ function RequirementRow({ document, busy, onDecide }) {
             className="w-full resize-y rounded border border-border-muted px-3 py-1.5 text-[12.5px] text-navy focus:border-navy focus:outline-none"
           />
           <div className="mt-1.5 flex justify-end gap-2">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setRejecting(false)}
-              className="text-[11px] font-medium tracking-[0.03em] text-text-secondary hover:underline"
             >
-              CANCEL
-            </button>
-            <button
-              type="button"
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
               disabled={busy || !remarks.trim()}
               onClick={() => onDecide('rejected', remarks).then(() => setRejecting(false))}
-              className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline disabled:opacity-40"
             >
-              MARK INVALID
-            </button>
+              Mark invalid
+            </Button>
           </div>
         </div>
       ) : (
-        <div className="mt-2 flex gap-3">
-          <button
-            type="button"
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            variant="success"
+            size="sm"
             disabled={busy}
             onClick={() => onDecide('verified', '')}
-            className="text-[11px] font-medium tracking-[0.03em] text-success hover:underline disabled:opacity-40"
           >
-            MARK VALID
-          </button>
-          <button
-            type="button"
+            Mark valid
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
             disabled={busy}
             onClick={() => setRejecting(true)}
-            className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline disabled:opacity-40"
           >
-            MARK INVALID
-          </button>
+            Mark invalid
+          </Button>
         </div>
       )}
     </li>
@@ -449,13 +449,14 @@ function ReviewModal({ vendor, onClose, onDecided, canCheckDocuments, canDecide 
                     sha256 {file.checksum.slice(0, 24)}…
                   </p>
                 </div>
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="info"
+                  icon={Download}
                   onClick={() => downloadDocument(file.id, file.filename)}
-                  className="flex min-h-[44px] shrink-0 items-center gap-1 px-2 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                 >
-                  <Download size={12} /> OPEN
-                </button>
+                  Open
+                </Button>
               </li>
             ))}
           </ol>
@@ -824,45 +825,39 @@ export default function VendorVerification() {
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-start gap-1.5">
                         {canOpenReview && vendor.registrationStatus === 'submitted' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant={canDecideEligibility ? 'success' : 'info'}
+                            icon={ShieldCheck}
                             onClick={() => setReviewing(vendor)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:underline"
                           >
-                            <ShieldCheck size={12} />{' '}
                             {canDecideEligibility ? 'Decide eligibility' : 'Check requirements'}
-                          </button>
+                          </Button>
                         )}
 
                         {canCreateAccounts && vendor.canCreateAccount && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            icon={UserPlus}
                             onClick={() => setCreatingFor(vendor)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:underline"
                           >
-                            <UserPlus size={12} /> Create account
-                          </button>
+                            Create account
+                          </Button>
                         )}
 
                         {canCreateAccounts &&
                           vendor.hasAccount &&
                           vendor.accountStatus === 'pendingActivation' && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="info"
+                              icon={resendingId === vendor.id ? Loader2 : Send}
+                              className={resendingId === vendor.id ? '[&>svg]:animate-spin' : ''}
                               disabled={resendingId === vendor.id}
                               onClick={() => resendInvitation(vendor)}
-                              className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:underline disabled:opacity-60"
                             >
-                              {resendingId === vendor.id ? (
-                                <>
-                                  <Loader2 size={12} className="animate-spin" /> Sending
-                                </>
-                              ) : (
-                                <>
-                                  <Send size={12} /> Resend invitation
-                                </>
-                              )}
-                            </button>
+                              {resendingId === vendor.id ? 'Sending' : 'Resend invitation'}
+                            </Button>
                           )}
                       </div>
                     </td>

@@ -10,10 +10,13 @@ export const createRfq = (payload) =>
 export const updateRfqSchedule = (rfqId, payload) =>
   apiClient.patch(`/bidding/rfqs/${rfqId}/schedule`, payload).then((res) => res.data)
 
+export const updateSvpTerms = (rfqId, payload) =>
+  apiClient.patch(`/bidding/rfqs/${rfqId}/svp-terms`, payload).then((res) => res.data)
+
 export const publishRfq = (id) => apiClient.post(`/bidding/rfqs/${id}/publish`).then((res) => res.data)
 export const closeRfq = (id) => apiClient.post(`/bidding/rfqs/${id}/close`).then((res) => res.data)
-export const cancelRfq = (id, reason) =>
-  apiClient.post(`/bidding/rfqs/${id}/cancel`, { reason }).then((res) => res.data)
+export const cancelRfq = (id, payload) =>
+  apiClient.post(`/bidding/rfqs/${id}/cancel`, typeof payload === 'string' ? { reason: payload } : payload).then((res) => res.data)
 
 export const openBids = (id, payload) =>
   apiClient.post(`/bidding/rfqs/${id}/open`, payload).then((res) => res.data)
@@ -27,8 +30,21 @@ export const requestBidCode = (id) =>
 export const verifyBidCode = (id, reference, code) =>
   apiClient.post(`/bidding/rfqs/${id}/bids/verify-code`, { reference, code }).then((res) => res.data)
 
-export const submitBid = (id, payload) =>
-  apiClient.post(`/bidding/rfqs/${id}/bids`, payload).then((res) => res.data)
+export const submitBid = (id, payload) => {
+  if (payload.technicalOffer) {
+    const form = new FormData()
+    for (const [key, value] of Object.entries(payload)) if (value != null) form.append(key, value)
+    return apiClient.post(`/bidding/rfqs/${id}/bids`, form).then((res) => res.data)
+  }
+  return apiClient.post(`/bidding/rfqs/${id}/bids`, payload).then((res) => res.data)
+}
+
+export const fetchMyQuotations = () => apiClient.get('/bidding/my-quotations').then((res) => res.data)
+export const uploadEligibilityEvidence = (bidId, file) => {
+  const form = new FormData()
+  form.append('file', file)
+  return apiClient.post(`/bidding/bids/${bidId}/eligibility-evidence`, form).then((res) => res.data)
+}
 
 export const fetchBids = (rfqId) =>
   apiClient.get(`/bidding/rfqs/${rfqId}/bids`).then((res) => res.data)

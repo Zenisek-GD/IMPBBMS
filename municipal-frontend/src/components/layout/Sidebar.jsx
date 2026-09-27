@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { PanelLeftClose, PanelLeftOpen, User, LogOut, UserCircle } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, User, LogOut, UserCircle, CircleHelp, X } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
 import { GLOSSARY } from '../../config/glossary'
 
@@ -47,7 +47,7 @@ const itemClass = (collapsed, isActive) =>
     collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'
   } ${isActive ? 'bg-navy-tint text-navy' : 'text-text-secondary hover:bg-navy-tint/60 hover:text-navy'}`
 
-export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle, onLogout, onNavigate, navigationMode = 'desktop' }) {
+export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed, onToggle, onLogout, onNavigate, onClose, navigationMode = 'desktop' }) {
   const { user } = useAuth()
 
   return (
@@ -55,8 +55,8 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
       // White, now that the page behind the content is faintly tinted — the rail
       // reads as its own panel rather than as a slightly different grey next to
       // another grey.
-      className={`flex h-full shrink-0 flex-col border-r border-border-muted bg-surface transition-[width] duration-200 ${
-        collapsed ? 'w-15' : 'w-60'
+      className={`flex h-full shrink-0 flex-col border-border-muted bg-surface transition-[width] duration-200 ${
+        navigationMode === 'mobile' ? 'w-full' : `border-r ${collapsed ? 'w-15' : 'w-60'}`
       }`}
     >
       <div
@@ -69,6 +69,16 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
             <p className="truncate text-body font-semibold text-navy">{brandTitle}</p>
             <p className="truncate text-[12px] text-text-faint">{brandSubtitle}</p>
           </div>
+        )}
+        {navigationMode === 'mobile' && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close navigation"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-text-faint transition-colors hover:bg-navy-tint hover:text-navy"
+          >
+            <X size={18} />
+          </button>
         )}
         {navigationMode !== 'mobile' && (
           <button
@@ -113,6 +123,24 @@ export default function Sidebar({ brandTitle, brandSubtitle, sections, collapsed
             </div>
           </div>
         ))}
+
+        <div className="border-t border-border-muted pt-3">
+          {!collapsed && (
+            <p className="px-2 pb-1.5 text-[12px] font-medium tracking-[0.04em] text-text-faint uppercase">
+              Support
+            </p>
+          )}
+          <NavLink
+            to="/help-guide"
+            onClick={onNavigate}
+            aria-label="Help and Guide"
+            title={collapsed ? 'Help & Guide' : undefined}
+            className={({ isActive }) => itemClass(collapsed, isActive)}
+          >
+            <CircleHelp size={15} strokeWidth={2} className="shrink-0" />
+            {!collapsed && <span className="truncate">Help &amp; Guide</span>}
+          </NavLink>
+        </div>
 
         {/* The account block. `mt-auto` sits it at the foot of the rail when the
             nav is short, and lets it scroll up with the links when the nav is

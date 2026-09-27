@@ -697,19 +697,19 @@ export default function InvitationToBid() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex min-w-[11rem] flex-wrap gap-1.5">
-                        <Button size="table" variant="secondary" icon={Eye} onClick={() => setPreviewing(notice)}>Preview</Button>
+                        <Button size="table" variant="info" icon={Eye} onClick={() => setPreviewing(notice)}>Preview</Button>
 
                         {canManage && notice.status === 'draft' && (
                           <>
                             <Button size="table" variant="secondary" onClick={() => setEditing(notice)}>Edit</Button>
-                            <Button size="table" icon={Globe} onClick={() => setPublishing(notice)}>Publish</Button>
+                            <Button size="table" variant="success" icon={Globe} onClick={() => setPublishing(notice)}>Publish</Button>
                           </>
                         )}
 
                         {canManage && notice.status === 'published' && (
                           <>
                             <Button size="table" variant="danger" icon={Undo2} onClick={() => setWithdrawing(notice)}>Withdraw</Button>
-                            <Button size="table" variant="secondary" icon={Archive} onClick={() => act(() => api.archiveAnnouncement(notice.id))}>Archive</Button>
+                            <Button size="table" variant="danger" icon={Archive} onClick={() => act(() => api.archiveAnnouncement(notice.id))}>Archive</Button>
                           </>
                         )}
 

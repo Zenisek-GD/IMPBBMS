@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -12,6 +12,8 @@ import {
   TRANSITION_FOR_STATUS,
   RETURN_PERMISSION_FOR_STATUS,
   PROCUREMENT_MODES,
+  PLAN_CYCLE_LABELS,
+  PLAN_STAGE_LABELS,
   modeLabel,
 } from '../../api/appEntries'
 import { usePermissions } from '../../context/usePermissions'
@@ -34,20 +36,31 @@ import useDraftRecovery from '../../hooks/useDraftRecovery'
 import { CommitteeActionModal } from '../bidding/EvaluationForms'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
+const PROCUREMENT_CATEGORIES = [
+  { value: 'goods', label: 'Goods' },
+  { value: 'infrastructure', label: 'Infrastructure' },
+  { value: 'consulting', label: 'Consulting services' },
+]
+const normalizeCategory = (value) => {
+  const category = String(value ?? '').trim().toLowerCase()
+  return PROCUREMENT_CATEGORIES.some((option) => option.value === category) ? category : ''
+}
 
 // Mirrors the Section 4.3 rules the server enforces.
 const entrySchema = z
   .object({
+    fiscalYear: z.coerce.number().int().min(2000, 'Enter a valid fiscal year.').max(2100, 'Enter a valid fiscal year.'),
+    planCycle: z.enum(['indicative', 'final']),
     projectTitle: z.string().trim().min(1, 'Project title is required'),
     description: z.string().optional(),
+    category: z.enum(['goods', 'infrastructure', 'consulting'], { message: 'Select a procurement category.' }),
     aipEntryId: z.coerce.number({ message: 'An investment program project is required' }).positive(
       'Select the investment program project this APP line will procure.'
     ),
-    // An APP entry is a plan to spend appropriated money, so it must name the
-    // ordinance line it draws on. The server refuses entries without one.
-    appropriationId: z.coerce.number({ message: 'An appropriation line is required' }).positive(
-      'Select the appropriation line this plan is charged against.'
-    ),
+    appropriationId: z.union([
+      z.coerce.number().positive('Select the appropriation line this plan is charged against.'),
+      z.literal(''),
+    ]),
     abc: z.coerce.number({ message: 'ABC is required' }).positive('ABC must be greater than 0.'),
     unit: z.string().optional(),
     quantity: z.union([z.coerce.number().int().positive(), z.literal('')]).optional(),
@@ -62,6 +75,13 @@ const entrySchema = z
     justification: z.string().optional(),
   })
   .superRefine((values, ctx) => {
+    if (values.planCycle === 'final' && !values.appropriationId) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['appropriationId'],
+        message: 'Select an enacted appropriation line for a final APP entry.',
+      })
+    }
     if (QUARTERS.indexOf(values.targetStartQuarter) > QUARTERS.indexOf(values.targetCompletionQuarter)) {
       ctx.addIssue({
         code: 'custom',
@@ -86,52 +106,110 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   const [suggestion, setSuggestion] = useState(null)
   const [appropriations, setAppropriations] = useState([])
   const [aipEntries, setAipEntries] = useState([])
+  const [linkedRecordsLoading, setLinkedRecordsLoading] = useState(true)
+  const [linkedRecordsError, setLinkedRecordsError] = useState(false)
+  const [linkedRecordsReload, setLinkedRecordsReload] = useState(0)
+  const yearChosenByUser = useRef(Boolean(defaultValues?.id))
 
   const {
     register,
     handleSubmit,
     control,
     reset,
+    setValue,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm({ resolver: zodResolver(entrySchema), defaultValues, mode: 'onBlur' })
   const currentValues = useWatch({ control })
+  const watchedFiscalYear = useWatch({ control, name: 'fiscalYear' })
+  const watchedPlanCycle = useWatch({ control, name: 'planCycle' })
+  const isIndicative = watchedPlanCycle === 'indicative'
   const draft = useDraftRecovery({
     key: defaultValues?.id ? `app-entry-${defaultValues.id}` : 'app-entry-new',
     value: currentValues,
-    onRestore: (saved) => reset(saved),
+    onRestore: (saved) => {
+      yearChosenByUser.current = true
+      const category = saved.category == null ? (defaultValues?.category ?? 'goods') : normalizeCategory(saved.category)
+      reset({ ...saved, planCycle: saved.planCycle ?? 'final', appropriationId: saved.appropriationId ?? '', category })
+    },
   })
 
   // Ask the server what mode the ABC implies, as it is typed. The thresholds
   // come from the RA 12009 IRR and depend on the LGU's classification, so this
   // is not something the frontend can work out on its own.
-  // Only enacted lines are offered — a draft ordinance authorises nothing, so
-  // planning against one would be meaningless.
+  // Load all eligible years. An indicative line needs an adopted AIP project;
+  // a final line also needs an enacted appropriation for that fiscal year.
   useEffect(() => {
     let cancelled = false
-    financeApi
-      .fetchAppropriations({ chargeable: 'true' })
-      .then((rows) => !cancelled && setAppropriations(rows))
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    Promise.all([
+      financeApi.fetchAppropriations({ chargeable: 'true' }),
+      planningApi.fetchAipEntries(),
+    ])
+      .then(([lines, projects]) => {
+        if (cancelled) return
+        setAppropriations(lines)
+        setAipEntries(projects)
+        setLinkedRecordsError(false)
+        setLinkedRecordsLoading(false)
 
-  useEffect(() => {
-    let cancelled = false
-    planningApi
-      .fetchAipEntries({ fiscalYear: new Date().getFullYear() })
-      .then((rows) => !cancelled && setAipEntries(rows))
-      .catch(() => {})
+        // For a new entry, choose the latest year with the records required by
+        // its cycle. Do not replace a year picked by the user or restored locally.
+        if (!yearChosenByUser.current) {
+          const projectYears = new Set(projects.map((entry) => Number(entry.fiscalYear)))
+          const lineYears = new Set(lines.map((line) => Number(line.fiscalYear)))
+          const sharedYears = [...projectYears].filter((year) => lineYears.has(year))
+          const availableYears = getValues('planCycle') === 'indicative'
+            ? [...projectYears]
+            : sharedYears.length ? sharedYears : [...projectYears, ...lineYears]
+          const preferredYear = availableYears.length ? Math.max(...availableYears) : new Date().getFullYear()
+          setValue('fiscalYear', preferredYear)
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        setLinkedRecordsError(true)
+        setLinkedRecordsLoading(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [getValues, linkedRecordsReload, setValue])
 
   const watchedAbc = useWatch({ control, name: 'abc' })
   const watchedCategory = useWatch({ control, name: 'category' })
   const watchedAppropriation = useWatch({ control, name: 'appropriationId' })
-  const selectedLine = appropriations.find((row) => String(row.id) === String(watchedAppropriation))
+  const year = Number(watchedFiscalYear)
+  const fiscalYears = [...new Set([
+    new Date().getFullYear(),
+    Number(defaultValues?.fiscalYear),
+    Number(watchedFiscalYear),
+    ...aipEntries.map((entry) => Number(entry.fiscalYear)),
+    ...appropriations.map((line) => Number(line.fiscalYear)),
+  ].filter((value) => Number.isInteger(value) && value >= 2000 && value <= 2100))].sort((a, b) => b - a)
+  const yearAipEntries = aipEntries.filter((entry) => Number(entry.fiscalYear) === year)
+  const yearAppropriations = appropriations.filter((line) => Number(line.fiscalYear) === year)
+  const selectedLine = yearAppropriations.find((row) => String(row.id) === String(watchedAppropriation))
+  const fiscalYearRegistration = register('fiscalYear')
+  const planCycleRegistration = register('planCycle')
+  const changePlanCycle = (event) => {
+    planCycleRegistration.onChange(event)
+    setValue('appropriationId', '')
+    if (!yearChosenByUser.current && aipEntries.length > 0) {
+      const projectYears = new Set(aipEntries.map((entry) => Number(entry.fiscalYear)))
+      const lineYears = new Set(appropriations.map((line) => Number(line.fiscalYear)))
+      const sharedYears = [...projectYears].filter((value) => lineYears.has(value))
+      const availableYears = event.target.value === 'indicative'
+        ? [...projectYears]
+        : sharedYears.length ? sharedYears : [...projectYears, ...lineYears]
+      if (availableYears.length > 0) {
+        const preferredYear = Math.max(...availableYears)
+        if (preferredYear !== year) {
+          setValue('fiscalYear', preferredYear)
+          setValue('aipEntryId', '')
+        }
+      }
+    }
+  }
   useEffect(() => {
     const abc = Number(watchedAbc)
     if (!abc || Number.isNaN(abc) || abc <= 0) return
@@ -157,7 +235,11 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   const submit = async (values) => {
     setServerError('')
     try {
-      await onSubmit(values)
+      const payload = { ...values }
+      // An indicative line has no ordinance reference. Omit the field entirely
+      // so an edited line cannot turn a blank select into a numeric zero.
+      if (payload.planCycle === 'indicative') delete payload.appropriationId
+      await onSubmit(payload)
       draft.clearDraft()
       onClose()
     } catch (err) {
@@ -170,7 +252,9 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
     // page with logical sections, not a scroll-heavy modal.
     <LargeFormPage
       title={title}
-      purpose="An APP entry plans one procurement against an adopted investment program project and an enacted appropriation line."
+      purpose={isIndicative
+        ? 'An indicative PPMP line plans a procurement for an adopted investment program project before the appropriation ordinance is enacted.'
+        : 'A final APP line plans a procurement against an adopted investment program project and an enacted appropriation line.'}
       onBack={onClose}
       backLabel="Back to procurement plan"
       error={serverError}
@@ -179,7 +263,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isSubmitting} onClick={handleSubmit(submit)}>
+          <Button type="submit" disabled={isSubmitting || linkedRecordsLoading || linkedRecordsError} onClick={handleSubmit(submit)}>
             {isSubmitting ? 'Saving…' : 'Save draft'}
           </Button>
         </>
@@ -199,9 +283,73 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
       )}
       <LargeFormPage.Section
         title="Linked records"
-        description="Everything below is constrained by these two lines: the project this procures and the ordinance line it is charged against."
+        description={isIndicative
+          ? 'Choose the fiscal year and adopted investment program project for this indicative line.'
+          : 'Choose the project this procures and the enacted ordinance line it is charged against.'}
       >
         <div className="flex flex-col gap-4">
+          <div>
+            <span className="mb-2 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">Plan cycle</span>
+            {defaultValues?.id ? (
+              <>
+                <input type="hidden" {...planCycleRegistration} />
+                <p className="rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy">
+                  {PLAN_CYCLE_LABELS[watchedPlanCycle] ?? watchedPlanCycle}
+                </p>
+              </>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  { value: 'indicative', title: 'Indicative plan', detail: 'Prepared during budget planning; no ordinance line is needed yet.' },
+                  { value: 'final', title: 'Final APP', detail: 'After enactment. Charged against an enacted appropriation line.' },
+                ].map((option) => (
+                  <label key={option.value} className={`flex cursor-pointer gap-3 rounded border p-3 ${watchedPlanCycle === option.value ? 'border-navy bg-chip/40' : 'border-border-muted bg-surface'}`}>
+                    <input type="radio" value={option.value} {...planCycleRegistration} onChange={changePlanCycle} className="mt-0.5 accent-navy" />
+                    <span>
+                      <span className="block text-[13px] font-medium text-navy">{option.title}</span>
+                      <span className="mt-1 block text-xs text-text-secondary">{option.detail}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {errors.planCycle && <p className="mt-1 text-xs text-danger">Select a plan cycle.</p>}
+          </div>
+          <div>
+            <label htmlFor="app-fiscal-year" className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
+              Fiscal year
+            </label>
+            <select
+              id="app-fiscal-year"
+              {...fiscalYearRegistration}
+              onChange={(event) => {
+                yearChosenByUser.current = true
+                fiscalYearRegistration.onChange(event)
+                setValue('aipEntryId', '')
+                setValue('appropriationId', '')
+              }}
+              className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
+            >
+              {fiscalYears.map((fiscalYear) => (
+                <option key={fiscalYear} value={fiscalYear}>FY {fiscalYear}</option>
+              ))}
+            </select>
+            {errors.fiscalYear && <p className="mt-1 text-xs text-danger">{errors.fiscalYear.message}</p>}
+            <p className="mt-1.5 text-xs text-text-faint">
+              {isIndicative ? 'Choose the fiscal year of the adopted AIP project.' : 'Choose the year of the adopted AIP and enacted appropriation.'}
+            </p>
+          </div>
+
+          {linkedRecordsLoading && <p className="text-xs text-text-faint">Loading linked records…</p>}
+          {linkedRecordsError && (
+            <p role="alert" className="text-xs text-danger">
+              Linked records could not be loaded.{' '}
+              <button type="button" className="underline underline-offset-2" onClick={() => {
+                setLinkedRecordsLoading(true)
+                setLinkedRecordsReload((value) => value + 1)
+              }}>Try again</button>
+            </p>
+          )}
           <div>
             <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
               Investment program project
@@ -211,23 +359,22 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
               className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
             >
               <option value="">— select an adopted investment program project —</option>
-              {aipEntries.map((entry) => (
+              {yearAipEntries.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.title} ({entry.fiscalYear}) · {peso(entry.estimatedCost)} programmed
                 </option>
               ))}
             </select>
             {errors.aipEntryId && <p className="mt-1 text-xs text-danger">{errors.aipEntryId.message}</p>}
-            {aipEntries.length === 0 && (
+            {!linkedRecordsLoading && !linkedRecordsError && yearAipEntries.length === 0 && (
               <p className="mt-1.5 text-xs text-warning">
-                No adopted investment program projects are available for this fiscal year. Create and adopt an AIP
+                No adopted investment program projects are available for FY {year}. Create and adopt an AIP
                 project before filing this APP line.
               </p>
             )}
           </div>
 
-          {/* The budget line first: everything below is constrained by it. */}
-          <div>
+          {!isIndicative && <div>
             <label className="mb-1 block text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">
               Charged against (appropriation line)
             </label>
@@ -236,7 +383,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
               className="w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none"
             >
               <option value="">— select an enacted ordinance line —</option>
-              {appropriations.map((row) => (
+              {yearAppropriations.map((row) => (
                 <option key={row.id} value={row.id}>
                   {row.ordinanceNo} · {row.title} ({peso(row.unprogrammed)} unprogrammed)
                 </option>
@@ -252,13 +399,18 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
                 <strong className="text-text-secondary">{peso(selectedLine.unprogrammed)} still unprogrammed</strong>.
               </p>
             )}
-            {appropriations.length === 0 && (
+            {!linkedRecordsLoading && !linkedRecordsError && yearAppropriations.length === 0 && (
               <p className="mt-1.5 text-xs text-warning">
-                No enacted appropriation lines are available. The Budget Officer must record the Appropriation
+                No enacted appropriation lines are available for FY {year}. The Budget Officer must record the Appropriation
                 Ordinance before procurement can be planned.
               </p>
             )}
-          </div>
+          </div>}
+          {isIndicative && (
+            <p className="rounded border border-info/20 bg-info-soft p-3 text-xs text-text-secondary">
+              An indicative plan is prepared before the appropriation ordinance. Add the enacted ordinance line when preparing the final APP.
+            </p>
+          )}
         </div>
       </LargeFormPage.Section>
 
@@ -276,6 +428,24 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
               {...register('description')}
             />
+          </div>
+
+          <div>
+            <label htmlFor="app-procurement-category" className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
+              Procurement category
+            </label>
+            <select
+              id="app-procurement-category"
+              className="w-full rounded border border-border-muted bg-surface px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
+              {...register('category')}
+            >
+              <option value="">Select a category</option>
+              {PROCUREMENT_CATEGORIES.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            {errors.category && <p className="mt-1 text-xs text-danger">{errors.category.message}</p>}
+            <p className="mt-1.5 text-xs text-text-faint">Used to calculate the suggested procurement mode.</p>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -507,10 +677,13 @@ export default function AppEntries() {
     return (
       <DashboardPage>
         <EntryFormModal
-          title="New APP entry"
+          title="New procurement plan line"
           defaultValues={{
+            fiscalYear: new Date().getFullYear(),
+            planCycle: 'final',
             projectTitle: '',
             description: '',
+            category: 'goods',
             aipEntryId: '',
             appropriationId: '',
             abc: '',
@@ -544,7 +717,9 @@ export default function AppEntries() {
           defaultValues={{
             ...editing,
             aipEntryId: editing.aipEntryId ?? '',
+            appropriationId: editing.appropriationId ?? '',
             description: editing.description ?? '',
+            category: normalizeCategory(editing.category),
             unit: editing.unit ?? '',
             quantity: editing.quantity ?? '',
             fundSource: editing.fundSource ?? '',
@@ -556,7 +731,9 @@ export default function AppEntries() {
           }}
           onClose={() => setEditing(null)}
           onSubmit={async (values) => {
-            await appApi.updateAppEntry(editing.id, values)
+            const editableValues = { ...values }
+            delete editableValues.planCycle
+            await appApi.updateAppEntry(editing.id, editableValues)
             refresh()
           }}
         />
@@ -568,11 +745,11 @@ export default function AppEntries() {
     <DashboardPage>
       <PageHeader
         title="Annual Procurement Plan"
-        subtitle="No purchase requisition may exist without an approved APP entry."
+        subtitle="Prepare indicative lines before budget enactment, then final APP lines against enacted appropriations."
         actions={
           canCreate && (
             <Button icon={Plus} onClick={() => setCreating(true)}>
-              NEW APP ENTRY
+              NEW PLAN LINE
             </Button>
           )
         }
@@ -588,7 +765,7 @@ export default function AppEntries() {
         </p>
       )}
 
-      <Card title="APP Entries" icon={ClipboardList} bodyClassName="">
+      <Card title="Procurement plan entries" icon={ClipboardList} bodyClassName="">
         {loading ? (
           <p className="px-4 py-8 text-center text-[13px] text-text-faint">Loading entries...</p>
         ) : table.failed ? (
@@ -606,6 +783,7 @@ export default function AppEntries() {
               <thead className="bg-sidebar">
                 <tr>
                   <SortableTh {...table.sortProps('projectTitle')}>Project</SortableTh>
+                  <Th>Cycle / stage</Th>
                   <Th>Unit</Th>
                   <SortableTh {...table.sortProps('abc')}>ABC</SortableTh>
                   <Th>Mode</Th>
@@ -629,6 +807,12 @@ export default function AppEntries() {
                           <p className="mt-1 text-xs text-danger">Returned: {entry.returnRemarks}</p>
                         )}
                       </td>
+                      <td className="px-4 py-3 text-xs text-text-secondary">
+                        <p className="font-medium text-navy">
+                          FY {entry.fiscalYear} · {entry.planCycle === 'indicative' ? 'Indicative' : 'Final'}
+                        </p>
+                        <p className="mt-1">{PLAN_STAGE_LABELS[entry.planStage] ?? entry.planStage ?? 'PPMP'}</p>
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs text-navy">{entry.implementingUnitCode ?? '—'}</td>
                       <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">{peso(entry.abc)}</td>
                       <td className="px-4 py-3 text-[13px] text-text-secondary">{modeLabel(entry.procurementMode)}</td>
@@ -642,31 +826,30 @@ export default function AppEntries() {
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex w-max items-center gap-2">
                           {entry.editable && canCreate && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="secondary"
                               onClick={() => setEditing(entry)}
-                              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
-                              EDIT
-                            </button>
+                              Edit
+                            </Button>
                           )}
                           {canAdvance && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
                               onClick={() => next.action === 'consolidate' ? setCommitteeEntry(entry) : runTransition(entry, next.action).catch(() => {})}
-                              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
                               {next.label}
-                            </button>
+                            </Button>
                           )}
                           {canReturn && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="warning"
                               onClick={() => setReturning(entry)}
-                              className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                             >
-                              RETURN
-                            </button>
+                              Return
+                            </Button>
                           )}
                           {entry.status === 'locked' && (
                             <span className="flex items-center gap-1 text-[11px] text-text-faint">

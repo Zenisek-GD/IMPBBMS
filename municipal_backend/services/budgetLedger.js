@@ -161,6 +161,7 @@ export const programmedFor = async (appropriationId, { excludeAppEntryId } = {})
 
   return {
     appropriationId,
+    fiscalYear: appropriation.fiscalYear,
     ordinanceNo: appropriation.ordinanceNo,
     title: appropriation.title,
     status: appropriation.status,

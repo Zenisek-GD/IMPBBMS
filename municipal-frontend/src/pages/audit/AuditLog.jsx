@@ -119,8 +119,8 @@ export default function AuditLog() {
         subtitle="Append-only, hash-chained record of every critical action — including denied ones."
         actions={
           canExport && (
-            <Button icon={Download} onClick={() => window.open(auditExportUrl, '_blank')}>
-              EXPORT CSV
+            <Button variant="info" icon={Download} onClick={() => window.open(auditExportUrl, '_blank')}>
+              Export CSV
             </Button>
           )
         }

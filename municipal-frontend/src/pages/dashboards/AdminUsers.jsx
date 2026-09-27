@@ -344,38 +344,39 @@ export default function AdminUsers() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
+                        <div className="flex w-max flex-wrap gap-2">
+                          <Button
+                            size="table"
+                            variant="secondary"
                             onClick={() => setEditing(row)}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            EDIT
-                          </button>
+                            Edit
+                          </Button>
                           {/* Hidden for your own account: the API refuses it,
                               because resetting yourself here would lock you out of
                               this console until you completed the emailed
                               invitation. Use Change password instead. */}
                           {!isSelf && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="info"
+                              icon={KeyRound}
                               onClick={() => handleResetPassword(row)}
                               title="Emails this user an invitation to set a new password. No password is shown to you."
-                              className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
-                              <KeyRound size={12} /> RESET
-                            </button>
+                              Reset
+                            </Button>
                           )}
                           {/* The API also blocks self-deactivation; hiding it here
                               just avoids offering an action that will fail. */}
                           {!isSelf && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant={row.status === 'active' ? 'danger' : 'success'}
                               onClick={() => setToggling(row)}
-                              className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                             >
-                              {row.status === 'active' ? 'DEACTIVATE' : 'REACTIVATE'}
-                            </button>
+                              {row.status === 'active' ? 'Deactivate' : 'Reactivate'}
+                            </Button>
                           )}
                         </div>
                       </td>

@@ -208,13 +208,13 @@ export default function PendingItems() {
                     </td>
                     <td className="px-4 py-3">
                       {!item.resolvedAt && canResolve && (
-                        <button
-                          type="button"
+                        <Button
+                          size="table"
+                          variant="success"
                           onClick={() => setResolving(item)}
-                          className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                         >
-                          RESOLVE
-                        </button>
+                          Resolve
+                        </Button>
                       )}
                       {item.resolvedAt && <Badge tone="success">{item.resolution}</Badge>}
                     </td>

@@ -296,34 +296,35 @@ export default function Invoices() {
                       <div className="flex w-max items-center gap-2">
                         {canCertify && invoice.status === 'submitted' && (
                           <>
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="success"
                               onClick={() => run(() => financeApi.certifyInvoice(invoice.id, 'certify'))}
-                              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
-                              CERTIFY
-                            </button>
-                            <button
-                              type="button"
+                              Certify
+                            </Button>
+                            <Button
+                              size="table"
+                              variant="warning"
                               onClick={() => setReturning(invoice)}
-                              className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                             >
-                              RETURN
-                            </button>
+                              Return
+                            </Button>
                           </>
                         )}
                         {canRelease && invoice.payment?.status === 'prepared' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="success"
+                            icon={Banknote}
                             onClick={() =>
                               run(() =>
                                 financeApi.releasePayment(invoice.payment.id, { method: 'LDDAP-ADA' })
                               )
                             }
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <Banknote size={12} /> RELEASE
-                          </button>
+                            Release
+                          </Button>
                         )}
                       </div>
                     </td>

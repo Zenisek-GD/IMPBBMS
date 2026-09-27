@@ -14,6 +14,7 @@ import TableToolbar from '../../components/ui/TableToolbar'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
 import EmptyState from '../../components/ui/EmptyState'
 import { useTableControls } from '../../components/ui/useTableControls'
+import { downloadDocument } from '../../api/documents'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -29,12 +30,15 @@ const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFra
 function BidModal({ rfq, onClose, onSubmitted }) {
   const [step, setStep] = useState('price')
   const [price, setPrice] = useState('')
+  const [technicalOffer, setTechnicalOffer] = useState(null)
+  const [eligibilityEvidence, setEligibilityEvidence] = useState(null)
   const [challenge, setChallenge] = useState(null)
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [resending, setResending] = useState(false)
+  const isSmallValue = rfq.modeKey === 'smallValueProcurement'
 
   const overAbc = price !== '' && Number(price) > Number(rfq.abc)
 
@@ -78,6 +82,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
         totalBidPrice: Number(price),
         reference: verified.reference,
         ticket: verified.ticket,
+        ...(isSmallValue ? { technicalOffer, ...(eligibilityEvidence ? { eligibilityEvidence } : {}) } : {}),
       })
       onSubmitted()
       onClose()
@@ -92,7 +97,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
   if (step === 'confirm') {
     return (
       <Modal
-        title="Confirm your bid"
+        title={isSmallValue ? 'Confirm your quotation' : 'Confirm your bid'}
         subtitle="A bid cannot be edited or withdrawn once accepted."
         onClose={onClose}
       >
@@ -155,7 +160,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
               </>
             ) : (
               <>
-                <ShieldCheck size={14} /> Confirm and submit sealed bid
+                <ShieldCheck size={14} /> {isSmallValue ? 'Confirm and submit quotation' : 'Confirm and submit sealed bid'}
               </>
             )}
           </button>
@@ -165,12 +170,13 @@ function BidModal({ rfq, onClose, onSubmitted }) {
   }
 
   return (
-    <Modal title={`Bid on ${rfq.referenceNo}`} onClose={onClose}>
+    <Modal title={`${isSmallValue ? 'Quote for' : 'Bid on'} ${rfq.referenceNo}`} onClose={onClose}>
       <div className="mb-4 flex items-start gap-2 rounded border border-navy/10 bg-chip/40 p-3">
         <Lock size={14} className="mt-0.5 shrink-0 text-navy" />
         <p className="text-xs text-text-secondary">
-          Your price is sealed on submission and stays hidden from evaluators until the technical component is
-          rated &ldquo;passed&rdquo; (IRR Sec. 58). A bid above the ABC is rated failed.
+          {isSmallValue
+            ? 'Your quotation and price will be available to the committee after the recorded opening. Attach the offer you are making for these exact RFQ terms.'
+            : <>Your price is sealed on submission and stays hidden from evaluators until the technical component is rated &ldquo;passed&rdquo; (IRR Sec. 58). A bid above the ABC is rated failed.</>}
         </p>
       </div>
 
@@ -179,7 +185,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
       </p>
 
       <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-        Total bid price (₱)
+        {isSmallValue ? 'Total quoted price' : 'Total bid price'} (₱)
       </label>
       <input
         type="number"
@@ -195,6 +201,17 @@ function BidModal({ rfq, onClose, onSubmitted }) {
           <AlertTriangle size={12} /> This exceeds the ABC and would be rated failed.
         </p>
       )}
+
+      {isSmallValue && <div className="mt-4 space-y-3 rounded border border-border-muted p-3">
+        <div><p className="text-xs font-semibold text-navy">RFQ technical specifications and terms</p><p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-text-secondary">{rfq.svpTechnicalSpecifications}</p></div>
+        <label className="block text-xs font-medium text-text-secondary">Signed quotation and technical offer (PDF, PNG or JPEG)
+          <input required type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(event) => setTechnicalOffer(event.target.files?.[0] ?? null)} className="mt-1 block w-full text-xs" />
+        </label>
+        <label className="block text-xs font-medium text-text-secondary">Eligibility document bundle {rfq.svpEligibilityDueStage === 'offer' ? '(required with quotation)' : '(may be supplied at the specified later stage)'}
+          <input required={rfq.svpEligibilityDueStage === 'offer'} type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(event) => setEligibilityEvidence(event.target.files?.[0] ?? null)} className="mt-1 block w-full text-xs" />
+        </label>
+        <p className="text-xs text-text-faint">Accepted files are locked to this quotation with a submission time and SHA-256 checksum.</p>
+      </div>}
 
       <p className="mt-3 text-[11.5px] leading-relaxed text-text-faint">
         The next step emails a 6-digit code to your registered address. Your bid is not submitted until
@@ -213,7 +230,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
         </Button>
         <button
           type="button"
-          disabled={saving || !price || Number(price) <= 0 || overAbc}
+          disabled={saving || !price || Number(price) <= 0 || overAbc || (isSmallValue && (!technicalOffer || (rfq.svpEligibilityDueStage === 'offer' && !eligibilityEvidence)))}
           onClick={requestCode}
           className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-accent px-4 text-[12px] font-medium text-accent-fg disabled:opacity-60 sm:w-auto"
         >
@@ -230,10 +247,31 @@ function BidModal({ rfq, onClose, onSubmitted }) {
   )
 }
 
+function EligibilityEvidenceModal({ quotation, onClose, onSubmitted }) {
+  const [file, setFile] = useState(null)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  return <Modal title={`Eligibility evidence — ${quotation.referenceNo}`} onClose={onClose}>
+    <p className="mb-3 text-sm text-text-secondary">Submit the documents required by this RFQ as one PDF or image bundle. The file and its submission time will be locked to your quotation.</p>
+    <label className="block text-sm font-medium text-navy">Eligibility documents
+      <input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full text-xs" />
+    </label>
+    {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={!file || saving} onClick={async () => {
+      setSaving(true); setError('')
+      try { await biddingApi.uploadEligibilityEvidence(quotation.id, file); onSubmitted(); onClose() }
+      catch (err) { setError(err.response?.data?.message ?? 'The evidence could not be submitted.') }
+      finally { setSaving(false) }
+    }}>{saving ? 'Submitting…' : 'Submit evidence'}</Button></div>
+  </Modal>
+}
+
 export default function BidOpportunities() {
   const [rfqs, setRfqs] = useState([])
+  const [myQuotations, setMyQuotations] = useState([])
   const [profile, setProfile] = useState(null)
   const [bidding, setBidding] = useState(null)
+  const [eligibilityFor, setEligibilityFor] = useState(null)
   const [notice, setNotice] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
 
@@ -241,11 +279,12 @@ export default function BidOpportunities() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([biddingApi.fetchRfqs(), biddingApi.fetchMyVendorProfile()])
-      .then(([rfqData, profileData]) => {
+    Promise.all([biddingApi.fetchRfqs(), biddingApi.fetchMyVendorProfile(), biddingApi.fetchMyQuotations()])
+      .then(([rfqData, profileData, quotationData]) => {
         if (cancelled) return
         setRfqs(rfqData)
         setProfile(profileData)
+        setMyQuotations(quotationData)
       })
       .catch(() => {})
     return () => {
@@ -338,7 +377,7 @@ export default function BidOpportunities() {
                   </dl>
                   {rfq.status === 'published' && verified && (
                     <Button className="mt-4 w-full" size="md" icon={Gavel} onClick={() => setBidding(rfq)}>
-                      Submit bid
+                      {rfq.modeKey === 'smallValueProcurement' ? 'Submit quotation' : 'Submit bid'}
                     </Button>
                   )}
                 </article>
@@ -372,13 +411,13 @@ export default function BidOpportunities() {
                     </td>
                     <td className="px-4 py-3">
                       {rfq.status === 'published' && verified && (
-                        <button
-                          type="button"
+                        <Button
+                          size="table"
+                          icon={Gavel}
                           onClick={() => setBidding(rfq)}
-                          className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                         >
-                          <Gavel size={12} /> SUBMIT BID
-                        </button>
+                          {rfq.modeKey === 'smallValueProcurement' ? 'Submit quotation' : 'Submit bid'}
+                        </Button>
                       )}
                     </td>
                   </tr>
@@ -391,16 +430,31 @@ export default function BidOpportunities() {
         <Pagination {...paginationProps} label="opportunities" />
       </Card>
 
+      {myQuotations.length > 0 && <Card title="My submitted quotations" bodyClassName="">
+        <div className="divide-y divide-border-muted">{myQuotations.map((quotation) => {
+          const hasEligibility = quotation.evidence.some((document) => document.docType === 'svpEligibilityEvidence')
+          const maySubmitEligibility = !hasEligibility && ((quotation.eligibilityDueStage === 'evaluation' && quotation.rfqStatus === 'opened') || (quotation.eligibilityDueStage === 'beforeAward' && (quotation.rfqStatus === 'opened' || (quotation.rfqStatus === 'evaluated' && quotation.bidStatus === 'technicalPassed'))))
+          return <div key={quotation.id} className="space-y-2 p-4">
+            <p className="text-sm font-semibold text-navy">{quotation.referenceNo} — {quotation.title}</p>
+            <p className="text-xs text-text-secondary">Quoted {peso(quotation.totalBidPrice)} · submitted {new Date(quotation.submittedAt).toLocaleString('en-PH')}</p>
+            <div className="flex flex-wrap gap-3">{quotation.evidence.map((document) => <button key={document.id} type="button" className="text-xs text-info underline" onClick={() => downloadDocument(document.id, document.filename).catch(() => setNotice('Could not download the submitted evidence.'))}>{document.docType === 'svpTechnicalOffer' ? 'Technical offer' : 'Eligibility evidence'} · {document.filename}</button>)}</div>
+            <p className="text-xs text-text-faint">Eligibility documents due: {quotation.eligibilityDueStage === 'offer' ? 'with quotation' : quotation.eligibilityDueStage === 'evaluation' ? 'during evaluation' : 'before award notice'}. {hasEligibility ? 'Submitted and locked.' : 'Not yet submitted.'}</p>
+            {maySubmitEligibility && <Button size="sm" onClick={() => setEligibilityFor(quotation)}>Submit eligibility evidence</Button>}
+          </div>
+        })}</div>
+      </Card>}
+
       {bidding && (
         <BidModal
           rfq={bidding}
           onClose={() => setBidding(null)}
           onSubmitted={() => {
-            setNotice(`Sealed bid submitted for ${bidding.referenceNo}.`)
+            setNotice(`${bidding.modeKey === 'smallValueProcurement' ? 'Quotation' : 'Sealed bid'} submitted for ${bidding.referenceNo}.`)
             refresh()
           }}
         />
       )}
+      {eligibilityFor && <EligibilityEvidenceModal quotation={eligibilityFor} onClose={() => setEligibilityFor(null)} onSubmitted={() => { setNotice(`Eligibility evidence submitted for ${eligibilityFor.referenceNo}.`); refresh() }} />}
     </DashboardPage>
   )
 }

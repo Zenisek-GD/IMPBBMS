@@ -1,6 +1,6 @@
 import express from "express";
 import { getEvaluationPlan, saveEvaluationPlan, approveEvaluationPlan, declareEvaluatorConflict, returnEvaluationForCorrection, getEvaluationAdministration, requestCriteriaAmendment, approveCriteriaAmendment } from "../controllers/evaluationWorkflowController.js";
-import { updateRfqSchedule } from "../controllers/biddingController.js";
+import { updateRfqSchedule, updateSvpTerms } from "../controllers/biddingController.js";
 import { listTwg, declareTwgConflict, saveTwg } from "../controllers/twgController.js";
 import {
   listRfqs,
@@ -9,6 +9,8 @@ import {
   closeRfq,
   cancelRfq,
   submitBid,
+  listMyQuotations,
+  submitSvpEligibilityEvidence,
   requestBidSubmissionCode,
   verifyBidSubmissionCode,
   openBids,
@@ -24,6 +26,8 @@ import {
   listAwards,
 } from "../controllers/biddingController.js";
 import { requirePermission, requireAnyPermission } from "../middleware/permissionMiddleware.js";
+import { upload, describeUploadError } from "../services/documentStore.js";
+import { rateLimit } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 router.get("/rfqs/:id/evaluation-plan", requireAnyPermission("bidding.view", "bidding.publish", "bidding.evaluate", "bidding.technicalInput", "bidding.chairEvaluation"), getEvaluationPlan);
@@ -43,12 +47,16 @@ router.get(
 );
 router.post("/rfqs", requirePermission("bidding.publish"), createRfq);
 router.patch("/rfqs/:id/schedule", requirePermission("bidding.publish"), updateRfqSchedule);
+router.patch("/rfqs/:id/svp-terms", requirePermission("bidding.publish"), updateSvpTerms);
 router.get("/rfqs/:id/twg", requireAnyPermission("bidding.view", "bidding.evaluate", "bidding.technicalInput", "bidding.chairEvaluation", "audit.viewAll"), listTwg);
 router.post("/rfqs/:id/twg/declaration", requirePermission("bidding.technicalInput"), declareTwgConflict);
 router.post("/bids/:bidId/twg", requirePermission("bidding.technicalInput"), saveTwg);
 router.post("/rfqs/:id/publish", requirePermission("bidding.publish"), publishRfq);
 router.post("/rfqs/:id/close", requirePermission("bidding.publish"), closeRfq);
-router.post("/rfqs/:id/cancel", requirePermission("bidding.publish"), cancelRfq);
+// The controller requires an explicit HoPE decision once quotations exist or
+// the deadline/opening stage has passed; the publishing office can only cancel
+// an unanswered draft or live solicitation.
+router.post("/rfqs/:id/cancel", requireAnyPermission("bidding.publish", "bidding.award"), cancelRfq);
 
 // RA 12009 Sec. 64 — a failure of bidding is declared by the committee, not by
 // the office that publishes. Two failures on one project open Negotiated
@@ -72,7 +80,14 @@ router.post(
   requirePermission("bidding.submitBid"),
   verifyBidSubmissionCode
 );
-router.post("/rfqs/:id/bids", requirePermission("bidding.submitBid"), submitBid);
+const receiveQuotationEvidence = (req, res, next) => upload.fields([
+  { name: "technicalOffer", maxCount: 1 },
+  { name: "eligibilityEvidence", maxCount: 1 },
+])(req, res, (error) => error ? res.status(400).json({ message: describeUploadError(error) }) : next());
+router.post("/rfqs/:id/bids", requirePermission("bidding.submitBid"), rateLimit({ bucket: "upload", max: 60 }), receiveQuotationEvidence, submitBid);
+router.get("/my-quotations", requirePermission("bidding.submitBid"), listMyQuotations);
+const receiveEligibilityEvidence = (req, res, next) => upload.single("file")(req, res, (error) => error ? res.status(400).json({ message: describeUploadError(error) }) : next());
+router.post("/bids/:bidId/eligibility-evidence", requirePermission("bidding.submitBid"), rateLimit({ bucket: "upload", max: 60 }), receiveEligibilityEvidence, submitSvpEligibilityEvidence);
 router.post("/rfqs/:id/open", requirePermission("bidding.publish"), openBids);
 
 router.get(

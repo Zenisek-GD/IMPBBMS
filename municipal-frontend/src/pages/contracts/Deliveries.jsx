@@ -197,13 +197,13 @@ export default function Deliveries() {
                     </td>
                     <td className="px-4 py-3">
                       {delivery.status === 'reported' && (
-                        <button
-                          type="button"
+                        <Button
+                          size="table"
+                          variant="info"
                           onClick={() => setInspecting(delivery)}
-                          className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                         >
-                          INSPECT
-                        </button>
+                          Inspect
+                        </Button>
                       )}
                     </td>
                   </tr>

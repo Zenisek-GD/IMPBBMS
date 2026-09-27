@@ -6,7 +6,7 @@ import { TwgAssessment } from "../models/twgModel.js";
 import { ProcurementAttempt } from "../models/procurementAttemptModel.js";
 import { failureStatusLabel } from "../services/attemptPolicy.js";
 import { serializeAssessment } from "./twgController.js";
-import { scheduleError, weightError, assessmentCompliant, activeEvaluations, technicalAverage, COMPLIANCE_REQUIREMENTS } from "../services/evaluationPolicy.js";
+import { scheduleError, weightError, assessmentCompliant, activeEvaluations, technicalAverage, complianceRequirementsFor } from "../services/evaluationPolicy.js";
 import { EvaluationPlan } from "../models/evaluationWorkflowModel.js";
 import { workflowError, actorAudit } from "../services/workflowSupport.js";
 import { assertBacAction, assertNewAttemptAllowed, assertNoPendingFailure, ensureProcurementAttempt, snapshotAttemptOutcome, committeeSnapshot } from "../services/procurementGovernance.js";
@@ -14,8 +14,10 @@ import { sequelize } from "../models/db.js";
 import { Rfq, Bid, BidOpeningRecord, Evaluation, PostQualification, Award } from "../models/biddingModel.js";
 import { ProcurementMode } from "../models/procurementModeModel.js";
 import { Vendor } from "../models/vendorModel.js";
+import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
 import { PrHeader } from "../models/prModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
+import { Appropriation } from "../models/appropriationModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
 import { BacResolution, nextResolutionNo } from "../models/bacResolutionModel.js";
@@ -31,6 +33,9 @@ import {
   procurementAmountError,
 } from "../services/procurementThresholds.js";
 import { checkVendorEligibility } from "../services/vendorEligibility.js";
+import { svpQuotationsDisclosable } from "../services/svpDisclosure.js";
+import { svpRequirementsFrom, SVP_ELIGIBILITY_DUE_STAGES } from "../services/svpRequirements.js";
+import { checksumOf, safeFilename, validateFileContent } from "../services/documentStore.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { unresolvedProtestsFor } from "./protestController.js";
 import { ObserverInvitation, ObserverOrganization } from "../models/observerModel.js";
@@ -63,6 +68,8 @@ const serializeRfq = (rfq) => ({
   title: rfq.title,
   abc: Number(rfq.abc),
   category: rfq.category,
+  svpTechnicalSpecifications: rfq.mode?.key === "smallValueProcurement" ? rfq.svpTechnicalSpecifications : null,
+  svpEligibilityDueStage: rfq.mode?.key === "smallValueProcurement" ? rfq.svpEligibilityDueStage : null,
   publishDate: rfq.publishDate,
   ...scheduleSnapshot(rfq),
   scheduleApprovedAt: rfq.scheduleApprovedAt,
@@ -88,7 +95,7 @@ const serializeRfq = (rfq) => ({
 
 // `viewer` decides how much of a bid is disclosed. During blind evaluation the
 // vendor is replaced by the anonymous label and the price is withheld.
-const serializeBid = (bid, { blind, includeFinancial }) => ({
+const serializeBid = (bid, { blind, includeFinancial, discloseQuotation = false }) => ({
   id: bid.id,
   rfqId: bid.rfqId,
   blindLabel: bid.blindLabel,
@@ -99,7 +106,9 @@ const serializeBid = (bid, { blind, includeFinancial }) => ({
   vendorName: blind ? bid.blindLabel : (bid.vendor?.businessName ?? null),
   // IRR Sec. 58: the financial envelope is opened only after the technical
   // component is rated "passed".
-  totalBidPrice: includeFinancial && !bid.financialSealed ? Number(bid.totalBidPrice) : null,
+  // SVP quotations are disclosed after the recorded opening under IRR 34.3(f).
+  // The stored envelope flag is left intact for the existing evaluation flow.
+  totalBidPrice: discloseQuotation || (includeFinancial && !bid.financialSealed) ? Number(bid.totalBidPrice) : null,
   financialSealed: bid.financialSealed,
   averageScore: activeEvaluations(bid.evaluations).length ? Number(technicalAverage(bid.evaluations).toFixed(2)) : null,
   evaluationCount: activeEvaluations(bid.evaluations).length,
@@ -150,6 +159,20 @@ export const updateRfqSchedule = async (req, res) => {
     return row;
   });
   res.json({ ...serializeRfq(rfq), message: "Procurement schedule saved. Obtain schedule approval before publication." });
+};
+
+export const updateSvpTerms = async (req, res) => {
+  const rfq = await withAuditTransaction(async (transaction, audit) => {
+    const row = await Rfq.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE, include: [{ model: ProcurementMode, as: "mode" }] });
+    if (!row) throw workflowError("Procurement not found.", 404);
+    if (row.status !== "draft" || row.mode?.key !== "smallValueProcurement") throw workflowError("Only draft Small Value Procurement terms can be updated.", 409);
+    const before = { svpTechnicalSpecifications: row.svpTechnicalSpecifications, svpEligibilityDueStage: row.svpEligibilityDueStage };
+    const terms = svpRequirementsFrom(req.body, row.mode.key);
+    await row.update(terms, { transaction });
+    await audit(actorAudit(req, { actionType: "rfq.svpTermsChanged", entityRef: "rfq", entityId: row.id, summary: "Draft RFQ technical terms and eligibility-document timing updated.", beforeState: before, afterState: terms }));
+    return row;
+  });
+  res.json({ ...serializeRfq(rfq), message: "Draft RFQ terms saved for review before publication." });
 };
 
 export const listRfqs = async (req, res) => {
@@ -250,6 +273,7 @@ export const createRfq = async (req, res) => {
       title: title?.trim() || pr.purpose || `Procurement for ${pr.prNumber}`,
       abc,
       category: category ?? "goods",
+      ...svpRequirementsFrom(req.body, modeKey),
       closingDate,
       ...config,
       ...readProcurementSchedule(req.body, { mandatoryPrebid: requiresPrebidConference(abc, lgu, category ?? "goods") }),
@@ -260,7 +284,7 @@ export const createRfq = async (req, res) => {
       status: "draft",
     }, { transaction });
     const attempt = await ensureProcurementAttempt(created, { transaction, actorId: req.currentUser.id });
-    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate, ...config } }));
+    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate, ...config, ...(modeKey === "smallValueProcurement" ? { svpTechnicalSpecifications: created.svpTechnicalSpecifications, svpEligibilityDueStage: created.svpEligibilityDueStage } : {}) } }));
     return created;
   }));
 
@@ -333,6 +357,7 @@ const createEpaSolicitation = async (req, res) => {
       title: title?.trim() || appEntry.projectTitle,
       abc,
       category: category ?? "goods",
+      ...svpRequirementsFrom(req.body, mode.key),
       closingDate,
       ...config,
       ...readProcurementSchedule(req.body, { mandatoryPrebid: requiresPrebidConference(abc, lgu, category ?? "goods") }),
@@ -344,7 +369,7 @@ const createEpaSolicitation = async (req, res) => {
       status: "draft",
     }, { transaction });
     const attempt = await ensureProcurementAttempt(created, { transaction, actorId: req.currentUser.id });
-    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate, ...config } }));
+    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate, ...config, ...(mode.key === "smallValueProcurement" ? { svpTechnicalSpecifications: created.svpTechnicalSpecifications, svpEligibilityDueStage: created.svpEligibilityDueStage } : {}) } }));
     return created;
   }));
 
@@ -363,6 +388,7 @@ export const publishRfq = async (req, res) => {
     const row = await Rfq.findByPk(req.params.id, { ...rfqIncludes, transaction, lock: transaction.LOCK.UPDATE });
     if (!row) throw workflowError("RFQ/ITB not found.", 404);
     if (row.status !== "draft") throw workflowError(`Cannot publish from status "${row.status}".`);
+    if (row.mode?.key === "smallValueProcurement" && (!row.svpTechnicalSpecifications?.trim() || !SVP_ELIGIBILITY_DUE_STAGES.includes(row.svpEligibilityDueStage))) throw workflowError("Complete the SVP technical specifications and eligibility-document timing before publication.", 400);
     assertApprovedSchedule(row);
     readProcurementSchedule({}, { base: row, mandatoryPrebid: requiresPrebidConference(Number(row.abc), await getLguProfile(), row.category) });
     await assertApprovedEvaluationPlan(row, { transaction });
@@ -404,28 +430,88 @@ export const closeRfq = async (req, res) => {
 };
 
 export const cancelRfq = async (req, res) => {
-  const { reason } = req.body;
-  if (!reason?.trim()) return res.status(400).json({ message: "A cancellation reason is required." });
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+  if (!reason || reason.length > 2000) return res.status(400).json({ message: "Enter a cancellation reason of at most 2,000 characters." });
 
-  const rfq = await Rfq.findByPk(req.params.id, rfqIncludes);
-  if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
-  if (["awarded", "cancelled", "failed"].includes(rfq.status)) {
-    return res.status(409).json({ message: `Cannot cancel from status "${rfq.status}".` });
-  }
-
-  await withAuditTransaction(async (transaction, audit) => {
-    await rfq.reload({ transaction, lock: transaction.LOCK.UPDATE });
+  const result = await withAuditTransaction(async (transaction, audit) => {
+    const rfq = await Rfq.findByPk(req.params.id, { ...rfqIncludes, transaction, lock: transaction.LOCK.UPDATE });
+    if (!rfq) throw workflowError("RFQ/ITB not found.", 404);
     await assertNoPendingFailure(rfq, { transaction });
     if (["awarded", "cancelled", "failed"].includes(rfq.status)) throw workflowError("A completed or failed procurement attempt cannot be cancelled. Its outcome must remain in the history.");
     if (await Award.findOne({ where: { rfqId: rfq.id, status: { [Op.in]: ["pendingHopeApproval", "issued", "accepted"] } }, transaction })) throw workflowError("Resolve the award recommendation before cancelling this procurement.");
-    const beforeState = { status: rfq.status };
+
+    const hasQuotations = await Bid.count({ where: { rfqId: rfq.id }, transaction }) > 0;
+    const deadlineReached = rfq.status === "published" && new Date(rfq.closingDate) <= new Date();
+    const requiresHopeDecision = hasQuotations || deadlineReached || !["draft", "published"].includes(rfq.status) ||
+      (rfq.status === "published" && req.currentUser.Role?.key === "hope");
+    let cancellationDecision = null;
+    if (requiresHopeDecision) {
+      if (req.currentUser.Role?.key !== "hope" || !req.permissions.has("bidding.award")) throw workflowError("Only the HoPE may withdraw a solicitation after quotations were received or opened.", 403);
+      const factualFinding = typeof req.body?.factualFinding === "string" ? req.body.factualFinding.trim() : "";
+      const decisionReference = typeof req.body?.decisionReference === "string" ? req.body.decisionReference.trim() : "";
+      const supportingDocumentId = Number(req.body?.supportingDocumentId);
+      if (!factualFinding || factualFinding.length > 4000) throw workflowError("Record the procedural defect and its effect on fair evaluation in at most 4,000 characters.", 400);
+      if (!decisionReference || decisionReference.length > 255) throw workflowError("Enter the written HoPE decision reference in at most 255 characters.", 400);
+      if (!Number.isSafeInteger(supportingDocumentId) || supportingDocumentId <= 0) throw workflowError("Attach the factual review note to this RFQ before recording the HoPE decision.", 400);
+      const evidence = await Document.findByPk(supportingDocumentId, { attributes: DOCUMENT_METADATA_ATTRIBUTES, transaction });
+      if (!evidence || evidence.entityRef !== "rfq" || Number(evidence.entityId) !== Number(rfq.id) || evidence.docType !== "rfqCancellationEvidence") throw workflowError("Select the factual review note attached to this RFQ.", 400);
+      cancellationDecision = {
+        legalBasis: "Approved 2025 IRR of RA 12009, Section 70(b)",
+        action: "Reject quotations and do not award; withdraw defective solicitation",
+        decisionReference,
+        factualFinding,
+        decidedById: req.currentUser.id,
+        decidedByName: req.currentUser.name,
+        decidedAt: new Date(),
+        supportingDocument: { documentId: evidence.id, name: evidence.filename, checksum: evidence.checksum },
+        supplierFault: false,
+        priorAssessments: "Preserved as provisional records; no bidder is disqualified by this withdrawal",
+      };
+    } else if (!req.permissions.has("bidding.publish")) {
+      throw workflowError("Only the publishing office may cancel a draft or an unanswered solicitation.", 403);
+    }
+
+    const beforeState = { status: rfq.status, hasQuotations, deadlineReached };
     const snapshot = await snapshotAttemptOutcome(rfq, { transaction });
     const attempt = await ensureProcurementAttempt(rfq, { transaction, actorId: req.currentUser.id });
-    await rfq.update({ status: "cancelled", cancellationReason: reason.trim() }, { transaction });
-    await attempt.update({ status: "cancelled", completedAt: new Date(), nextAction: "Review procurement preparation", outcomeSnapshot: { ...snapshot, cancellationReason: reason.trim() } }, { transaction });
-    await audit(actorAudit(req, { actionType: "rfq.cancelled", entityRef: "rfq", entityId: rfq.id, summary: "Procurement cancelled with a recorded reason. Attempt records are preserved.", beforeState, afterState: { status: "cancelled", reason: reason.trim(), attemptNumber: attempt.attemptNumber } }));
+    await rfq.update({ status: "cancelled", cancellationReason: reason }, { transaction });
+    await attempt.update({
+      status: "cancelled", completedAt: new Date(),
+      nextAction: "Review procurement preparation before any new solicitation",
+      outcomeSnapshot: { ...snapshot, cancellationReason: reason, cancellationDecision },
+    }, { transaction });
+    await audit(actorAudit(req, {
+      actionType: requiresHopeDecision ? "rfq.withdrawnByHope" : "rfq.cancelled",
+      entityRef: "rfq", entityId: rfq.id,
+      summary: requiresHopeDecision ? "HoPE withdrew a procedurally defective solicitation without attributing fault to suppliers; the abstract, quotations and assessments remain in the history." : "Unanswered solicitation cancelled with a recorded reason.",
+      beforeState, afterState: { status: "cancelled", reason, attemptNumber: attempt.attemptNumber, cancellationDecision },
+    }));
+    return { rfqId: rfq.id, referenceNo: rfq.referenceNo, wasPublished: beforeState.status !== "draft", requiresHopeDecision };
   });
-  res.json(serializeRfq(await Rfq.findByPk(rfq.id, rfqIncludes)));
+
+  if (result.wasPublished) {
+    try {
+      // Publishing this RFQ notified every verified supplier; reach that same
+      // audience and every respondent when the opportunity is withdrawn.
+      const [registeredVendors, respondents] = await Promise.all([
+        Vendor.findAll({ where: { registrationStatus: "verified" }, attributes: ["userId"] }),
+        Bid.findAll({ where: { rfqId: result.rfqId }, include: [{ model: Vendor, as: "vendor", attributes: ["userId"] }] }),
+      ]);
+      await notifyUsers([...registeredVendors.map((vendor) => vendor.userId), ...respondents.map((bid) => bid.vendor?.userId)], {
+        type: NOTIFICATION_EVENTS.RFQ_WITHDRAWN,
+        title: `Opportunity withdrawn: ${result.referenceNo}`,
+        body: result.requiresHopeDecision
+          ? "The HoPE withdrew this solicitation because its published requirements were incomplete. Received quotations remain in the record and no supplier is disqualified by this withdrawal. Any replacement RFQ will have a new deadline."
+          : "This solicitation was cancelled before quotations were received. Review new opportunities for any replacement RFQ.",
+        link: "/supplier/opportunities", refEntity: "rfq", refId: result.rfqId, severity: "warning",
+      });
+    } catch (error) {
+      // The official decision has committed; a notice failure must not turn it
+      // into an apparent failed cancellation or tempt a duplicate decision.
+      console.error("[rfq.cancel] supplier notification failed:", error.name);
+    }
+  }
+  res.json({ ...serializeRfq(await Rfq.findByPk(result.rfqId, rfqIncludes)), message: result.requiresHopeDecision ? "HoPE withdrawal recorded. Quotations and provisional assessments remain in history without supplier fault. Review the project before any new RFQ." : "RFQ/ITB cancelled. Its attempt history remains available." });
 };
 
 // ── Bid submission ──────────────────────────────────────────────────────────
@@ -523,6 +609,22 @@ export const submitBid = async (req, res) => {
   } = req.body;
   const rfq = await Rfq.findByPk(req.params.id);
   if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
+  const mode = await ProcurementMode.findByPk(rfq.procurementModeId);
+  if (!mode) return res.status(409).json({ message: "The procurement mode for this opportunity is unavailable." });
+  const securityRequired = mode.key !== "smallValueProcurement" && mode.requiresBidSecurity;
+  const isSmallValue = mode.key === "smallValueProcurement";
+  const offerFile = req.files?.technicalOffer?.[0];
+  const eligibilityFile = req.files?.eligibilityEvidence?.[0];
+  if (!isSmallValue && (offerFile || eligibilityFile)) return res.status(400).json({ message: "SVP quotation files cannot be attached to this procurement mode." });
+  if (isSmallValue) {
+    if (!rfq.svpTechnicalSpecifications?.trim() || !SVP_ELIGIBILITY_DUE_STAGES.includes(rfq.svpEligibilityDueStage)) return res.status(409).json({ message: "This RFQ does not specify the technical terms and eligibility-document timing needed for quotation submission." });
+    if (!offerFile) return res.status(400).json({ message: "Attach the signed technical offer or quotation for this RFQ." });
+    if (rfq.svpEligibilityDueStage === "offer" && !eligibilityFile) return res.status(400).json({ message: "This RFQ requires the eligibility documents with the quotation." });
+    for (const file of [offerFile, eligibilityFile].filter(Boolean)) {
+      const contentError = validateFileContent(file);
+      if (contentError) return res.status(400).json({ message: contentError });
+    }
+  }
 
   if (rfq.status !== "published") {
     return res.status(409).json({ message: "This opportunity is not open for bids." });
@@ -576,19 +678,17 @@ export const submitBid = async (req, res) => {
   }
 
   // ── Bid security ───────────────────────────────────────────────────────────
-  // A bid without security is not a commitment — the bidder can walk away from
-  // a winning bid at no cost, which is exactly what the instrument exists to
-  // prevent. Required at submission, since a security posted after the deadline
-  // secures nothing.
-  const form = bidSecurityForm ?? "suretyBond";
-  if (!SECURITY_FORMS.includes(form)) {
+  // SVP quotations do not require bid security. Other modes follow their
+  // configured bid-security requirement and retain the existing form handling.
+  const form = securityRequired ? bidSecurityForm ?? "suretyBond" : null;
+  if (securityRequired && !SECURITY_FORMS.includes(form)) {
     return res.status(400).json({
       message: "Unknown bid security form.",
       accepted: SECURITY_FORMS,
     });
   }
 
-  const requiredAmount = requiredBidSecurity(rfq.abc, form);
+  const requiredAmount = securityRequired ? requiredBidSecurity(rfq.abc, form) : null;
 
   // ── Email verification ────────────────────────────────────────────────────
   // Spent here, after every other check has passed, so a rejected bid does not
@@ -617,33 +717,56 @@ export const submitBid = async (req, res) => {
     throw workflowError("Bid submission must be confirmed with the code we email you. Request a new code and try again.", spent.status, { requiresOtp: true });
   }
 
+  const submittedAt = new Date();
   const created = await Bid.create({
     rfqId: rfq.id,
     vendorId: vendor.id,
     technicalSubmitted: true,
     financialSealed: true, // stays sealed until the technical component passes
     totalBidPrice: price,
-    submittedAt: new Date(),
+    submittedAt,
     status: "submitted",
   }, { transaction });
 
-  // A Securing Declaration carries no deposit — the bidder's undertaking is the
-  // security — so its amount is legitimately zero.
-  await Security.create({
-    type: "bid",
-    form,
-    amount: requiredAmount,
-    percentage: BID_SECURITY_RATES[form] ?? 0,
-    referenceNo: bidSecurityReference ?? null,
-    issuer: bidSecurityIssuer ?? null,
-    postedAt: new Date(),
-    validUntil: rfq.closingDate,
-    status: "posted",
-    entityRef: "bid",
-    entityId: created.id,
-    vendorId: vendor.id,
-    recordedById: req.currentUser.id,
-  }, { transaction });
+  const evidence = [];
+  if (isSmallValue) {
+    for (const [file, docType] of [[offerFile, "svpTechnicalOffer"], [eligibilityFile, "svpEligibilityEvidence"]]) {
+      if (!file) continue;
+      const document = await Document.create({
+        filename: safeFilename(file.originalname),
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        content: file.buffer,
+        checksum: checksumOf(file.buffer),
+        entityRef: "bid",
+        entityId: created.id,
+        docType,
+        label: docType === "svpTechnicalOffer" ? "Submitted technical offer" : "Submitted eligibility evidence",
+        uploadedById: req.currentUser.id,
+        uploadedAt: submittedAt,
+      }, { transaction });
+      evidence.push({ documentId: document.id, docType, checksum: document.checksum, submittedAt });
+    }
+  }
+
+  if (securityRequired) {
+    // A Securing Declaration carries no deposit; its undertaking is the security.
+    await Security.create({
+      type: "bid",
+      form,
+      amount: requiredAmount,
+      percentage: BID_SECURITY_RATES[form] ?? 0,
+      referenceNo: bidSecurityReference ?? null,
+      issuer: bidSecurityIssuer ?? null,
+      postedAt: new Date(),
+      validUntil: rfq.closingDate,
+      status: "posted",
+      entityRef: "bid",
+      entityId: created.id,
+      vendorId: vendor.id,
+      recordedById: req.currentUser.id,
+    }, { transaction });
+  }
 
   // Workflow requirement 11: bid submissions.
   //
@@ -658,7 +781,7 @@ export const submitBid = async (req, res) => {
     actionType: AUDIT_ACTIONS.BID_SUBMITTED,
     entityRef: "bid",
     entityId: created.id,
-    summary: `${vendor.businessName} submitted a bid for ${rfq.referenceNo}`,
+    summary: `${vendor.businessName} submitted a ${mode.key === "smallValueProcurement" ? "quotation" : "bid"} for ${rfq.referenceNo}`,
     afterState: {
       rfqId: rfq.id,
       rfqReference: rfq.referenceNo,
@@ -669,8 +792,8 @@ export const submitBid = async (req, res) => {
       businessName: vendor.businessName,
       totalBidPrice: price,
       abc: Number(rfq.abc),
-      bidSecurityForm: form,
-      bidSecurityAmount: requiredAmount,
+      ...(securityRequired ? { bidSecurityForm: form, bidSecurityAmount: requiredAmount } : {}),
+      ...(isSmallValue ? { evidence, eligibilityDueStage: rfq.svpEligibilityDueStage } : {}),
       // The fact of verification, not the code.
       emailVerified: true,
     },
@@ -682,12 +805,66 @@ export const submitBid = async (req, res) => {
     id: bid.id,
     status: bid.status,
     submittedAt: bid.submittedAt,
-    bidSecurity: {
-      form,
-      amount: requiredAmount,
-      percentOfAbc: BID_SECURITY_RATES[form] ?? 0,
-    },
+    ...(securityRequired
+      ? { bidSecurity: { form, amount: requiredAmount, percentOfAbc: BID_SECURITY_RATES[form] ?? 0 } }
+      : {}),
   });
+};
+
+export const listMyQuotations = async (req, res) => {
+  const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
+  if (!vendor) return res.json([]);
+  const bids = await Bid.findAll({
+    where: { vendorId: vendor.id, status: { [Op.ne]: "withdrawn" } },
+    include: [{ model: Rfq, as: "rfq", include: [{ model: ProcurementMode, as: "mode" }] }],
+    order: [["submittedAt", "DESC"]],
+  });
+  const svpBids = bids.filter((bid) => bid.rfq?.mode?.key === "smallValueProcurement");
+  const evidence = svpBids.length ? await Document.findAll({
+    where: { entityRef: "bid", entityId: { [Op.in]: svpBids.map((bid) => bid.id) }, docType: { [Op.in]: ["svpTechnicalOffer", "svpEligibilityEvidence"] } },
+    attributes: DOCUMENT_METADATA_ATTRIBUTES,
+  }) : [];
+  res.json(svpBids.map((bid) => ({
+    id: bid.id,
+    rfqId: bid.rfqId,
+    referenceNo: bid.rfq.referenceNo,
+    title: bid.rfq.title,
+    rfqStatus: bid.rfq.status,
+    bidStatus: bid.status,
+    submittedAt: bid.submittedAt,
+    totalBidPrice: Number(bid.totalBidPrice),
+    eligibilityDueStage: bid.rfq.svpEligibilityDueStage,
+    evidence: evidence.filter((document) => document.entityId === bid.id).map(({ id, filename, checksum, docType, uploadedAt }) => ({ id, filename, checksum, docType, uploadedAt })),
+  })));
+};
+
+export const submitSvpEligibilityEvidence = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: "Attach the eligibility document bundle." });
+  const contentError = validateFileContent(req.file);
+  if (contentError) return res.status(400).json({ message: contentError });
+  const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
+  if (!vendor) return res.status(403).json({ message: "A verified supplier account is required." });
+  const document = await withAuditTransaction(async (transaction, audit) => {
+    const bid = await Bid.findByPk(req.params.bidId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!bid || bid.vendorId !== vendor.id) throw workflowError("This quotation is unavailable to your account.", 403);
+    const rfq = await Rfq.findByPk(bid.rfqId, { include: [{ model: ProcurementMode, as: "mode" }], transaction });
+    if (rfq?.mode?.key !== "smallValueProcurement" || bid.status === "withdrawn") throw workflowError("Eligibility evidence can be added only to your active SVP quotation.", 409);
+    if (!SVP_ELIGIBILITY_DUE_STAGES.includes(rfq.svpEligibilityDueStage)) throw workflowError("This earlier RFQ did not state an eligibility-document due stage, so a late upload cannot be accepted.", 409);
+    if (rfq.svpEligibilityDueStage === "offer") throw workflowError("This RFQ required eligibility evidence with the original quotation. Late files cannot be added.", 409);
+    if (rfq.svpEligibilityDueStage === "evaluation" && rfq.status !== "opened") throw workflowError("Submit the eligibility evidence while quotation evaluation is open.", 409);
+    if (rfq.svpEligibilityDueStage === "beforeAward" && !["opened", "evaluated"].includes(rfq.status)) throw workflowError("Eligibility evidence is accepted before the award notice is issued.", 409);
+    if (rfq.status === "evaluated" && bid.status !== "technicalPassed") throw workflowError("Eligibility evidence after evaluation is accepted for quotations proceeding to supplier verification.", 409);
+    if (await Document.findOne({ where: { entityRef: "bid", entityId: bid.id, docType: "svpEligibilityEvidence" }, transaction })) throw workflowError("Eligibility evidence is already submitted and cannot be replaced.", 409);
+    const created = await Document.create({
+      filename: safeFilename(req.file.originalname), mimeType: req.file.mimetype,
+      sizeBytes: req.file.size, content: req.file.buffer, checksum: checksumOf(req.file.buffer),
+      entityRef: "bid", entityId: bid.id, docType: "svpEligibilityEvidence", label: "Submitted eligibility evidence",
+      uploadedById: req.currentUser.id, uploadedAt: new Date(),
+    }, { transaction });
+    await audit(actorAudit(req, { actionType: "bidding.eligibilityEvidenceSubmitted", entityRef: "bid", entityId: bid.id, summary: "Supplier submitted the RFQ-specific eligibility evidence.", afterState: { rfqId: rfq.id, documentId: created.id, checksum: created.checksum, uploadedAt: created.uploadedAt, dueStage: rfq.svpEligibilityDueStage } }));
+    return created;
+  });
+  res.status(201).json({ id: document.id, checksum: document.checksum, uploadedAt: document.uploadedAt, message: "Eligibility evidence submitted and locked." });
 };
 
 // ── Bid opening ─────────────────────────────────────────────────────────────
@@ -759,6 +936,7 @@ export const openBids = async (req, res) => {
 export const abstractOfBids = async (req, res) => {
   const rfq = await Rfq.findByPk(req.params.id, rfqIncludes);
   if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
+  const isSmallValue = rfq.mode?.key === "smallValueProcurement";
 
   // The abstract is prepared after the deadline has passed — before that it
   // would disclose who has bid and at what, while bidding is still open.
@@ -768,20 +946,25 @@ export const abstractOfBids = async (req, res) => {
     });
   }
 
+  const opening = await BidOpeningRecord.findOne({
+    where: { rfqId: rfq.id },
+    include: [{ model: User, as: "openedBy", attributes: ["id", "name"] }],
+  });
+
+  // Keep submitted quotations confidential until the scheduled opening is
+  // recorded, then show the respondents and prices required by IRR 34.3(f).
+  if (isSmallValue && !svpQuotationsDisclosable(rfq, opening)) {
+    return res.status(409).json({ message: "The Abstract of Quotations is available after the scheduled quotation opening is recorded." });
+  }
+
   const bids = await Bid.findAll({
     where: { rfqId: rfq.id },
     include: [{ model: Vendor, as: "vendor" }, { model: Evaluation, as: "evaluations" }],
     order: [["submittedAt", "ASC"]],
   });
 
-  const opening = await BidOpeningRecord.findOne({
-    where: { rfqId: rfq.id },
-    include: [{ model: User, as: "openedBy", attributes: ["id", "name"] }],
-  });
-
-  // Identities stay masked while scoring is open, exactly as they are on every
-  // other surface — the abstract does not become a way around the blind.
-  const blind = isBlindStage(rfq);
+  // Competitive bidding keeps its existing blind evaluation disclosure rule.
+  const blind = !isSmallValue && isBlindStage(rfq);
 
   // Observers are invited to each stage separately (pre-bid conference,
   // eligibility checking, preliminary examination, evaluation, post-
@@ -814,6 +997,7 @@ export const abstractOfBids = async (req, res) => {
     abc: Number(rfq.abc),
     category: rfq.category,
     mode: rfq.mode?.name ?? null,
+    modeKey: rfq.mode?.key ?? null,
     closingDate: rfq.closingDate,
   openingDate: rfq.openingDate,
   qualityWeight: rfq.category === "consulting" ? Number(rfq.qualityWeight) : null,
@@ -829,9 +1013,9 @@ export const abstractOfBids = async (req, res) => {
     entries: bids.map((bid) => ({
       blindLabel: bid.blindLabel,
       bidderName: blind ? bid.blindLabel : (bid.vendor?.businessName ?? null),
-      // The financial envelope stays sealed until the technical component
-      // passes (IRR Sec. 58), so the abstract shows what is lawfully open.
-      totalBidPrice: !blind && !bid.financialSealed ? Number(bid.totalBidPrice) : null,
+      // The SVP abstract records every quotation, including one later found
+      // noncompliant. Other modes retain their existing envelope disclosure.
+      totalBidPrice: isSmallValue || (!blind && !bid.financialSealed) ? Number(bid.totalBidPrice) : null,
       rating: activeEvaluations(bid.evaluations).length ? Number(technicalAverage(bid.evaluations).toFixed(2)) : null,
       status: bid.status,
       submittedAt: bid.submittedAt,
@@ -849,10 +1033,15 @@ export const abstractOfBids = async (req, res) => {
 // ── Evaluation (blind) ──────────────────────────────────────────────────────
 
 export const listBidsForRfq = async (req, res) => {
-  const rfq = await Rfq.findByPk(req.params.id);
+  const rfq = await Rfq.findByPk(req.params.id, { include: [{ model: ProcurementMode, as: "mode" }] });
   if (!rfq) return res.status(404).json({ message: "RFQ/ITB not found." });
 
-  const blind = isBlindStage(rfq);
+  const isSmallValue = rfq.mode?.key === "smallValueProcurement";
+  const opening = isSmallValue ? await BidOpeningRecord.findOne({
+    where: { rfqId: rfq.id }, attributes: ["id", "openedAt"],
+  }) : null;
+  const quotationOpened = isSmallValue && svpQuotationsDisclosable(rfq, opening);
+  const blind = isSmallValue ? !quotationOpened : isBlindStage(rfq);
   const evaluationPlan = rfq.category === "consulting" ? await EvaluationPlan.findOne({ where: { rfqId: rfq.id } }) : null;
   const bids = await Bid.findAll({
     where: { rfqId: rfq.id },
@@ -863,24 +1052,36 @@ export const listBidsForRfq = async (req, res) => {
     ],
     order: [["blindLabel", "ASC"]],
   });
+  const evidence = quotationOpened && bids.length ? await Document.findAll({
+    where: { entityRef: "bid", entityId: { [Op.in]: bids.map((bid) => bid.id) }, docType: { [Op.in]: ["svpTechnicalOffer", "svpEligibilityEvidence"] } },
+    attributes: DOCUMENT_METADATA_ATTRIBUTES,
+  }) : [];
 
   res.json({
     blind,
+    quotationOpened,
     category: rfq.category,
     evaluationMethod: rfq.category === "consulting" ? "qualityPrice" : "compliance",
     evaluationPlan,
-    complianceRequirements: COMPLIANCE_REQUIREMENTS[rfq.category] ?? [],
+    complianceRequirements: complianceRequirementsFor(rfq.category, rfq.mode?.key),
     qualityWeight: rfq.category === "consulting" ? Number(rfq.qualityWeight) : null,
     financialWeight: rfq.category === "consulting" ? Number(rfq.financialWeight) : null,
     consultingPassingScore: Number(rfq.consultingPassingScore),
     twgRequired: rfq.twgRequired,
     // Say plainly why identities are hidden, so the UI doesn't have to guess.
-    blindNotice: blind
+    blindNotice: quotationOpened
+      ? "Small Value Procurement quotations were opened. Respondent names and quoted prices are available while the committee reviews compliance."
+      : blind
       ? "Bidder identities are masked until the BAC Chairperson closes evaluation."
       : null,
-    bids: bids.map((bid) =>
-      serializeBid(bid, { blind, includeFinancial: !blind || bid.status === "technicalPassed" })
-    ),
+    bids: bids.map((bid) => ({
+      ...serializeBid(bid, {
+        blind,
+        includeFinancial: isSmallValue ? quotationOpened : !blind || bid.status === "technicalPassed",
+        discloseQuotation: quotationOpened,
+      }),
+      evidence: quotationOpened ? evidence.filter((document) => document.entityId === bid.id).map(({ id, filename, checksum, docType, uploadedAt }) => ({ id, filename, checksum, docType, uploadedAt })) : [],
+    })),
   });
 };
 
@@ -927,9 +1128,15 @@ export const submitPostQualification = async (req, res) => {
 
   await withAuditTransaction(async (transaction, audit) => {
     const currentRfq = await Rfq.findByPk(bid.rfqId, { transaction, lock: transaction.LOCK.UPDATE });
+    const mode = await ProcurementMode.findByPk(currentRfq.procurementModeId, { transaction });
     await bid.reload({ transaction });
     await assertNoPendingFailure(currentRfq, { transaction });
     if (currentRfq.status !== "evaluated" || bid.status !== "technicalPassed") throw workflowError("The bid status changed. Reload before recording post-qualification.");
+    if (mode?.key === "smallValueProcurement" && result === "passed") {
+      const evidence = await Document.findAll({ where: { entityRef: "bid", entityId: bid.id, docType: { [Op.in]: ["svpTechnicalOffer", "svpEligibilityEvidence"] } }, attributes: ["docType"], transaction });
+      if (!["svpTechnicalOffer", "svpEligibilityEvidence"].every((type) => evidence.some((document) => document.docType === type))) throw workflowError("Review the submitted technical offer and eligibility evidence before recording a compliant supplier verification.");
+      if (!["legal", "technical", "financial"].every((key) => checklist?.[key] === "ok") || !remarks?.trim()) throw workflowError("Record compliant legal, technical and financial findings with written justification before passing supplier verification.", 400);
+    }
     const candidates = await Bid.findAll({ where: { rfqId: bid.rfqId }, include: [{ model: Evaluation, as: "evaluations" }], transaction });
     if (candidates.some((candidate) => candidate.evaluations.some((row) => row.status === "returned"))) throw workflowError("Complete returned evaluations before post-qualification.");
     const entitled = rankBids(candidates, currentRfq.category).ranked[0];
@@ -1047,12 +1254,11 @@ export const recommendAward = async (req, res) => {
   }
 
   // ── The mode decides how many offers make a valid contest ──────────────────
-  // Competitive Bidding needs a competition; Small Value Procurement needs
-  // three quotations; Direct Contracting needs one, because it is single-source
-  // by definition. Awarding a "competitive" bidding on a single offer is a
-  // failure of bidding, not an award.
+  // Small Value Procurement requests quotations from at least three qualified
+  // suppliers, but one received quotation may proceed to evaluation (IRR Sec.
+  // 34.1 and 34.3(c)). The stored mode value may predate this correction.
   const mode = bid.rfq?.mode;
-  const minimumOffers = mode?.minimumOffers ?? 2;
+  const minimumOffers = mode?.key === "smallValueProcurement" ? 1 : (mode?.minimumOffers ?? 2);
   const offersReceived = await Bid.count({
     where: { rfqId: bid.rfqId, status: { [Op.ne]: "withdrawn" } },
   });
@@ -1216,6 +1422,55 @@ export const approveAward = async (req, res) => {
           "contract may be awarded until the appropriation ordinance is enacted and the plan line is " +
           "finalised against it (RA 12009; IRR Sec. 7.7.5).",
         earlyProcurement: true,
+      });
+    }
+  }
+
+  // An ordinary requisition can also be raised against next year's FINAL APP
+  // after its annual ordinance is enacted in the current year. Enactment does
+  // not make that annual budget effective early: LGC Sec. 320 starts it on the
+  // first day of the ensuing calendar year. Keep the BAC recommendation pending
+  // until the fiscal-year funding behind the requisition is actually effective.
+  if (award.rfq?.prHeaderId) {
+    const pr = await PrHeader.findByPk(award.rfq.prHeaderId, {
+      include: [{ model: AppEntry, as: "appEntry" }],
+    });
+    const appEntry = pr?.appEntry;
+    const appropriation = appEntry?.appropriationId
+      ? await Appropriation.findByPk(appEntry.appropriationId)
+      : null;
+    const appYear = Number(appEntry?.fiscalYear);
+    const appropriationYear = Number(appropriation?.fiscalYear);
+    const localYear = Number(new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Manila", year: "numeric",
+    }).format(new Date()));
+    if (appEntry && appropriation && appYear !== appropriationYear) {
+      return res.status(409).json({
+        code: "AWARD_FUNDING_YEAR_MISMATCH",
+        message: `The final APP is for FY ${appYear}, but its appropriation is for FY ${appropriationYear}. Correct the funding lineage before approving this award.`,
+      });
+    }
+    if (appYear > localYear || appropriationYear > localYear) {
+      if (appEntry?.planCycle !== "final" || appEntry.planStage !== "finalApp" ||
+          !["approved", "locked"].includes(appEntry.status) ||
+          !appropriation || appropriation.status !== "enacted" || appYear !== appropriationYear) {
+        return res.status(409).json({
+          code: "AWARD_FUNDING_NOT_FINAL",
+          message: "The next-year award must wait for a matching approved final APP and enacted appropriation.",
+        });
+      }
+      if (appropriation.type !== "annual") {
+        return res.status(409).json({
+          code: "AWARD_FUNDING_EFFECTIVITY_UNVERIFIED",
+          fundingFiscalYear: appYear,
+          message: `The linked appropriation is recorded for FY ${appYear}, which has not begun. Its effectivity must be established before the HoPE may issue the Notice of Award.`,
+        });
+      }
+      return res.status(409).json({
+        code: "AWARD_FUNDING_NOT_EFFECTIVE",
+        fundingFiscalYear: appYear,
+        effectiveOn: `${appYear}-01-01`,
+        message: `The FY ${appYear} annual funding does not take effect until January 1, ${appYear}. Keep the BAC recommendation pending; the HoPE cannot issue the Notice of Award yet.`,
       });
     }
   }

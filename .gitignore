@@ -11,3 +11,11 @@
 **/backup-*.sql
 **/*.dump
 security-artifacts/
+
+# Local agent/tool caches and raw guide-production workspace. These are not
+# application runtime assets and must not be published with the project.
+/.agents/
+/.codex/
+/.vite/
+/guide-preview/
+/impeccable/

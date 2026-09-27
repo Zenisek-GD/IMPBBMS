@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Upload, Check, Download, Trash2, Loader2 } from 'lucide-react'
 import * as documentsApi from '../../api/documents'
 import { ACCEPTED_EXTENSIONS, MAX_UPLOAD_MB, formatBytes } from '../../api/documents'
+import Button from './Button'
 
 // One required document: upload, replace, download, or remove. `existing` is
 // the stored Document record for this slot, or null if nothing is attached.
@@ -77,16 +78,18 @@ export default function DocumentSlot({
 
             {!disabled && (
               <>
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => inputRef.current?.click()}
                   disabled={busy}
-                  className="min-h-11 px-2 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                 >
-                  REPLACE
-                </button>
-                <button
-                  type="button"
+                  Replace
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  icon={Trash2}
                   onClick={async () => {
                     setBusy(true)
                     await documentsApi.deleteDocument(existing.id).catch(() => {})
@@ -94,10 +97,7 @@ export default function DocumentSlot({
                     onChanged?.()
                   }}
                   aria-label="Remove document"
-                  className="flex min-h-11 min-w-11 items-center justify-center text-text-faint hover:text-danger"
-                >
-                  <Trash2 size={13} />
-                </button>
+                />
               </>
             )}
           </>

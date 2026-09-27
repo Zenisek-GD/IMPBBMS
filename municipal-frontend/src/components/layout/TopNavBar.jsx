@@ -25,7 +25,7 @@ import BrandMark from '../brand/BrandMark'
 // ── DYNAMIC SYSTEM NAME ─────────────────────────────────────────────────────
 // The wordmark is configurable by the system administrator through System
 // Settings → Branding. It falls back to "ProcureNance" when no override is set.
-export default function TopNavBar({ sections = [], lguName, systemName, onOpenNavigation }) {
+export default function TopNavBar({ sections = [], lguName, systemName, onOpenNavigation, navigationOpen = false }) {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [noMatch, setNoMatch] = useState(false)
@@ -41,7 +41,7 @@ export default function TopNavBar({ sections = [], lguName, systemName, onOpenNa
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-black/20 bg-brand px-3 sm:gap-4 sm:px-5">
       <div className="flex min-w-0 items-center gap-3 sm:gap-5">
-        <button type="button" aria-label="Open navigation" onClick={onOpenNavigation} className="flex h-11 w-11 shrink-0 items-center justify-center text-brand-fg md:h-9 md:w-9"><Menu size={20} /></button>
+        <button type="button" aria-label="Open navigation" aria-controls="mobile-navigation-drawer" aria-expanded={navigationOpen} onClick={onOpenNavigation} className="flex h-11 w-11 shrink-0 items-center justify-center text-brand-fg md:hidden"><Menu size={20} /></button>
         <BrandMark priority className="size-9 sm:size-10" alt="" />
         <div className="flex min-w-0 flex-col leading-tight">
           <span title={systemName || 'ProcureNance'} className="truncate text-[17px] font-semibold tracking-[-0.01em] text-brand-fg">{systemName || 'ProcureNance'}</span>

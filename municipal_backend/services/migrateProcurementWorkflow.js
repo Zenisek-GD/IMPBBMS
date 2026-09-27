@@ -15,7 +15,7 @@ export const migrateProcurementWorkflow = async () => {
   const qi = sequelize.getQueryInterface();
   const tables = new Set((await qi.showAllTables()).map((row) => typeof row === "string" ? row.toLowerCase() : row.tableName.toLowerCase()));
   const additions = [
-    [Rfq, ["openingDate", "qualityWeight", "financialWeight", "consultingPassingScore", "twgRequired"]],
+    [Rfq, ["openingDate", "qualityWeight", "financialWeight", "consultingPassingScore", "twgRequired", "svpTechnicalSpecifications", "svpEligibilityDueStage"]],
     [Bid, ["qualityScore", "financialScore", "combinedScore"]],
     [Evaluation, ["noConflictDeclared", "declaredAt"]],
   ];

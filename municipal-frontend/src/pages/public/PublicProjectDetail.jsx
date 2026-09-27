@@ -20,6 +20,7 @@ import ReportIssueButton from '../../components/public/ReportIssueButton'
 import PublicFooter from '../../components/public/PublicFooter'
 import ProjectTimeline from '../../components/public/ProjectTimeline'
 import SortableTh, { Th } from '../../components/ui/SortableTh'
+import Button from '../../components/ui/Button'
 
 const peso = (value) =>
   value === null || value === undefined
@@ -526,7 +527,7 @@ export default function PublicProjectDetail() {
               ) : extras.timelineFailed ? (
                 <div role="alert" className="px-4 py-10 text-center text-sm text-danger">
                   <p>The timeline could not be loaded. Please try again.</p>
-                  <button type="button" className="mt-2 underline" onClick={retryExtras}>Retry</button>
+                  <Button variant="secondary" size="sm" className="mt-3" onClick={retryExtras}>Retry</Button>
                 </div>
               ) : timeline ? (
                 <ProjectTimeline
@@ -549,7 +550,7 @@ export default function PublicProjectDetail() {
               ) : extras.documentsFailed ? (
                 <div role="alert" className="px-4 py-10 text-center text-sm text-danger">
                   <p>Documents could not be loaded. Please try again.</p>
-                  <button type="button" className="mt-2 underline" onClick={retryExtras}>Retry</button>
+                  <Button variant="secondary" size="sm" className="mt-3" onClick={retryExtras}>Retry</Button>
                 </div>
               ) : documents.length === 0 ? (
                 <div className="px-4 py-10 text-center">

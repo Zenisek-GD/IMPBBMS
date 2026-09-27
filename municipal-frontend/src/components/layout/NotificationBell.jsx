@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, CheckCheck } from 'lucide-react'
 import * as notificationsApi from '../../api/notifications'
+import Button from '../ui/Button'
 
 const SEVERITY_DOT = {
   info: 'bg-accent',
@@ -108,16 +109,17 @@ export default function NotificationBell() {
               Notifications {data.unreadCount > 0 && `(${data.unreadCount})`}
             </span>
             {data.unreadCount > 0 && (
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="table"
+                icon={CheckCheck}
                 onClick={async () => {
                   await notificationsApi.markAllRead().catch(() => {})
                   refresh()
                 }}
-                className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
               >
-                <CheckCheck size={12} /> MARK ALL READ
-              </button>
+                Mark all read
+              </Button>
             )}
           </header>
 

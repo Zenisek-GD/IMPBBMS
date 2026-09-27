@@ -313,13 +313,14 @@ export default function PublicMessages() {
                       </Badge>
                     </td>
                     <td className="px-5 py-3.5">
-                      <button
-                        type="button"
+                      <Button
+                        size="table"
+                        variant="info"
+                        icon={Mail}
                         onClick={() => setReading(message)}
-                        className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:underline"
                       >
-                        <Mail size={12} /> Open
-                      </button>
+                        Open
+                      </Button>
                     </td>
                   </tr>
                 ))}

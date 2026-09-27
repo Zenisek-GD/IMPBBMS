@@ -139,7 +139,7 @@ const pickEditable = (body, allowed) =>
 // Note this is *programmed* against, not *obligated* against. Planning and
 // committing are different acts checked at different moments: this one guards
 // the plan, and the Budget Officer's certification later guards the commitment.
-const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId, cycle = "final" } = {}) => {
+const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId, cycle = "final", fiscalYear } = {}) => {
   // ── The indicative cycle (IRR Sec. 7.7.1–7.7.2) ────────────────────────────
   // An indicative PPMP exists precisely because nothing has been appropriated
   // yet: it is prepared to SUPPORT the budget proposal. Requiring an enacted
@@ -170,6 +170,10 @@ const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId, 
     return {
       error: `Ordinance ${balance.ordinanceNo} is "${balance.status}". Only an enacted appropriation can be planned against.`,
     };
+  }
+
+  if (Number(balance.fiscalYear) !== Number(fiscalYear)) {
+    return { error: `Ordinance ${balance.ordinanceNo} is for FY ${balance.fiscalYear}, not FY ${fiscalYear}.` };
   }
 
   if (Number(abc) > balance.unprogrammed) {
@@ -228,7 +232,10 @@ const liveRequisitionsFor = (appEntryId) =>
   });
 
 // Section 4.3 validation rules, enforced server-side.
-const validateEntry = ({ abc, targetStartQuarter, targetCompletionQuarter, procurementMode, justification }) => {
+const validateEntry = ({ fiscalYear, abc, targetStartQuarter, targetCompletionQuarter, procurementMode, justification }) => {
+  if (fiscalYear !== undefined && (!Number.isInteger(Number(fiscalYear)) || Number(fiscalYear) < 2000 || Number(fiscalYear) > 2100)) {
+    return "A valid fiscal year is required.";
+  }
   if (abc === undefined || abc === null || abc === "") return "ABC is required.";
 
   const numericAbc = Number(abc);
@@ -445,7 +452,7 @@ export const createAppEntry = async (req, res) => {
     return res.status(400).json({ message: "That implementing unit is not available." });
   }
 
-  const fiscalYear = payload.fiscalYear ?? new Date().getFullYear();
+  const fiscalYear = Number(payload.fiscalYear ?? new Date().getFullYear());
 
   // Which of the two cycles this line belongs to. Indicative lines support the
   // budget proposal; final lines are charged against the enacted ordinance.
@@ -453,6 +460,7 @@ export const createAppEntry = async (req, res) => {
 
   const funding = await validateAppropriation(payload.appropriationId, payload.abc, {
     cycle: planCycle,
+    fiscalYear,
   });
   if (funding.error) return res.status(400).json({ message: funding.error, balance: funding.balance });
 
@@ -500,6 +508,9 @@ export const updateAppEntry = async (req, res) => {
   }
 
   const body = pickEditable(req.body, EDITABLE_APP_FIELDS);
+  if (body.planCycle !== undefined && body.planCycle !== entry.planCycle) {
+    return res.status(409).json({ message: "The plan cycle cannot be changed after creation. Create a new plan line for the other cycle." });
+  }
   const merged = { ...serialize(entry), ...body };
   const validationError = validateEntry(merged);
   if (validationError) return res.status(400).json({ message: validationError });
@@ -511,11 +522,12 @@ export const updateAppEntry = async (req, res) => {
   const funding = await validateAppropriation(merged.appropriationId, merged.abc, {
     excludeAppEntryId: entry.id,
     cycle: entry.planCycle,
+    fiscalYear: merged.fiscalYear,
   });
   if (funding.error) return res.status(400).json({ message: funding.error, balance: funding.balance });
 
-  if (body.aipEntryId !== undefined) {
-    const programmed = await validateAipLink(body.aipEntryId, merged.fiscalYear);
+  if (body.aipEntryId !== undefined || body.fiscalYear !== undefined) {
+    const programmed = await validateAipLink(merged.aipEntryId, merged.fiscalYear);
     if (programmed.error) return res.status(400).json({ message: programmed.error });
   }
 
@@ -594,9 +606,11 @@ export const transitionAppEntry = async (req, res) => {
     // Which document a line lands in depends on which cycle it is in. An
     // indicative line consolidates into the Indicative APP and is approved as
     // the updated Indicative APP (IRR Sec. 7.7.4) — the basis for Early
-    // Procurement Activities. A final line consolidates into the same working
-    // document but is approved as the Final APP (Sec. 7.7.5).
-    if (action === "consolidate") changes.planStage = "indicativeApp";
+    // Procurement Activities. A final-cycle line consolidates into the Final
+    // APP, which still requires funding certification and approval (Sec. 7.7.5).
+    if (action === "consolidate") {
+      changes.planStage = entry.planCycle === "indicative" ? "indicativeApp" : "finalApp";
+    }
     if (result.to === "approved") {
       changes.planStage = entry.planCycle === "indicative" ? "updatedIndicativeApp" : "finalApp";
       // Sec. 7.7.5 — the approved final APP is posted on the website of the

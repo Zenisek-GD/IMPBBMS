@@ -6,6 +6,7 @@ import LargeFormPage from '../../components/ui/LargeFormPage'
 import Button from '../../components/ui/Button'
 import DocumentSlot from '../../components/ui/DocumentSlot'
 import BacAttendance from './BacAttendance'
+import QuotationEvidence from './QuotationEvidence'
 
 const inputClass = 'mt-1 min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy focus:border-navy focus:outline-none'
 const complianceOptions = [['compliant', 'Pass'], ['nonCompliant', 'Fail']]
@@ -35,7 +36,7 @@ export function BidEvaluationModal({ bid, rfq, plan, requirements = [], onClose,
   const completed = criteria.length > 0 && Object.values(scores).every((value) => value !== '')
   const quality = completed && consulting ? criteria.reduce((sum, criterion) => sum + Number(scores[criterion.key]) / Number(criterion.maxScore) * Number(criterion.weight), 0) : null
   return <LargeFormPage
-    title={`${consulting ? 'Quality and Price evaluation' : 'Compliance evaluation'} ? ${bid.vendorName ?? bid.blindLabel}`}
+    title={`${consulting ? 'Quality and Price evaluation' : 'Compliance evaluation'} — ${bid.vendorName ?? bid.blindLabel}`}
     purpose={consulting ? `Approved quality weight: ${plan?.qualityWeight ?? 'pending'}%; price weight: ${plan?.financialWeight ?? 'pending'}%. Financial scores are calculated after technical evaluation closes.` : 'Check every mandatory requirement, select the final Pass or Fail result, and record your recommendation.'}
     onBack={onClose} backLabel="Back to evaluation" error={error}
     actions={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button type="submit" form="bid-evaluation-form" disabled={saving || !completed || !noConflict || (consulting && plan?.status !== 'approved')}>{saving ? 'Submitting?' : 'Submit final evaluation'}</Button></>}
@@ -49,8 +50,9 @@ export function BidEvaluationModal({ bid, rfq, plan, requirements = [], onClose,
       finally { setSaving(false) }
     }} className="space-y-4">
       <LargeFormPage.Section title="Bidder and procurement information">
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">{[['Bidder', bid.vendorName ?? bid.blindLabel], ['Bid reference', `${rfq.referenceNo} / Bid #${bid.id}`], ['Procurement project', rfq.title], ['Procurement type', consulting ? 'Consulting Services' : rfq.category === 'infrastructure' ? 'Infrastructure Projects' : 'Goods'], ['Bid amount', bid.totalBidPrice == null ? 'Financial envelope sealed' : `?${Number(bid.totalBidPrice).toLocaleString('en-PH')}`], ['Date submitted', bid.submittedAt ? new Date(bid.submittedAt).toLocaleString('en-PH') : 'Recorded at bid opening']].map(([key, value]) => <div key={key} className="min-w-0"><dt className="text-text-faint">{key}</dt><dd className="break-words font-medium text-navy">{value}</dd></div>)}</dl>
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">{[['Bidder', bid.vendorName ?? bid.blindLabel], ['Bid reference', `${rfq.referenceNo} / Bid #${bid.id}`], ['Procurement project', rfq.title], ['Procurement type', consulting ? 'Consulting Services' : rfq.category === 'infrastructure' ? 'Infrastructure Projects' : 'Goods'], ['Bid amount', bid.totalBidPrice == null ? 'Financial envelope sealed' : `₱${Number(bid.totalBidPrice).toLocaleString('en-PH')}`], ['Date submitted', bid.submittedAt ? new Date(bid.submittedAt).toLocaleString('en-PH') : 'Recorded at bid opening']].map(([key, value]) => <div key={key} className="min-w-0"><dt className="text-text-faint">{key}</dt><dd className="break-words font-medium text-navy">{value}</dd></div>)}</dl>
       </LargeFormPage.Section>
+      {rfq.modeKey === 'smallValueProcurement' && <LargeFormPage.Section title="Submitted quotation evidence"><QuotationEvidence rfq={rfq} bid={bid} onError={setError} /></LargeFormPage.Section>}
       {previous && <p className="text-sm text-info">This is a correction of submission #{previous.id}. Its original scores and findings remain in the evaluation history.</p>}
       <LargeFormPage.Section title={consulting ? 'Approved quality criteria' : 'Mandatory compliance checklist'} description="Review the submitted TWG assessment and supporting evidence before finalizing.">
         {consulting && plan?.status !== 'approved' && <p role="alert" className="text-sm text-danger">Approved consulting criteria are missing. Evaluation is blocked until the authorized procurement process resolves the missing approval.</p>}
@@ -80,7 +82,7 @@ export function BidEvaluationModal({ bid, rfq, plan, requirements = [], onClose,
   </LargeFormPage>
 }
 
-export function TwgAssessmentModal({ bid, assessment, onClose, onSaved }) {
+export function TwgAssessmentModal({ bid, rfq, assessment, onClose, onSaved }) {
   const empty = { requirement: '', complianceStatus: '', findings: '', remarks: '', supportingInformation: '', documents: [] }
   const [record, setRecord] = useState(assessment)
   const [requirements, setRequirements] = useState(assessment?.requirements?.length ? assessment.requirements : [{ ...empty }])
@@ -129,6 +131,7 @@ export function TwgAssessmentModal({ bid, assessment, onClose, onSaved }) {
       }
     >
       {message && <p role="status" className="rounded border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">{message}</p>}
+      {rfq?.modeKey === 'smallValueProcurement' && <LargeFormPage.Section title="Submitted quotation evidence"><QuotationEvidence rfq={rfq} bid={bid} onError={setError} /></LargeFormPage.Section>}
       <LargeFormPage.Section title="Technical requirements">
         <div className="flex flex-col gap-3">
           {requirements.map((item, index) => <fieldset key={index} className="space-y-2 rounded border border-border-muted p-3">
@@ -177,7 +180,7 @@ export function CommitteeActionModal({ title, description, onClose, onSubmit, re
   </div></Modal>
 }
 
-export function PostQualificationModal({ bid, onClose, onSubmit }) {
+export function PostQualificationModal({ bid, rfq, onClose, onSubmit }) {
   const [checklist, setChecklist] = useState({ legal: '', technical: '', financial: '' })
   const [remarks, setRemarks] = useState('')
   const [error, setError] = useState('')
@@ -186,6 +189,7 @@ export function PostQualificationModal({ bid, onClose, onSubmit }) {
     event.preventDefault(); setError(''); setSaving(true)
     try { await onSubmit({ result: Object.values(checklist).every((value) => value === 'ok') ? 'passed' : 'failed', checklist, remarks }); onClose() } catch (err) { setError(err.response?.data?.message ?? 'Could not record the verification.') } finally { setSaving(false) }
   }}>
+    {rfq?.modeKey === 'smallValueProcurement' && <div className="rounded border border-border-muted p-3"><p className="mb-2 text-sm font-semibold text-navy">Submitted quotation evidence</p><QuotationEvidence rfq={rfq} bid={bid} onError={setError} /></div>}
     {Object.entries(checklist).map(([key, value]) => <label key={key} className="block text-sm capitalize text-text-secondary">{key} verification<select required value={value} onChange={(event) => setChecklist({ ...checklist, [key]: event.target.value })} className={inputClass}><option value="">Select result</option><option value="ok">Verified and compliant</option><option value="failed">Failed verification</option></select></label>)}
     <label className="block text-xs text-text-secondary">Verification findings<textarea required rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} className={inputClass} /></label>
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}

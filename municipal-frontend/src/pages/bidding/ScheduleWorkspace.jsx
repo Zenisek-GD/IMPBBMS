@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../api/procurementSchedule'
-import { updateRfqSchedule } from '../../api/bidding'
+import { updateRfqSchedule, updateSvpTerms } from '../../api/bidding'
 import { fetchDocuments, uploadDocument, downloadDocument, ACCEPTED_EXTENSIONS } from '../../api/documents'
 import { usePermissions } from '../../context/usePermissions'
 import { useAuth } from '../../context/useAuth'
@@ -22,6 +22,7 @@ export default function ScheduleWorkspace({ rfq, onClose, onChanged }) {
   const canApprove = permissions.has('bidding.chairEvaluation') && ['bacChairperson', 'bacViceChairperson'].includes(user?.role ?? user?.Role?.key)
   const [data, setData] = useState(null)
   const [form, setForm] = useState({})
+  const [svpForm, setSvpForm] = useState({ svpTechnicalSpecifications: rfq.svpTechnicalSpecifications ?? '', svpEligibilityDueStage: rfq.svpEligibilityDueStage ?? '' })
   const [documents, setDocuments] = useState([])
   const [documentId, setDocumentId] = useState('')
   const [reason, setReason] = useState('')
@@ -50,11 +51,17 @@ export default function ScheduleWorkspace({ rfq, onClose, onChanged }) {
   return <LargeFormPage title={`Schedule / Criteria — ${rfq.referenceNo}`} purpose="Approve the official dates before publication. Published dates change through a documented amendment and independent BAC approval." onBack={onClose} backLabel="Back to procurements" error={error} actions={<Button variant="secondary" onClick={onClose}>Close</Button>}>
     {message && <p role="status" className="rounded border border-success/30 p-3 text-sm text-success">{message}</p>}
     {!data ? <p>Loading official schedule…</p> : <>
+      {rfq.modeKey === 'smallValueProcurement' && <LargeFormPage.Section title="RFQ technical terms and document timing" description="Suppliers see these terms before quoting. The published RFQ locks them for this attempt.">
+        <label className="block text-xs text-text-secondary">Technical specifications, quantity, delivery terms and required eligibility documents<textarea required rows={5} minLength={20} disabled={!canPrepare || rfq.status !== 'draft' || busy} value={svpForm.svpTechnicalSpecifications} onChange={(event) => setSvpForm({ ...svpForm, svpTechnicalSpecifications: event.target.value })} className={input} /></label>
+        <label className="mt-3 block text-xs text-text-secondary">When are eligibility documents due?<select required disabled={!canPrepare || rfq.status !== 'draft' || busy} value={svpForm.svpEligibilityDueStage} onChange={(event) => setSvpForm({ ...svpForm, svpEligibilityDueStage: event.target.value })} className={input}><option value="">Choose a stage</option><option value="offer">With the quotation</option><option value="evaluation">During evaluation</option><option value="beforeAward">Before award notice</option></select></label>
+        {canPrepare && rfq.status === 'draft' && <Button className="mt-4" disabled={busy || svpForm.svpTechnicalSpecifications.trim().length < 20 || !svpForm.svpEligibilityDueStage} onClick={() => run(() => updateSvpTerms(rfq.id, svpForm))}>Save draft RFQ terms</Button>}
+        {!svpForm.svpTechnicalSpecifications && rfq.status !== 'draft' && <p className="mt-2 text-xs text-text-faint">This earlier RFQ did not record technical terms in this field.</p>}
+      </LargeFormPage.Section>}
       <LargeFormPage.Section title={amending ? 'Proposed revised schedule' : 'Official procurement schedule'} description={`${data.approvedAt ? `Approved ${new Date(data.approvedAt).toLocaleString('en-PH')}.` : 'Schedule approval pending.'} ${data.locked ? 'Published dates are protected by the amendment process.' : 'Editing the draft requires a fresh schedule approval.'}`}>
         <ScheduleFields form={form} setForm={setForm} disabled={!editable || busy} />
         {canPrepare && !data.locked && <Button className="mt-4" disabled={busy} onClick={() => run(() => updateRfqSchedule(rfq.id, schedulePayload(form)))}>Save draft schedule</Button>}
-        {canApprove && !data.locked && !data.approvedAt && Number(data.preparedById) !== user?.id && <Button className="mt-4 ml-2" disabled={busy} onClick={() => run(() => api.approveSchedule(rfq.id))}>Approve official schedule</Button>}
-        {canPrepare && data.locked && !['failed', 'awarded', 'cancelled'].includes(data.status) && !amending && <Button className="mt-4" disabled={busy} onClick={() => setAmending(true)}>Request Schedule Amendment</Button>}
+        {canApprove && !data.locked && !data.approvedAt && Number(data.preparedById) !== user?.id && <Button className="mt-4 ml-2" variant="success" disabled={busy} onClick={() => run(() => api.approveSchedule(rfq.id))}>Approve official schedule</Button>}
+        {canPrepare && data.locked && !['failed', 'awarded', 'cancelled'].includes(data.status) && !amending && <Button className="mt-4" variant="warning" disabled={busy} onClick={() => setAmending(true)}>Request Schedule Amendment</Button>}
       </LargeFormPage.Section>
       {amending && <LargeFormPage.Section title="Schedule amendment request" description="State the reason and attach the official supporting document. Review the proposed dates above before creating the request.">
         <label className="block text-xs">Reason for amendment<textarea required value={reason} onChange={(event) => setReason(event.target.value)} className={input} /></label>
@@ -68,10 +75,10 @@ export default function ScheduleWorkspace({ rfq, onClose, onChanged }) {
           <p className="text-sm">{amendment.reason}</p>
           <p className="text-xs text-text-secondary">Requested by {amendment.requestedBy?.name} on {new Date(amendment.requestedAt).toLocaleString('en-PH')}{amendment.approvedBy && ` · Reviewed by ${amendment.approvedBy.name} on ${new Date(amendment.reviewedAt).toLocaleString('en-PH')}`}</p>
           <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="p-2">Date / field</th><th className="p-2">Previous</th><th className="p-2">Proposed / revised</th></tr></thead><tbody>{amendment.changedFields.map((key) => <tr key={key} className="border-t border-border-muted"><td className="p-2">{labels[key] ?? key}</td><td className="p-2">{formatted(key, amendment.previousSchedule[key])}</td><td className="p-2">{formatted(key, amendment.proposedSchedule[key])}</td></tr>)}</tbody></table></div>
-          {amendment.supportingDocument && <Button variant="secondary" size="sm" onClick={() => downloadDocument(amendment.supportingDocument.id, amendment.supportingDocument.filename).catch(() => setError('Could not download the supporting document.'))}>View supporting document</Button>}
+          {amendment.supportingDocument && <Button variant="info" size="sm" onClick={() => downloadDocument(amendment.supportingDocument.id, amendment.supportingDocument.filename).catch(() => setError('Could not download the supporting document.'))}>View supporting document</Button>}
           {amendment.decisionRemarks && <p className="text-sm">Review remarks: {amendment.decisionRemarks}</p>}
           {canPrepare && amendment.status === 'draft' && <Button disabled={busy} onClick={() => run(() => api.submitAmendment(rfq.id, amendment.id))}>Submit to BAC for review</Button>}
-           {canApprove && amendment.status === 'submitted' && amendment.requestedById !== user?.id && <div className="space-y-3"><label className="block text-xs">Review remarks (required for rejection)<textarea value={remarks[amendment.id] ?? ''} onChange={(event) => setRemarks({ ...remarks, [amendment.id]: event.target.value })} className={input} /></label><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="w-full sm:w-auto" disabled={busy} onClick={() => run(() => api.decideAmendment(rfq.id, amendment.id, 'approve', remarks[amendment.id]))}>Approve and apply amendment</Button><Button className="w-full sm:w-auto" variant="secondary" disabled={busy || !remarks[amendment.id]?.trim()} onClick={() => run(() => api.decideAmendment(rfq.id, amendment.id, 'reject', remarks[amendment.id]))}>Reject amendment</Button></div></div>}
+           {canApprove && amendment.status === 'submitted' && amendment.requestedById !== user?.id && <div className="space-y-3"><label className="block text-xs">Review remarks (required for rejection)<textarea value={remarks[amendment.id] ?? ''} onChange={(event) => setRemarks({ ...remarks, [amendment.id]: event.target.value })} className={input} /></label><div className="flex flex-col-reverse gap-2 sm:flex-row"><Button className="w-full sm:w-auto" variant="success" disabled={busy} onClick={() => run(() => api.decideAmendment(rfq.id, amendment.id, 'approve', remarks[amendment.id]))}>Approve and apply amendment</Button><Button className="w-full sm:w-auto" variant="danger" disabled={busy || !remarks[amendment.id]?.trim()} onClick={() => run(() => api.decideAmendment(rfq.id, amendment.id, 'reject', remarks[amendment.id]))}>Reject amendment</Button></div></div>}
         </article>)}
       </LargeFormPage.Section>
       <LargeFormPage.Section title="Evaluation method and approved criteria"><ApprovedEvaluationCriteria rfq={rfq} onChanged={onChanged} /></LargeFormPage.Section>

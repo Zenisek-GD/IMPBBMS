@@ -71,6 +71,10 @@ export const COMPLIANCE_REQUIREMENTS = {
     { key: "personnelEquipment", label: "Key personnel, equipment and construction schedule" },
   ],
 };
+export const complianceRequirementsFor = (category, modeKey) =>
+  (COMPLIANCE_REQUIREMENTS[category] ?? []).filter(
+    (requirement) => modeKey !== "smallValueProcurement" || requirement.key !== "bidSecurity"
+  );
 export const FAILURE_REASONS = ["missingDocument", "technicalSpecification", "invalidEligibility", "nonResponsive", "exceedsBudget", "failedVerification", "other"];
 const numeric = (value) => value !== "" && value !== null && typeof value !== "boolean" && Number.isFinite(Number(value));
 export const evaluationPlanError = (plan) => {
@@ -92,7 +96,7 @@ export const evaluationPlanError = (plan) => {
 };
 export const consultingQualityScore = (breakdown, plan) => Number(plan.criteria.reduce((sum, criterion) => sum + Number(breakdown[criterion.key]) / Number(criterion.maxScore) * Number(criterion.weight), 0).toFixed(4));
 export const consultingMinimumsMet = (breakdown, plan) => plan.criteria.every((criterion) => criterion.minimumScore == null || criterion.minimumScore === "" || Number(breakdown[criterion.key]) >= Number(criterion.minimumScore));
-export const evaluationError = ({ category, criteriaBreakdown, verdict, remarks, failureReason, failureExplanation, plan }) => {
+export const evaluationError = ({ category, modeKey, criteriaBreakdown, verdict, remarks, failureReason, failureExplanation, plan }) => {
   if (!["goods", "infrastructure", "consulting"].includes(category)) return "The procurement category is not supported for evaluation.";
   if (category === "consulting") {
     if (verdict != null) return "Consulting results are determined from the approved quality criteria and minimum scores.";
@@ -104,7 +108,7 @@ export const evaluationError = ({ category, criteriaBreakdown, verdict, remarks,
   } else {
     if (!["passed", "failed"].includes(verdict)) return "Goods and Infrastructure require a Compliant or Non-Compliant technical verdict.";
     if (!criteriaBreakdown || typeof criteriaBreakdown !== "object" || Array.isArray(criteriaBreakdown) || !Object.keys(criteriaBreakdown).length) return "Record the mandatory technical requirements examined.";
-    if (COMPLIANCE_REQUIREMENTS[category].some((criterion) => !Object.hasOwn(criteriaBreakdown, criterion.key))) return "Complete every mandatory eligibility and technical compliance requirement.";
+    if (complianceRequirementsFor(category, modeKey).some((criterion) => !Object.hasOwn(criteriaBreakdown, criterion.key))) return "Complete every mandatory eligibility and technical compliance requirement.";
     const values = Object.values(criteriaBreakdown);
     if (values.some((value) => ![...COMPLIANCE_STATUSES, "passed", "failed", true, false].includes(value))) return "Use compliance statuses for Goods and Infrastructure requirements; quality-price scores do not apply.";
     if (values.includes("needsClarification")) return "Resolve technical clarifications before final evaluation.";

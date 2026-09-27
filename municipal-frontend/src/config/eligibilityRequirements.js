@@ -1,6 +1,8 @@
-// Bidder eligibility requirements transcribed from the Implementing Rules and
-// Regulations of RA No. 12009, 1st Edition (as of March 30, 2026), published by
-// the GPPB: https://www.gppb.gov.ph/wp-content/uploads/2026/05/IRR-of-RA-12009-1st-Edition.pdf
+// Bidder eligibility requirements from the GPPB-approved IRR of RA No. 12009,
+// published in the Official Gazette on February 10, 2025:
+// https://www.officialgazette.gov.ph/downloads/2025/02feb/20250210-IRR-RA-12009-FRM.pdf
+// Accessible GPPB copy:
+// https://www.gppb.gov.ph/wp-content/uploads/2025/02/Implementing-Rules-and-Regulations-of-RA-12009.pdf
 //
 // Section references are cited per item so they can be re-verified against the
 // source when the GPPB issues amendments. Treat this file as the single place
@@ -49,8 +51,8 @@ const PHILGEPS_SUPPORTING_DOCUMENTS = [
   {
     id: 'pcab-registry',
     label: 'PCAB License and Registration',
-    help: 'Required of contractors.',
-    citation: 'IRR Sec. 20.2.9.1(e)',
+    help: 'Contractors must maintain this in PhilGEPS. An infrastructure joint venture also submits its PCAB license and registration with the bid.',
+    citation: 'IRR Sec. 20.2.9.1(e), 52.4.2.3',
     appliesIf: (profile) => profile.category === 'infrastructure',
   },
   {
@@ -78,19 +80,35 @@ const LEGAL_STEP = {
     ...PHILGEPS_SUPPORTING_DOCUMENTS.map((doc) => ({ ...doc, required: true })),
     {
       id: 'jva',
-      label: 'Joint Venture Agreement (or notarized undertaking)',
-      help: 'If no JVA exists yet, all prospective partners submit notarized statements undertaking to enter into and abide by a JVA should the bid succeed. Failure to do so forfeits the bid security. Infrastructure JVs must comply with RA 4566 (Contractors’ License Law).',
-      citation: 'IRR Sec. 52.2, 54.2(a)(v)',
+      label: 'Joint Venture Agreement or notarized undertakings (Goods / Consulting)',
+      help: 'For Goods and Consulting Services, all prospective partners may submit notarized undertakings if no JVA exists yet. A successful bidder must then enter into the JVA or forfeit bid security.',
+      citation: 'IRR Sec. 52.2(a)',
+      required: true,
+      appliesIf: (profile) => profile.isJointVenture && profile.category !== 'infrastructure',
+    },
+    {
+      id: 'jva',
+      label: 'Joint Venture Agreement (Infrastructure Projects)',
+      help: 'An infrastructure joint venture must submit a JVA that complies with RA No. 4566; a notarized undertaking is not the substitute allowed for Goods and Consulting Services.',
+      citation: 'IRR Sec. 52.2(b), 54.2(b)(vi)',
+      required: true,
+      appliesIf: (profile) => profile.isJointVenture && profile.category === 'infrastructure',
+    },
+    {
+      id: 'jv-partner-philgeps',
+      label: 'PhilGEPS Platinum certificate for each joint venture partner',
+      help: 'Each partner submits its own certificate. The partner providing the NFCC also submits its statement of ongoing contracts.',
+      citation: 'IRR Sec. 52.2',
       required: true,
       appliesIf: (profile) => profile.isJointVenture,
     },
     {
       id: 'foreign-reciprocity',
-      label: 'Country reciprocity certification (foreign bidders)',
-      help: 'A certification from the relevant government office of the bidder’s country stating that Filipinos may participate in its government procurement for the same item or product.',
+      label: 'Country reciprocity certificate (Goods, if claiming reciprocal rights)',
+      help: 'Only a foreign Goods bidder relying on its country\'s reciprocal rights needs this certificate. Other lawful bases of foreign eligibility do not require it.',
       citation: 'IRR Sec. 54.2(a)(ix), 52.4.1.2(b)',
-      required: true,
-      appliesIf: (profile) => profile.isForeignBidder,
+      required: false,
+      appliesIf: (profile) => profile.isForeignBidder && profile.category === 'goods',
     },
   ],
 }
@@ -122,10 +140,11 @@ const TECHNICAL_ITEMS = {
   infrastructure: [
     {
       id: 'pcab-license',
-      label: 'PCAB License and Registration',
-      help: 'Must match the category, classification, and size range of the project. Required for the JV itself where the bidder is a joint venture.',
+      label: 'Joint venture PCAB License and Registration',
+      help: 'An infrastructure joint venture submits its PCAB License and Registration with the bid.',
       citation: 'IRR Sec. 54.2(b)(ii)',
       required: true,
+      appliesIf: (profile) => profile.isJointVenture,
     },
     {
       id: 'ongoing-contracts',
@@ -278,8 +297,21 @@ export const buildEligibilitySteps = (profile) => {
   const filterItems = (items) =>
     items.filter((item) => (item.appliesIf ? item.appliesIf(profile) : true))
 
+  const foreignEquivalentIds = new Set([
+    'sec-dti-cda', 'gis', 'mayors-permit', 'tax-clearance', 'afs',
+  ])
+  const legalItems = filterItems(LEGAL_STEP.items).map((item) =>
+    profile.isForeignBidder && foreignEquivalentIds.has(item.id)
+      ? {
+          ...item,
+          label: `${item.label} or appropriate foreign equivalent`,
+          citation: `${item.citation}, 20.2.9.2`,
+        }
+      : item
+  )
+
   const steps = [
-    { ...LEGAL_STEP, items: filterItems(LEGAL_STEP.items) },
+    { ...LEGAL_STEP, items: legalItems },
     {
       id: 'technical',
       title: 'Technical Eligibility',
@@ -314,6 +346,6 @@ export const SUBMISSION_PERIODS = {
 }
 
 export const IRR_SOURCE = {
-  label: 'IRR of RA No. 12009, 1st Edition (as of March 30, 2026)',
-  url: 'https://www.gppb.gov.ph/wp-content/uploads/2026/05/IRR-of-RA-12009-1st-Edition.pdf',
+  label: 'GPPB-approved IRR of RA No. 12009 (February 2025)',
+  url: 'https://www.gppb.gov.ph/wp-content/uploads/2025/02/Implementing-Rules-and-Regulations-of-RA-12009.pdf',
 }

@@ -78,6 +78,8 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
 
   const organizationType = useWatch({ control, name: 'organizationType' })
   const category = useWatch({ control, name: 'category' })
+  const isJointVenture = useWatch({ control, name: 'isJointVenture' })
+  const isForeignBidder = useWatch({ control, name: 'isForeignBidder' })
   const announcementId = useWatch({ control, name: 'announcementId' })
 
   useEffect(() => {
@@ -95,8 +97,8 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
   // The same IRR-derived checklist the old self-service wizard rendered from, so
   // the requirements an officer checks against are the ones the regulation names.
   const steps = useMemo(
-    () => buildEligibilitySteps({ organizationType, category }),
-    [organizationType, category]
+    () => buildEligibilitySteps({ organizationType, category, isJointVenture, isForeignBidder }),
+    [organizationType, category, isJointVenture, isForeignBidder]
   )
 
   const allItems = useMemo(
@@ -342,7 +344,7 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
 
       <LargeFormPage.Section
         title="Documents received"
-        description={`Tick what the bidder actually handed over — ${receivedCount} of ${allItems.length} ticked. Each ticked item enters the review queue as received-but-unexamined. Derived from ${IRR_SOURCE.label}.`}
+        description={`Tick what the bidder actually handed over — ${receivedCount} of ${allItems.length} ticked. Each ticked item enters the review queue as received-but-unexamined. Derived from ${IRR_SOURCE.label}.${isForeignBidder ? ' Foreign bidders may present appropriate home-country equivalents; review English translation, authentication, and the sworn declaration under IRR Sec. 20.2.9.2 and 52.3.' : ''}`}
       >
         <div className="max-h-64 overflow-y-auto rounded border border-border-muted">
           {steps.map((step) => (

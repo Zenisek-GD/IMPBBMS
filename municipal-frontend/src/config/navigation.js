@@ -118,6 +118,7 @@ export const ROLE_NAV = {
         items: [
           { label: 'APP Approvals', href: '/app-entries', icon: ClipboardCheck, shortcut: 'Alt+4' },
           { label: 'PR Approvals', href: '/purchase-requisitions', icon: FileText, shortcut: 'Alt+5' },
+          { label: 'RFQ / ITB Review', href: '/secretariat/rfq', icon: Megaphone },
           { label: 'Award Approvals', href: '/evaluation', icon: Award, shortcut: 'Alt+6' },
           { label: 'Document Approvals', href: '/documents', icon: Stamp },
         ],

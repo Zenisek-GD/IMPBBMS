@@ -17,10 +17,12 @@ const WIDTHS = {
   md: 'max-w-md',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
+  '2xl': 'max-w-6xl',
 }
 
-export default function Modal({ title, subtitle, onClose, size = 'md', children }) {
+export default function Modal({ title, subtitle, onClose, size = 'md', placement = 'responsive', floatingControls = null, children }) {
   const panelRef = useRef(null)
+  const overlayRef = useRef(null)
   const onCloseRef = useRef(onClose)
 
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
@@ -29,7 +31,7 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onCloseRef.current()
       if (event.key === 'Tab') {
-        const controls = [...panelRef.current.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')]
+        const controls = [...overlayRef.current?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]') ?? []]
           .filter((element) => element.getClientRects().length > 0)
         const first = controls[0]
         const last = controls.at(-1)
@@ -61,7 +63,8 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
+      ref={overlayRef}
+      className={`fixed inset-0 z-50 flex justify-center bg-black/50 backdrop-blur-[2px] ${placement === 'centered' ? 'items-center p-3 sm:p-4' : 'items-end p-0 sm:items-center sm:p-4'}`}
       // Clicking the backdrop dismisses; clicking inside the panel must not,
       // which is why the check is against the event target itself.
       onMouseDown={(event) => {
@@ -86,7 +89,7 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
         //
         // Scrolling belongs to the body below, not this element, so the header
         // stays pinned while the form moves under it.
-        className={`flex max-h-[calc(100dvh-1rem)] w-full ${WIDTHS[size]} flex-col overflow-hidden rounded-t-xl border border-border-muted bg-surface shadow-xl focus:outline-none sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl`}
+        className={`flex max-h-[calc(100dvh-1rem)] w-full ${WIDTHS[size]} flex-col overflow-hidden border border-border-muted bg-surface shadow-xl focus:outline-none sm:max-h-[calc(100dvh-2rem)] ${placement === 'centered' ? 'rounded-xl' : 'rounded-t-xl sm:rounded-xl'}`}
       >
         {/* `shrink-0` rather than `sticky top-0`: the scroll container is the
             body below, not this panel, so the header is already pinned by the
@@ -111,6 +114,7 @@ export default function Modal({ title, subtitle, onClose, size = 'md', children 
             straight back. */}
         <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">{children}</div>
       </div>
+      {floatingControls}
     </div>
   )
 }

@@ -128,9 +128,9 @@ const PROCUREMENT_MODES = [
   { key: "repeatOrder", name: "Repeat Order", requiresHopeApproval: true, citation: "IRR Sec. 33", sortOrder: 7,
     requiresCompetitiveBidding: false, minimumOffers: 1, allowsDirectAward: true, requiresBidSecurity: false },
 
-  // Three quotations, not sealed two-envelope bids.
+  // Request three quotations; one received is sufficient to proceed.
   { key: "smallValueProcurement", name: "Small Value Procurement", requiresHopeApproval: false, citation: "IRR Sec. 34", sortOrder: 8,
-    requiresCompetitiveBidding: false, minimumOffers: 3, allowsDirectAward: false, requiresBidSecurity: false },
+    requiresCompetitiveBidding: false, minimumOffers: 1, allowsDirectAward: false, requiresBidSecurity: false },
 
   { key: "negotiatedProcurement", name: "Negotiated Procurement", requiresHopeApproval: true, citation: "IRR Sec. 35", sortOrder: 9,
     requiresCompetitiveBidding: false, minimumOffers: 1, allowsDirectAward: true, requiresBidSecurity: false },

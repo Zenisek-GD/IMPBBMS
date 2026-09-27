@@ -49,7 +49,7 @@ export default function ApprovedEvaluationCriteria({ rfq, onChanged }) {
     <h3 className="font-semibold text-navy">Approved Consulting Evaluation Criteria</h3>
     <p className="text-sm text-text-secondary">Configure quality criteria before publication. Quality must outweigh price, and both weights must total 100%. BAC approval locks the criteria for the entire bidding attempt.</p>
     {locked && <p className="text-sm text-info">{saved?.status === 'approved' ? `Locked under approval ${saved.approvalReference}, revision ${saved.revision ?? 1}.` : 'Publication has locked this attempt. Its approved criteria must already be on record.'} Changes require an approved amendment before bids have been received; later changes require a new authorized attempt.</p>}
-    {canAmend && !amending && !pendingAmendment && permissions.has('bidding.publish') && <Button variant="secondary" onClick={() => setAmending(true)}>Request criteria amendment</Button>}
+    {canAmend && !amending && !pendingAmendment && permissions.has('bidding.publish') && <Button variant="warning" onClick={() => setAmending(true)}>Request criteria amendment</Button>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     {message && <p role="status" className="text-sm text-success">{message}</p>}
     <fieldset disabled={!canPrepare || busy} className="space-y-4">
@@ -58,7 +58,7 @@ export default function ApprovedEvaluationCriteria({ rfq, onChanged }) {
         <label className="block text-xs">Criterion name<input value={criterion.name} onChange={(event) => changeCriterion(index, 'name', event.target.value)} className={input} /></label>
         <label className="block text-xs">Description<textarea value={criterion.description} onChange={(event) => changeCriterion(index, 'description', event.target.value)} className={input} /></label>
         <div className="grid gap-3 sm:grid-cols-3">{[['maxScore', 'Maximum score'], ['weight', 'Quality criterion weight (%)'], ['minimumScore', 'Minimum score (optional)']].map(([key, label]) => <label key={key} className="text-xs">{label}<input type="number" min="0" step="0.01" value={criterion[key] ?? ''} onChange={(event) => changeCriterion(index, key, event.target.value)} className={input} /></label>)}</div>
-        {canPrepare && plan.criteria.length > 1 && <Button variant="secondary" onClick={() => setPlan({ ...plan, criteria: plan.criteria.filter((_, i) => i !== index) })}>Remove criterion</Button>}
+        {canPrepare && plan.criteria.length > 1 && <Button variant="danger" onClick={() => setPlan({ ...plan, criteria: plan.criteria.filter((_, i) => i !== index) })}>Remove criterion</Button>}
       </div>)}
       {canPrepare && <Button variant="secondary" onClick={() => setPlan({ ...plan, criteria: [...plan.criteria, { key: `criterion_${Date.now()}`, name: '', description: '', maxScore: 100, weight: '', minimumScore: '' }] })}>Add approved criterion</Button>}
     </fieldset>
@@ -76,7 +76,7 @@ export default function ApprovedEvaluationCriteria({ rfq, onChanged }) {
       <label className="block text-xs">BAC approval / resolution reference<input value={reference} onChange={(event) => setReference(event.target.value)} className={input} /></label>
       <BacAttendance value={attendance} onChange={setAttendance} />
       {unsavedChanges && <p className="text-sm text-info">Save your changes before requesting approval. Another authorized officer must approve a draft you prepare.</p>}
-      <Button disabled={busy || !reference.trim() || unsavedChanges} onClick={() => act(() => approveEvaluationPlan(rfq.id, { approvalReference: reference, ...attendance }))}>Approve and lock criteria</Button>
+      <Button variant="success" disabled={busy || !reference.trim() || unsavedChanges} onClick={() => act(() => approveEvaluationPlan(rfq.id, { approvalReference: reference, ...attendance }))}>Approve and lock criteria</Button>
     </div>}
     {amendments.map((amendment) => <details key={amendment.id} className="rounded border border-border-muted p-3">
       <summary className="cursor-pointer text-sm font-medium">Criteria amendment #{amendment.id} — {amendment.status}</summary>
@@ -88,7 +88,7 @@ export default function ApprovedEvaluationCriteria({ rfq, onChanged }) {
       {amendment.status === 'submitted' && permissions.has('bidding.chairEvaluation') && amendment.requestedById !== user?.id && <div className="mt-3 space-y-3">
         <label className="block text-xs">BAC amendment approval / resolution reference<input value={reference} onChange={(event) => setReference(event.target.value)} className={input} /></label>
         <BacAttendance value={attendance} onChange={setAttendance} />
-        <Button disabled={busy || !reference.trim()} onClick={() => act(() => approveCriteriaAmendment(amendment.id, { approvalReference: reference, ...attendance }))}>Approve criteria amendment</Button>
+        <Button variant="success" disabled={busy || !reference.trim()} onClick={() => act(() => approveCriteriaAmendment(amendment.id, { approvalReference: reference, ...attendance }))}>Approve criteria amendment</Button>
       </div>}
     </details>)}
   </section>

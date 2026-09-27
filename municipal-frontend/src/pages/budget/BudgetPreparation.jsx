@@ -169,13 +169,12 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
         <div>
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-medium tracking-[0.02em] text-text-secondary">Lines</span>
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => setLines((current) => [...current, emptyLine()])}
-              className="min-h-[44px] text-[12px] font-medium tracking-[0.03em] text-navy hover:underline"
             >
-              + ADD LINE
-            </button>
+              Add line
+            </Button>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -204,16 +203,17 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
                     onChange={(event) => updateLine(index, 'proposedAmount', event.target.value)}
                     className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-3"
                   />
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    icon={Trash2}
                     onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                     disabled={lines.length === 1}
                     aria-label="Remove line"
-                    className="flex min-h-11 w-full items-center justify-start gap-2 rounded border border-border-muted px-3 text-text-faint hover:text-danger disabled:opacity-30 sm:col-span-1 sm:w-auto sm:justify-center sm:gap-0 sm:rounded-none sm:border-0 sm:px-0"
+                    className="w-full sm:col-span-1 sm:w-auto"
                   >
-                    <Trash2 size={14} />
                     <span className="sm:hidden">Remove line</span>
-                  </button>
+                  </Button>
                 </div>
 
                 {/* The link back to the investment program. Capital lines that
@@ -641,30 +641,29 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                     </Badge>
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-3">
+                    <div className="flex w-max flex-wrap gap-2">
                       {proposal.status === 'draft' && budget.proposalsOpen && canPropose && (
                         <>
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="secondary"
                             onClick={() => setEditingProposal({ budget, proposal })}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            EDIT
-                          </button>
-                          <button
-                            type="button"
+                            Edit
+                          </Button>
+                          <Button
+                            size="table"
                             onClick={() => run(() => budgetApi.submitProposal(proposal.id)).catch(() => {})}
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            SUBMIT PROPOSAL
-                          </button>
+                            Submit proposal
+                          </Button>
                         </>
                       )}
                       {budget.status === 'pendingMbcReview' &&
                         permissions.has('budget.reviewProposal') &&
                         proposal.status !== 'draft' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
                             onClick={() =>
                               setAmountsFor({
                                 proposal,
@@ -673,16 +672,16 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                                 submit: (payload) => budgetApi.reviewProposal(proposal.id, payload),
                               })
                             }
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            RECOMMEND
-                          </button>
+                            Recommend
+                          </Button>
                         )}
                       {budget.status === 'pendingFinalisation' &&
                         permissions.has('budget.finaliseExecutive') &&
                         proposal.status !== 'draft' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="success"
                             onClick={() =>
                               setAmountsFor({
                                 proposal,
@@ -691,10 +690,9 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                                 submit: (payload) => budgetApi.finaliseProposal(proposal.id, payload),
                               })
                             }
-                            className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            STRIKE FINAL FIGURES
-                          </button>
+                            Strike final figures
+                          </Button>
                         )}
                     </div>
                   </td>
@@ -853,35 +851,33 @@ export default function BudgetPreparation() {
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge tone={BUDGET_STATUS_TONES[budget.status]}>{budget.statusLabel}</Badge>
                   {budget.proposalsOpen && canPropose && !myProposal && (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
                       onClick={() => setProposing(budget)}
-                      className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                     >
-                      NEW PROPOSAL
-                    </button>
+                      New proposal
+                    </Button>
                   )}
                   {(permissions.has('budget.conductForum') || permissions.has('budget.conductHearing')) && (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="secondary"
                       onClick={() => setRecordingProceeding(budget)}
-                      className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                     >
-                      RECORD PROCEEDING
-                    </button>
+                      Record proceeding
+                    </Button>
                   )}
                   {canAct && (
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
                       onClick={() =>
                         stage.opensForm
                           ? setStageFormFor({ budget, stage })
                           : run(() => budgetApi.transitionBudget(budget.id, stage.action)).catch(() => {})
                       }
-                      className="text-[11px] font-medium tracking-[0.03em] text-accent hover:underline"
                     >
                       {stage.actionLabel}
-                    </button>
+                    </Button>
                   )}
                 </div>
               }

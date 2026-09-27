@@ -8,6 +8,7 @@ import { Permission } from "../models/permissionModel.js";
 // publication, bid results, award issuance, and payment status changes.
 export const NOTIFICATION_EVENTS = {
   RFQ_PUBLISHED: "rfq.published",
+  RFQ_WITHDRAWN: "rfq.withdrawn",
   BID_RESULT: "bid.result",
   AWARD_ISSUED: "award.issued",
   AWARD_RECOMMENDED: "award.recommended",

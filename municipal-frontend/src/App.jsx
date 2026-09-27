@@ -42,6 +42,7 @@ const AuditLog = lazy(() => import('./pages/audit/AuditLog'))
 const SecurityConsole = lazy(() => import('./pages/audit/SecurityConsole'))
 const DssDashboard = lazy(() => import('./pages/insights/DssDashboard'))
 const Reports = lazy(() => import('./pages/reports/Reports'))
+const HelpGuide = lazy(() => import('./pages/guides/HelpGuide'))
 const TransparencyPortal = lazy(() => import('./pages/insights/TransparencyPortal'))
 const AnnouncementsAdmin = lazy(() => import('./pages/announcements/AnnouncementsAdmin'))
 const InvitationToBid = lazy(() => import('./pages/announcements/InvitationToBid'))
@@ -100,6 +101,10 @@ function App() {
         <Route path="/account/two-factor" element={<MfaEnrollment />} />
 
         <Route element={<AppShell />}>
+          {/* Guide content is shared with every signed-in role. It teaches the
+              workflow without granting permission to perform its actions. */}
+          <Route path="/help-guide" element={<HelpGuide />} />
+
           {/* Every signed-in account has one, whatever the role — it is reached
               from the sidebar footer rather than a header dropdown, so it needs
               no RoleRoute guard. */}
@@ -284,7 +289,7 @@ function App() {
           <Route element={<RoleRoute allow={['bacSecretariat']} />}>
             <Route path="/secretariat" element={<RoleWorkspace />} />
           </Route>
-          <Route element={<RoleRoute allow={['bacSecretariat', 'bacChairperson', 'bacViceChairperson', 'bacMember', 'internalAuditor']} />}>
+          <Route element={<RoleRoute allow={['hope', 'bacSecretariat', 'bacChairperson', 'bacViceChairperson', 'bacMember', 'internalAuditor']} />}>
             <Route path="/secretariat/rfq" element={<RfqManagement />} />
           </Route>
 

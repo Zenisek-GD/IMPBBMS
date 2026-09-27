@@ -133,8 +133,8 @@ export default function Reports() {
       <PageHeader title="Reports" subtitle="Detailed procurement records and official report generation. Each report follows your account’s access permissions." actions={
         <>
           <Button variant="secondary" icon={RefreshCw} disabled={!selected || loading} onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh</Button>
-          <Button variant="secondary" icon={Printer} disabled={!selected?.canExport || exporting || loading} onClick={() => doExport('print')}>Print / PDF</Button>
-          <Button icon={Download} disabled={!selected?.canExport || exporting || loading} onClick={() => doExport('csv')}>{exporting ? 'Preparing report…' : 'Export CSV'}</Button>
+          <Button variant="info" icon={Printer} disabled={!selected?.canExport || exporting || loading} onClick={() => doExport('print')}>Print / PDF</Button>
+          <Button variant="info" icon={Download} disabled={!selected?.canExport || exporting || loading} onClick={() => doExport('csv')}>{exporting ? 'Preparing report…' : 'Export CSV'}</Button>
         </>
       } />
       {error && <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{error}</p>}

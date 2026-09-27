@@ -7,6 +7,7 @@ import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 import EmptyState from '../../components/ui/EmptyState'
+import Button from '../../components/ui/Button'
 import { dashboardFor } from './dashboardConfig'
 import { useDashboardData } from './useDashboardData'
 import { recentlyCompleted } from './queues'
@@ -106,7 +107,7 @@ export default function RoleWorkspace() {
       {!loading && failedSources.length > 0 && (
         <div role="alert" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-text-secondary">
           <p>Some dashboard information could not be loaded. Totals and pending items may be incomplete.</p>
-          <button type="button" onClick={retry} className="mt-2 font-medium text-navy underline">Retry dashboard</button>
+          <Button variant="secondary" size="sm" className="mt-3" onClick={retry}>Retry dashboard</Button>
         </div>
       )}
 

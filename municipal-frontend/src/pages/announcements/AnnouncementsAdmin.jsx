@@ -654,7 +654,7 @@ export default function AnnouncementsAdmin() {
                         {row.status === 'draft' && (
                           <Button
                             size="table"
-                            variant="primary"
+                            variant="success"
                             onClick={() => publish(row)}
                           >
                             Publish

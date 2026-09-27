@@ -367,6 +367,22 @@ h2.ui-card-title {
   min-height: 100svh;
 }
 
+/* Dense records stay readable on a phone. A scrollable table should use its
+   natural column widths rather than compressing titles, dates, statuses, and
+   actions into unusable slivers. Explicit per-table minimums still win; the
+   Development Plans list has its own card layout because it is a frequent
+   primary task rather than a reference register. */
+@media (max-width: 47.999rem) {
+  .overflow-x-auto > table:not(.doc-table):not([class*='min-w-']) {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .overflow-x-auto > table[class*='min-w-']:not(.doc-table) {
+    width: max-content;
+  }
+}
+
 /* Colour transitions only. Animating `all` would drag layout properties into
    the transition and make every re-render feel laggy. */
 body,

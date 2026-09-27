@@ -207,7 +207,7 @@ function DocumentViewer({ doc, onClose, onChanged }) {
             <>
               {canEdit && <Button variant="secondary" icon={Pencil} onClick={() => setEditing(true)}>EDIT</Button>}
 
-              <Button variant="secondary" icon={Download} disabled={busy} onClick={async () => {
+              <Button variant="info" icon={Download} disabled={busy} onClick={async () => {
                 setError('')
                 try {
                   await api.downloadDocumentPdf(doc.id, { filename: `${doc.documentNo}.pdf` })
@@ -219,7 +219,7 @@ function DocumentViewer({ doc, onClose, onChanged }) {
               </Button>
 
               {doc.hasPdf && (
-                <Button variant="secondary" icon={RefreshCw} disabled={busy} onClick={async () => {
+                <Button variant="info" icon={RefreshCw} disabled={busy} onClick={async () => {
                   await api.downloadDocumentPdf(doc.id, { regenerate: true, filename: `${doc.documentNo}.pdf` })
                 }}>
                   REPRINT
@@ -227,25 +227,25 @@ function DocumentViewer({ doc, onClose, onChanged }) {
               )}
 
               {doc.status === 'draft' && permissions.has('document.approve') && (
-                <Button icon={Check} disabled={busy} onClick={() => act(() => api.approveDocument(doc.id))}>
+                <Button variant="success" icon={Check} disabled={busy} onClick={() => act(() => api.approveDocument(doc.id))}>
                   APPROVE &amp; ISSUE
                 </Button>
               )}
 
               {doc.status === 'approved' && doc.publishable && !doc.isPublic && permissions.has('document.publish') && (
-                <Button icon={Globe} disabled={busy} onClick={() => setConfirming('publish')}>
+                <Button variant="success" icon={Globe} disabled={busy} onClick={() => setConfirming('publish')}>
                   PUBLISH
                 </Button>
               )}
 
               {doc.isPublic && permissions.has('document.publish') && (
-                <Button variant="secondary" icon={Globe} disabled={busy} onClick={() => setConfirming('withdraw')}>
+                <Button variant="danger" icon={Globe} disabled={busy} onClick={() => setConfirming('withdraw')}>
                   WITHDRAW
                 </Button>
               )}
 
               {doc.status !== 'void' && permissions.has('document.void') && (
-                <Button variant="secondary" icon={Ban} disabled={busy} onClick={() => setConfirming('void')}>
+                <Button variant="danger" icon={Ban} disabled={busy} onClick={() => setConfirming('void')}>
                   VOID
                 </Button>
               )}
@@ -423,16 +423,19 @@ export default function GeneratedDocuments() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          type="button"
+                      <div className="flex w-max flex-wrap gap-2">
+                        <Button
+                          size="table"
+                          variant="info"
+                          icon={Eye}
                           onClick={async () => setViewing(await api.fetchDocument(doc.id))}
-                          className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                         >
-                          <Eye size={11} /> OPEN
-                        </button>
-                        <button
-                          type="button"
+                          Open
+                        </Button>
+                        <Button
+                          size="table"
+                          variant="info"
+                          icon={Download}
                           onClick={async () => {
                             setNotice('')
                             try {
@@ -441,10 +444,9 @@ export default function GeneratedDocuments() {
                               setNotice('Could not produce the PDF. Chrome may not be installed on the server — see CHROME_PATH in the backend .env.')
                             }
                           }}
-                          className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                         >
-                          <Download size={11} /> PDF
-                        </button>
+                          PDF
+                        </Button>
                       </div>
                     </td>
                   </tr>

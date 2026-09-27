@@ -2,11 +2,19 @@ import { DEFAULT_PROCUREMENT_POLICY, evaluateBacDecision } from "./bacCommittee.
 
 // Pure guard shared by history displays, review, approval and process creation.
 // Count sequential failed attempts, never cancelled or merely drafted records.
+const TWO_FAILED_BIDDINGS_MODES = new Set(["competitiveBidding", "limitedSourceBidding", "competitiveDialogue"]);
+export const eligibleFailedBiddingMode = (attempt) => {
+  const modeKey = attempt.rfq?.mode?.key ?? attempt.modeKey;
+  // Older standalone policy records do not carry an RFQ association. Live
+  // procurement attempts load it through attemptsForProject.
+  return modeKey == null ? !attempt.rfq : TWO_FAILED_BIDDINGS_MODES.has(modeKey);
+};
 export const negotiatedEligibility = (attempts = [], policy = DEFAULT_PROCUREMENT_POLICY) => {
   const ordered = [...attempts].sort((a, b) => a.attemptNumber - b.attemptNumber);
   const required = Math.max(2, Number(policy.requiredFailedAttempts) || 2);
   const missing = [];
-  const failed = ordered.filter((attempt) => attempt.status === "failed");
+  const failed = ordered.filter((attempt) => attempt.status === "failed" && eligibleFailedBiddingMode(attempt));
+  if (ordered.some((attempt) => attempt.status === "failed" && !eligibleFailedBiddingMode(attempt))) missing.push("Only failed Competitive Bidding, Limited Source Bidding, or Competitive Dialogue attempts qualify under IRR Section 35.1.");
   if (failed.length < required) missing.push(`${required} failed procurement attempts are required; ${failed.length} have been recorded.`);
   if (ordered.some((attempt) => !["failed", "cancelled"].includes(attempt.status))) missing.push("Every preceding procurement attempt must be closed without an award before Negotiated Procurement review.");
   for (const attempt of failed) {

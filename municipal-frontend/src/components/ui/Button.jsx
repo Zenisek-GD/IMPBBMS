@@ -1,11 +1,17 @@
 // Sentence case rather than the previous wide-tracked uppercase: at this
 // density all-caps labels are harder to scan and take more room than they earn.
 const VARIANTS = {
-  primary: 'bg-accent text-accent-fg hover:opacity-90 shadow-sm',
-  secondary:
-    'border border-border-muted bg-surface text-navy hover:border-border-strong shadow-sm',
-  ghost: 'text-text-secondary hover:bg-navy-tint hover:text-navy',
-  danger: 'border border-danger/25 bg-danger/10 text-danger hover:bg-danger/15',
+  // One action grammar everywhere: brand actions commit work, success actions
+  // approve it, information actions retrieve it, warning actions send it back
+  // for correction, and danger actions reject or remove it. `secondary` is
+  // deliberately neutral for editing, cancelling and other reversible work.
+  primary: 'border-accent bg-accent text-accent-fg shadow-sm hover:bg-accent/90 hover:shadow-md',
+  secondary: 'border-border-strong bg-surface text-navy shadow-sm hover:bg-sidebar hover:shadow-md',
+  info: 'border-info/30 bg-info-soft text-info hover:border-info/45 hover:bg-info/15',
+  success: 'border-success/30 bg-success/10 text-success hover:border-success/45 hover:bg-success/15',
+  warning: 'border-warning/30 bg-warning/10 text-warning hover:border-warning/45 hover:bg-warning/15',
+  danger: 'border-danger/30 bg-danger/10 text-danger hover:border-danger/45 hover:bg-danger/15',
+  ghost: 'border-transparent text-text-secondary hover:bg-navy-tint hover:text-navy',
 }
 
 // Desktop record tables need a compact action size so each row stays focused,
@@ -31,7 +37,7 @@ export default function Button({
   return (
     <button
       type="button"
-      className={`inline-flex max-w-full items-center justify-center rounded-md font-medium text-center leading-tight whitespace-normal transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${SIZES[size]} ${VARIANTS[variant]} ${className}`}
+      className={`inline-flex max-w-full items-center justify-center rounded-md border font-medium text-center leading-tight whitespace-normal transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:active:translate-y-0 ${SIZES[size]} ${VARIANTS[variant] ?? VARIANTS.primary} ${className}`}
       {...props}
     >
       {Icon && <Icon size={iconSize} className="shrink-0" />}

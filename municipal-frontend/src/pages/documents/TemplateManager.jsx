@@ -184,7 +184,7 @@ function TemplateEditor({ template, options, onBack, onSaved }) {
             <Button variant="secondary" icon={History} onClick={() => setShowHistory(true)}>
               HISTORY ({template.versionCount})
             </Button>
-            <Button variant="secondary" icon={Eye} onClick={runPreview}>PREVIEW</Button>
+            <Button variant="info" icon={Eye} onClick={runPreview}>Preview</Button>
             {canManage && (
               <Button icon={Save} onClick={save} disabled={saving}>
                 {saving ? 'SAVING…' : 'SAVE NEW VERSION'}
@@ -298,17 +298,17 @@ function TemplateEditor({ template, options, onBack, onSaved }) {
                   {new Date(v.createdAt).toLocaleString('en-PH')} · {v.createdByName ?? '—'}
                 </span>
                 {!v.isActive && canManage && (
-                  <button
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="warning"
                     onClick={async () => {
                       const updated = await api.activateTemplateVersion(template.id, v.id)
                       onSaved(updated)
                       setShowHistory(false)
                     }}
-                    className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                   >
-                    REVERT TO THIS
-                  </button>
+                    Revert to this
+                  </Button>
                 )}
               </div>
             ))}
@@ -584,22 +584,23 @@ export default function TemplateManager() {
                       <Badge tone={TEMPLATE_STATUS_TONES[template.status]}>{template.status}</Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          type="button"
+                      <div className="flex w-max flex-wrap gap-2">
+                        <Button
+                          size="table"
+                          variant={canManage ? 'secondary' : 'info'}
                           onClick={() => openTemplate(template.id)}
-                          className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                         >
-                          {canManage ? 'EDIT' : 'VIEW'}
-                        </button>
+                          {canManage ? 'Edit' : 'View'}
+                        </Button>
                         {canManage && template.status !== 'archived' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="danger"
+                            icon={Archive}
                             onClick={() => setArchiving(template)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                           >
-                            <Archive size={11} /> ARCHIVE
-                          </button>
+                            Archive
+                          </Button>
                         )}
                       </div>
                     </td>

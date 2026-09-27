@@ -536,57 +536,60 @@ export default function Contracts() {
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex w-max items-center gap-2">
                         {canDraft && contract.status === 'draft' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            icon={Send}
                             onClick={() => run(() => contractsApi.issueForSignature(contract.id))}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <Send size={12} /> ISSUE
-                          </button>
+                            Issue
+                          </Button>
                         )}
                         {canSign &&
                           contract.status === 'pendingSignatures' &&
                           !(isSupplier ? contract.signedByVendorAt : contract.signedByLguAt) && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="success"
+                              icon={PenLine}
                               onClick={() => setSigning(contract)}
-                              className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
-                              <PenLine size={12} /> SIGN
-                            </button>
+                              Sign
+                            </Button>
                           )}
                         {isSupplier && contract.status === 'active' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            icon={Truck}
                             onClick={() => setDelivering(contract)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <Truck size={12} /> REPORT DELIVERY
-                          </button>
+                            Report delivery
+                          </Button>
                         )}
 
                         {/* Sec. 71 — only against a contract in force, and only
                             for the office that signs contracts. */}
                         {canSign && !isSupplier && contract.status === 'active' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="secondary"
+                            icon={GitBranch}
                             onClick={() => setVarying(contract)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <GitBranch size={12} /> VARIATION ORDER
-                          </button>
+                            Variation order
+                          </Button>
                         )}
 
                         {/* Sec. 62 — posted on final acceptance, so it appears
                             once the contract has run to completion. */}
                         {canSign && !isSupplier && contract.status === 'completed' && (
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="success"
+                            icon={ShieldCheck}
                             onClick={() => setWarranting(contract)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                           >
-                            <ShieldCheck size={12} /> WARRANTY SECURITY
-                          </button>
+                            Warranty security
+                          </Button>
                         )}
                       </div>
                     </td>

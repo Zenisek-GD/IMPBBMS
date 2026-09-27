@@ -272,21 +272,21 @@ export default function AdminDepartments() {
                       <Badge tone={row.status === 'active' ? 'success' : 'neutral'}>{row.status}</Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          type="button"
+                      <div className="flex w-max flex-wrap gap-2">
+                        <Button
+                          size="table"
+                          variant="secondary"
                           onClick={() => setEditing(row)}
-                          className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                         >
-                          EDIT
-                        </button>
-                        <button
-                          type="button"
+                          Edit
+                        </Button>
+                        <Button
+                          size="table"
+                          variant={row.status === 'active' ? 'danger' : 'success'}
                           onClick={() => toggleStatus(row)}
-                          className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                         >
-                          {row.status === 'active' ? 'DEACTIVATE' : 'REACTIVATE'}
-                        </button>
+                          {row.status === 'active' ? 'Deactivate' : 'Reactivate'}
+                        </Button>
                       </div>
                     </td>
                   </tr>

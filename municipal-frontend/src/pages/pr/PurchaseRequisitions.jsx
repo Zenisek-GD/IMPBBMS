@@ -92,12 +92,17 @@ function PrFormModal({ existing, onClose, onSaved }) {
     }
   }, [])
 
-  // Only approved/locked APP entries may be linked (Section 5.3).
+  // A requisition draws only against an approved final APP and its ordinance
+  // line. An approved indicative APP remains a planning document.
   useEffect(() => {
     let cancelled = false
     fetchAppEntries()
       .then((entries) => {
-        if (!cancelled) setAppEntries(entries.filter((e) => ['approved', 'locked'].includes(e.status)))
+        if (!cancelled) {
+          setAppEntries(entries.filter((e) =>
+            ['approved', 'locked'].includes(e.status) && e.planCycle === 'final' && e.appropriationId
+          ))
+        }
       })
       .catch(() => {})
     return () => {
@@ -201,7 +206,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
       >
         <div>
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary" title="Annual Procurement Plan (APP): the year's list of what the municipality will procure">
-            Linked Annual Procurement Plan (APP) entry (approved only)
+            Linked final Annual Procurement Plan (APP) entry (approved only)
           </label>
           <select
             value={appEntryId}
@@ -209,7 +214,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
             disabled={Boolean(existing)}
             className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy disabled:bg-sidebar focus:border-navy focus:outline-none"
           >
-            <option value="">Select an approved Annual Procurement Plan (APP) entry...</option>
+            <option value="">Select an approved final Annual Procurement Plan (APP) entry...</option>
             {appEntries.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.projectTitle} — Approved Budget for the Contract (ABC) {peso(entry.abc)}
@@ -307,13 +312,12 @@ function PrFormModal({ existing, onClose, onSaved }) {
         <div>
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-medium tracking-[0.02em] text-text-secondary">Items</span>
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={() => setLines((current) => [...current, emptyLine()])}
-              className="min-h-[44px] text-[12px] font-medium tracking-[0.03em] text-navy hover:underline"
             >
-              + ADD LINE
-            </button>
+              Add line
+            </Button>
           </div>
 
           <div className="flex flex-col gap-3">
@@ -348,16 +352,17 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       onChange={(event) => updateLine(index, 'unitCost', event.target.value)}
                       className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-2"
                     />
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      icon={Trash2}
                       onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
                       disabled={lines.length === 1}
                       aria-label="Remove line"
-                      className="flex min-h-11 w-full items-center justify-start gap-2 rounded border border-border-muted px-3 text-text-faint hover:text-danger disabled:opacity-30 sm:col-span-1 sm:w-auto sm:justify-center sm:gap-0 sm:rounded-none sm:border-0 sm:px-0"
+                      className="w-full sm:col-span-1 sm:w-auto"
                     >
-                      <Trash2 size={14} />
                       <span className="sm:hidden">Remove line</span>
-                    </button>
+                    </Button>
                   </div>
 
                   {/* Useful life is the question only the requester can answer,
@@ -1033,43 +1038,43 @@ export default function PurchaseRequisitions() {
                         <div className="flex w-max items-center gap-2">
                           {/* First, and available to everyone who can see the
                               row: reading a requisition is not an action on it. */}
-                          <button
-                            type="button"
+                          <Button
+                            size="table"
+                            variant="info"
+                            icon={Eye}
                             onClick={() => setViewing(pr)}
-                            className="flex items-center gap-1 text-[11px] font-medium tracking-[0.03em] text-navy uppercase hover:underline"
                           >
-                            <Eye size={12} /> View
-                          </button>
+                            View
+                          </Button>
                           {pr.editable && canCreate && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="secondary"
                               onClick={() => setEditing(pr)}
-                              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
-                              EDIT
-                            </button>
+                              Edit
+                            </Button>
                           )}
                           {canAdvance && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
                               onClick={() =>
                                 next.opensForm
                                   ? setDeterminingMode(pr)
                                   : runTransition(pr, next.action).catch(() => {})
                               }
-                              className="text-[11px] font-medium tracking-[0.03em] text-navy hover:underline"
                             >
                               {next.label}
-                            </button>
+                            </Button>
                           )}
                           {canReturn && (
-                            <button
-                              type="button"
+                            <Button
+                              size="table"
+                              variant="warning"
                               onClick={() => setReturning(pr)}
-                              className="text-[11px] font-medium tracking-[0.03em] text-danger hover:underline"
                             >
-                              RETURN
-                            </button>
+                              Return
+                            </Button>
                           )}
                         </div>
                       </td>

@@ -22,7 +22,7 @@ const extensionOf = (filename) => {
 
 export const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 8, parts: 9, fieldSize: 2048, fieldNameSize: 100 },
+  limits: { fileSize: MAX_FILE_BYTES, files: 2, fields: 8, parts: 10, fieldSize: 2048, fieldNameSize: 100 },
   fileFilter: (req, file, callback) => {
     const permitted = ALLOWED_TYPES[file.mimetype];
     if (!permitted) {
@@ -72,6 +72,6 @@ export const describeUploadError = (err) => {
   if (err?.code === "LIMIT_FILE_SIZE") {
     return `That file is larger than the ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB limit.`;
   }
-  if (err?.code === "LIMIT_FILE_COUNT") return "Upload one file at a time.";
+  if (err?.code === "LIMIT_FILE_COUNT") return "Too many files were uploaded.";
   return err?.message ?? "The file could not be uploaded.";
 };
