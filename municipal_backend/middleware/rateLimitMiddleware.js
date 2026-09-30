@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { sequelize } from "../models/db.js";
+import { takeDatabaseAttempt, clearDatabaseRateLimit } from "../services/databaseRateLimiter.js";
 const WINDOW_MS = 15 * 60 * 1000;
 const buckets = new Map();
 let workerDb;
@@ -8,7 +10,9 @@ if (process.env.CLOUDFLARE_WORKER === "true") {
   workerDb = env.SESSIONS;
 }
 
-export const takeAttempt = async (bucket, key, max, { db = workerDb, now = Date.now() } = {}) => {
+const standaloneProduction = () => process.env.NODE_ENV === "production" && process.env.CLOUDFLARE_WORKER !== "true";
+
+export const takeAttempt = async (bucket, key, max, { db = workerDb, mysql = standaloneProduction() ? sequelize : null, now = Date.now() } = {}) => {
   const id = crypto.createHmac("sha256", process.env.SESSION_SECRET || "local-rate-limit")
     .update(bucket + ":" + key).digest("hex");
   if (db) {
@@ -21,6 +25,9 @@ export const takeAttempt = async (bucket, key, max, { db = workerDb, now = Date.
     ).bind(id, now + WINDOW_MS, now, max + 1, now).first();
     return { allowed: row.attempts <= max, retryAfter: Math.max(1, Math.ceil((row.expires_at - now) / 1000)) };
   }
+  // A storage failure rejects the request; production never falls back to the
+  // per-process map and cannot reset its ceiling by restarting a Node worker.
+  if (mysql) return takeDatabaseAttempt(id, max, now, WINDOW_MS, mysql);
   // Local development only. Bound memory under address churn.
   for (const [storedKey, row] of buckets) if (row.expires_at <= now) buckets.delete(storedKey);
   let row = buckets.get(id);
@@ -39,10 +46,11 @@ export const rateLimit = ({ bucket, max, key = (req) => req.ip }) => (req, res, 
 };
 
 // A successful password check is not a failed guess. Clear the matching
-// counter without making authentication wait on a best-effort D1 cleanup.
+// counter without making authentication wait on best-effort storage cleanup.
 export const clearRateLimit = (bucket, key) => {
   const id = crypto.createHmac("sha256", process.env.SESSION_SECRET || "local-rate-limit")
     .update(bucket + ":" + key).digest("hex");
   buckets.delete(id);
   if (workerDb) workerDb.prepare("DELETE FROM rate_limits WHERE key = ?").bind(id).run().catch(() => {});
+  else if (standaloneProduction()) clearDatabaseRateLimit(id).catch(() => {});
 };

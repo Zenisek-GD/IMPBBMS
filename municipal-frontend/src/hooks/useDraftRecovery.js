@@ -1,70 +1,82 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/useAuth'
 
-// Local recovery is intentionally scoped to the signed-in account and browser.
-// It protects against an accidental close, reload, or brief offline period, but
-// it does not claim that an unsaved draft has reached the municipal record.
 const PREFIX = 'procurenance.form-draft.v1'
 const MAX_BYTES = 250_000
+const MAX_AGE = 7 * 86400000
 
-export default function useDraftRecovery({ key, value, onRestore }) {
+// Recovery remains local to this account and browser. It never submits a record
+// or persists attachments/passwords. Consumers pass only their ordinary fields.
+export default function useDraftRecovery({ key, value, onRestore, enabled = true, dirty = true }) {
   const { user } = useAuth()
   const [pendingDraft, setPendingDraft] = useState(null)
   const [lastSavedAt, setLastSavedAt] = useState(null)
+  const [storageError, setStorageError] = useState('')
+  const [decision, setDecision] = useState(0)
   const ready = useRef(false)
+  const clearedValue = useRef(null)
   const restoreHandler = useRef(onRestore)
-  const storageKey = `${PREFIX}.${user?.id ?? 'anonymous'}.${key}`
+  const activeSave = useRef(null)
+  const storageKey = user?.id && enabled ? `${PREFIX}.${user.id}.${key}` : null
   const serialized = JSON.stringify(value)
 
   useEffect(() => { restoreHandler.current = onRestore }, [onRestore])
-
   useEffect(() => {
     ready.current = false
-    // Queue these state updates after the storage read. React's effect rule
-    // correctly rejects synchronous effect-to-render cascades here.
-    queueMicrotask(() => {
-      setPendingDraft(null)
+    clearedValue.current = null
+    let cancelled = false
+    const update = (draft) => queueMicrotask(() => {
+      if (cancelled) return
+      setPendingDraft(draft)
       setLastSavedAt(null)
+      setStorageError('')
     })
+    update(null)
+    if (!storageKey) return undefined
     try {
       const raw = window.localStorage.getItem(storageKey)
-      if (!raw) {
+      const parsed = raw ? JSON.parse(raw) : null
+      if (parsed && parsed.value != null && Number.isFinite(parsed.savedAt) && Date.now() - parsed.savedAt < MAX_AGE) {
+        update(parsed)
+      } else {
+        if (raw) window.localStorage.removeItem(storageKey)
         ready.current = true
-        return
       }
-      const parsed = JSON.parse(raw)
-      if (!parsed?.value || !Number.isFinite(parsed.savedAt)) {
-        window.localStorage.removeItem(storageKey)
-        ready.current = true
-        return
-      }
-      queueMicrotask(() => setPendingDraft(parsed))
     } catch {
-      // Storage can be unavailable in private browsing. The workflow remains
-      // usable; only this convenience recovery is unavailable.
       ready.current = true
+      queueMicrotask(() => { if (!cancelled) setStorageError('Browser recovery is unavailable. Save your draft in the system before leaving.') })
     }
+    return () => { cancelled = true }
   }, [storageKey])
 
   useEffect(() => {
-    if (!ready.current) return undefined
     const save = () => {
+      if (!storageKey || !ready.current || !dirty || clearedValue.current === serialized) return
       try {
-        if (serialized.length > MAX_BYTES) return
+        if (serialized.length > MAX_BYTES) throw new Error('Draft too large')
         const savedAt = Date.now()
         window.localStorage.setItem(storageKey, JSON.stringify({ savedAt, value: JSON.parse(serialized) }))
         setLastSavedAt(savedAt)
-      } catch {
-        // Do not turn a storage quota failure into a form failure.
-      }
+        setStorageError('')
+      } catch { setStorageError('Browser recovery is unavailable. Save your draft in the system before leaving.') }
     }
+    activeSave.current = save
     const timer = window.setTimeout(save, 500)
-    window.addEventListener('beforeunload', save)
+    return () => { window.clearTimeout(timer) }
+  }, [serialized, storageKey, dirty, decision])
+
+  useEffect(() => {
+    const flush = () => activeSave.current?.()
+    window.addEventListener('auth:before-clear', flush)
+    window.addEventListener('beforeunload', flush)
+    window.addEventListener('pagehide', flush)
     return () => {
-      window.clearTimeout(timer)
-      window.removeEventListener('beforeunload', save)
+      flush()
+      window.removeEventListener('auth:before-clear', flush)
+      window.removeEventListener('beforeunload', flush)
+      window.removeEventListener('pagehide', flush)
     }
-  }, [serialized, storageKey])
+  }, [])
 
   const restoreDraft = () => {
     if (!pendingDraft) return
@@ -72,19 +84,22 @@ export default function useDraftRecovery({ key, value, onRestore }) {
     setLastSavedAt(pendingDraft.savedAt)
     setPendingDraft(null)
     ready.current = true
+    setDecision((value) => value + 1)
   }
-
   const discardDraft = () => {
-    try { window.localStorage.removeItem(storageKey) } catch { /* unavailable */ }
+    try { if (storageKey) window.localStorage.removeItem(storageKey) } catch { /* unavailable */ }
     setPendingDraft(null)
+    setLastSavedAt(null)
+    clearedValue.current = serialized
     ready.current = true
+    setDecision((value) => value + 1)
   }
-
   const clearDraft = () => {
-    try { window.localStorage.removeItem(storageKey) } catch { /* unavailable */ }
+    // Suppress pending timers and unmount flush after a successful server save.
+    clearedValue.current = serialized
+    try { if (storageKey) window.localStorage.removeItem(storageKey) } catch { /* unavailable */ }
     setPendingDraft(null)
     setLastSavedAt(null)
   }
-
-  return { pendingDraft, lastSavedAt, restoreDraft, discardDraft, clearDraft }
+  return { pendingDraft, lastSavedAt, storageError, restoreDraft, discardDraft, clearDraft }
 }

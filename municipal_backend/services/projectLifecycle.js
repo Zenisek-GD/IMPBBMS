@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { Appropriation } from "../models/appropriationModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
 import { PrHeader } from "../models/prModel.js";
@@ -7,6 +8,8 @@ import { ProcurementMode } from "../models/procurementModeModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
 import { Invoice, Payment } from "../models/paymentModel.js";
+import { projectFinancialPositions } from "./projectFinancials.js";
+import { calculateFinancialPosition, fiscalYearFilter, sumMoney } from "./financialCalculations.js";
 
 // ── WHAT A "PROJECT" IS ──────────────────────────────────────────────────────
 // The public sees a project, not a table. In this schema a project is an APP
@@ -75,9 +78,9 @@ const loadChain = async (appEntryIds) => {
   const prs = await PrHeader.findAll({ where: { appEntryId: { [Op.in]: appEntryIds } } });
   const prIds = prs.map((pr) => pr.id);
 
-  const rfqs = prIds.length
+  const rfqs = appEntryIds.length
     ? await Rfq.findAll({
-        where: { prHeaderId: { [Op.in]: prIds }, status: { [Op.in]: PUBLIC_RFQ_STATES } },
+        where: { [Op.or]: [{ prHeaderId: { [Op.in]: prIds } }, { appEntryId: { [Op.in]: appEntryIds } }], status: { [Op.in]: PUBLIC_RFQ_STATES } },
         include: [{ model: ProcurementMode, as: "mode" }],
       })
     : [];
@@ -167,35 +170,25 @@ const CATEGORY_RANK = { completed: 0, ongoing: 1, upcoming: 2 };
 
 // Money, in the three figures that matter publicly: what was budgeted, what it
 // was actually awarded for, and what has actually left the treasury.
-const deriveFinancials = (entry, { awards, contracts, invoices, payments }) => {
-  const budget = num(entry.abc);
-  const awardedAmount = awards.reduce((sum, award) => sum + num(award.amount), 0);
-  const contractAmount = contracts.reduce((sum, contract) => sum + num(contract.amount), 0);
-  const invoiced = invoices.reduce((sum, invoice) => sum + num(invoice.amount), 0);
-  const disbursed = payments
-    .filter((payment) => payment.status === "released")
-    .reduce((sum, payment) => sum + num(payment.amount), 0);
-
-  // Savings only mean something once there is an award to compare against.
-  const contracted = contractAmount || awardedAmount;
-  const savings = contracted ? budget - contracted : null;
-
+const deriveFinancials = (entry, { awards, contracts, invoices, payments }, position) => {
+  const financials = position ?? calculateFinancialPosition({ plannedAmount: entry.abc, invoices, payments });
+  const awardedAmount = sumMoney(awards, (row) => row.amount);
+  const contractAmount = sumMoney(contracts.filter((row) => row.status !== "rescinded"), (row) => row.amount);
+  const savings = financials.financialCloseoutApproved ? financials.recognizedSavings : null;
   return {
-    budget,
-    awardedAmount: awardedAmount || null,
-    contractAmount: contractAmount || null,
-    invoicedAmount: invoiced || null,
-    disbursedAmount: disbursed,
-    savings,
-    savingsPercent: savings !== null && budget > 0 ? Number(((savings / budget) * 100).toFixed(1)) : null,
-    // How much of the awarded value has actually been paid out.
-    utilisationPercent: contracted > 0 ? Number(((disbursed / contracted) * 100).toFixed(1)) : 0,
+    ...financials,
+    budget: financials.plannedAmount,
+    awardedAmount: awardedAmount || null, contractAmount: contractAmount || null,
+    invoicedAmount: financials.invoicedGross || null,
+    disbursedAmount: financials.supplierPaid,
+    savings, savingsPercent: savings !== null && financials.allocated > 0 ? Number(((savings / financials.allocated) * 100).toFixed(1)) : null,
+    utilisationPercent: financials.allocated > 0 ? Number(((financials.grossExpenses / financials.allocated) * 100).toFixed(1)) : 0,
   };
 };
 
 // Assembles one public project view. `detailed` adds the per-record breakdown
 // the detail page needs; the list view omits it to keep responses small.
-const buildProject = (entry, chain, { detailed = false, modeNames = null } = {}) => {
+const buildProject = (entry, chain, { detailed = false, modeNames = null, financialPosition = null } = {}) => {
   const phase = derivePhase(chain);
   const category = deriveCategory(phase, chain);
   const phaseIndex = PHASE_ORDER.indexOf(phase);
@@ -221,12 +214,12 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null } = {})
     progressPercent: Math.round(((phaseIndex + 1) / PHASE_ORDER.length) * 100),
     procurementMode:
       rfq?.mode?.name ?? modeNames?.get(entry.procurementMode) ?? entry.procurementMode,
-    fiscalYear: entry.fiscalYear,
+    fiscalYear: financialPosition?.fiscalYear ?? entry.fiscalYear,
     targetStartQuarter: entry.targetStartQuarter,
     targetCompletionQuarter: entry.targetCompletionQuarter,
     projectCategory: entry.category,
     fundSource: entry.fundSource,
-    financials: deriveFinancials(entry, chain),
+    financials: deriveFinancials(entry, chain, financialPosition),
     awardedTo: award?.vendor?.businessName ?? null,
     noaNumber: award?.noaNumber ?? null,
     noaDate: award?.noaDate ?? null,
@@ -315,7 +308,7 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null } = {})
 const chainFor = (entryId, grouped) => {
   const prs = grouped.prsByApp.get(entryId) ?? [];
   const prIds = new Set(prs.map((pr) => pr.id));
-  const rfqs = grouped.rfqs.filter((rfq) => prIds.has(rfq.prHeaderId));
+  const rfqs = grouped.rfqs.filter((rfq) => prIds.has(rfq.prHeaderId) || Number(rfq.appEntryId) === Number(entryId));
 
   const rfqIds = new Set(rfqs.map((rfq) => rfq.id));
   const bids = grouped.bids.filter((bid) => rfqIds.has(bid.rfqId));
@@ -342,8 +335,8 @@ export const listPublicProjects = async ({ search, category, fiscalYear, departm
   // Number() on a non-numeric string yields NaN, which Sequelize renders as the
   // literal `NaN` and MySQL rejects. Every numeric filter here is checked before
   // it reaches a query — these endpoints take anonymous input.
-  const year = Number(fiscalYear);
-  if (fiscalYear && Number.isFinite(year)) where.fiscalYear = year;
+  const year = fiscalYearFilter(fiscalYear);
+  if (year !== null) where[Op.and] = [{ [Op.or]: [{ "$appropriation.fiscalYear$": year }, { appropriationId: null, fiscalYear: year }] }];
 
   const departmentId = Number(department);
   if (department && Number.isFinite(departmentId)) where.implementingUnitId = departmentId;
@@ -360,18 +353,18 @@ export const listPublicProjects = async ({ search, category, fiscalYear, departm
 
   const entries = await AppEntry.findAll({
     where,
-    include: [{ model: Department, as: "implementingUnit" }],
+    include: [{ model: Department, as: "implementingUnit" }, { model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }],
     order: [["updatedAt", "DESC"]],
   });
 
-  const [chain, modeNames] = await Promise.all([
+  const [chain, modeNames, positions] = await Promise.all([
     loadChain(entries.map((entry) => entry.id)),
-    loadModeNames(),
+    loadModeNames(), projectFinancialPositions(entries.map((entry) => entry.id)),
   ]);
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
   const projects = entries.map((entry) =>
-    buildProject(entry, chainFor(entry.id, grouped), { detailed, modeNames })
+    buildProject(entry, chainFor(entry.id, grouped), { detailed, modeNames, financialPosition: positions.get(Number(entry.id)) })
   );
 
   // Completed projects lead the list: a finished procurement is the one with a
@@ -399,20 +392,20 @@ export const getPublicProject = async (id) => {
 
   const entry = await AppEntry.findOne({
     where: { id: entryId, status: { [Op.in]: PUBLISHED_APP_STATES } },
-    include: [{ model: Department, as: "implementingUnit" }],
+    include: [{ model: Department, as: "implementingUnit" }, { model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }],
   });
   if (!entry) return null;
 
-  const [chain, modeNames] = await Promise.all([loadChain([entry.id]), loadModeNames()]);
+  const [chain, modeNames, positions] = await Promise.all([loadChain([entry.id]), loadModeNames(), projectFinancialPositions([entry.id])]);
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
-  return buildProject(entry, chainFor(entry.id, grouped), { detailed: true, modeNames });
+  return buildProject(entry, chainFor(entry.id, grouped), { detailed: true, modeNames, financialPosition: positions.get(Number(entry.id)) });
 };
 
 // Aggregate figures for the portal header, computed over the same published set
 // the list returns so the totals always agree with the rows beneath them.
-export const getPublicSummary = async () => {
-  const projects = await listPublicProjects({});
+export const getPublicSummary = async (filters = {}) => {
+  const projects = await listPublicProjects(filters);
   const lastUpdatedAt = projects.reduce((latest, project) => {
     const candidate = project.lastUpdatedAt;
     if (!candidate || Number.isNaN(new Date(candidate).getTime())) return latest;
@@ -420,32 +413,30 @@ export const getPublicSummary = async () => {
     return latest;
   }, null);
 
-  // Savings are only meaningful against the projects that actually reached a
-  // contract. Comparing total contracted value to the budget of every project —
-  // including ones not yet advertised — would read as an enormous underspend
-  // when nothing of the sort has happened.
+  // Contract totals describe awards; only approved closeouts recognize savings.
   const contractedProjects = projects.filter((project) => project.financials.contractAmount);
-  const budgetOfContracted = contractedProjects.reduce(
-    (sum, project) => sum + project.financials.budget,
-    0
-  );
-  const totalContracted = contractedProjects.reduce(
-    (sum, project) => sum + project.financials.contractAmount,
-    0
-  );
+  const budgetOfContracted = sumMoney(contractedProjects, (project) => project.financials.plannedAmount);
+  const totalContracted = sumMoney(contractedProjects, (project) => project.financials.contractAmount);
 
   return {
+    fiscalYear: fiscalYearFilter(filters.fiscalYear) ?? "all",
+    totalAllocated: sumMoney(projects, (project) => project.financials.allocated),
+    totalGrossExpenses: sumMoney(projects, (project) => project.financials.grossExpenses),
+    recognizedSavings: sumMoney(projects, (project) => project.financials.recognizedSavings),
     totalProjects: projects.length,
     completed: projects.filter((project) => project.category === "completed").length,
     ongoing: projects.filter((project) => project.category === "ongoing").length,
     upcoming: projects.filter((project) => project.category === "upcoming").length,
-    totalBudget: projects.reduce((sum, project) => sum + project.financials.budget, 0),
+    totalBudget: sumMoney(projects, (project) => project.financials.plannedAmount),
+    totalSupplierPaid: sumMoney(projects, (project) => project.financials.supplierPaid),
+    totalTaxesWithheld: sumMoney(projects, (project) => project.financials.taxesWithheld),
+    totalRetention: sumMoney(projects, (project) => project.financials.retention),
+    totalUnpaid: sumMoney(projects, (project) => project.financials.unpaid),
     totalContracted,
-    // The comparable budget for the contracted set, so the UI can state a
-    // savings figure that means what it says.
+    // Kept for comparison with procurement plans; this is not recognized savings.
     budgetOfContracted,
     contractedProjects: contractedProjects.length,
-    totalDisbursed: projects.reduce((sum, project) => sum + project.financials.disbursedAmount, 0),
+    totalDisbursed: sumMoney(projects, (project) => project.financials.supplierPaid),
     lastUpdatedAt,
   };
 };

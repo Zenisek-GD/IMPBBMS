@@ -6,6 +6,9 @@ export const fetchInvoices = (params = {}) =>
 export const submitInvoice = (payload) =>
   apiClient.post('/finance/invoices', payload).then((res) => res.data)
 
+export const resubmitInvoice = (id, payload) =>
+  apiClient.post(`/finance/invoices/${id}/resubmit`, payload).then((res) => res.data)
+
 export const certifyInvoice = (id, decision, remarks) =>
   apiClient.post(`/finance/invoices/${id}/certify`, { decision, remarks }).then((res) => res.data)
 
@@ -17,6 +20,15 @@ export const fetchBudgetMonitor = (params = {}) =>
 
 export const dispatchAlerts = () =>
   apiClient.post('/finance/budget-monitor/alerts').then((res) => res.data)
+
+export const fetchBudgetControls = (params = {}) =>
+  apiClient.get('/finance/budget-controls', { params }).then((res) => res.data)
+export const createBudgetControl = (payload) =>
+  apiClient.post('/finance/budget-controls', payload).then((res) => res.data)
+export const updateBudgetControl = (id, payload) =>
+  apiClient.patch(`/finance/budget-controls/${id}`, payload).then((res) => res.data)
+export const transitionBudgetControl = (id, action, remarks) =>
+  apiClient.post(`/finance/budget-controls/${id}/transition`, { action, remarks }).then((res) => res.data)
 
 // ── Appropriation register ──────────────────────────────────────────────────
 // The ordinance lines everything else is charged against.

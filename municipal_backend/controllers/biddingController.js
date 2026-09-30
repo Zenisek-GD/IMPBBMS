@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { fundingIncludes, fundingYearCondition, fundingYearOf } from "../services/fundingYear.js";
 import { readProcurementSchedule, assertApprovedSchedule, synchronizeSchedule } from "../services/procurementSchedule.js";
 import { scheduleSnapshot, scheduleIsLocked, scheduleValidationError } from "../services/procurementSchedulePolicy.js";
 import { assertApprovedEvaluationPlan } from "../services/evaluationPlan.js";
@@ -18,6 +19,7 @@ import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.
 import { PrHeader } from "../models/prModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Appropriation } from "../models/appropriationModel.js";
+import { ProjectAllocation } from "../models/budgetControlModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
 import { BacResolution, nextResolutionNo } from "../models/bacResolutionModel.js";
@@ -178,6 +180,13 @@ export const updateSvpTerms = async (req, res) => {
 export const listRfqs = async (req, res) => {
   const { status, search } = req.query;
   const where = {};
+  const funding = fundingIncludes();
+  const listIncludes = { include: rfqIncludes.include.map(entry => entry.as === "purchaseRequisition" ? { ...entry, include: funding[0].include } : entry).concat(funding[1]) };
+  const serialize = row => ({ ...serializeRfq(row), fiscalYear: fundingYearOf(row) });
+  if (req.query.fiscalYear != null) {
+    const scope = fundingYearCondition(req.query.fiscalYear, "");
+    if (scope) where[Op.and] = [scope];
+  }
   if (status) where.status = status;
   if (req.query.prebidRequired === "true" || req.query.prebidRequired === "false") where.prebidRequired = req.query.prebidRequired === "true";
   const searched = searchCondition(search, ["referenceNo", "title"]);
@@ -194,15 +203,15 @@ export const listRfqs = async (req, res) => {
 
   const paged = ["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
   if (!paged) {
-    const rfqs = await Rfq.findAll({ where, ...rfqIncludes, order: [["createdAt", "DESC"]] });
-    return res.json(rfqs.map(serializeRfq));
+    const rfqs = await Rfq.findAll({ where, ...listIncludes, order: [["createdAt", "DESC"]] });
+    return res.json(rfqs.map(serialize));
   }
   const page = parseListParams(req.query, {
     sorts: { referenceNo: "referenceNo", title: "title", abc: "abc", closingDate: "closingDate", openingDate: "openingDate", status: "status", createdAt: "createdAt" },
     defaultSort: { field: "createdAt", direction: "desc" },
   });
-  const { count, rows } = await Rfq.findAndCountAll({ where, ...rfqIncludes, ...page, distinct: true });
-  res.json(pageEnvelope({ rows: rows.map(serializeRfq), total: count, page: page.page, pageSize: page.pageSize }));
+  const { count, rows } = await Rfq.findAndCountAll({ where, ...listIncludes, ...page, distinct: true, subQuery: false });
+  res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: page.page, pageSize: page.pageSize }));
 };
 
 export const createRfq = async (req, res) => {
@@ -267,6 +276,10 @@ export const createRfq = async (req, res) => {
   await assertNewAttemptAllowed({ prHeaderId: pr.id, modeKey });
 
   const rfq = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
+    // Serialize with financial closeout before creating any new procurement.
+    await AppEntry.findByPk(pr.appEntryId, { transaction, lock: transaction.LOCK.UPDATE });
+    const allocation = await ProjectAllocation.findOne({ where: { appEntryId: pr.appEntryId }, transaction });
+    if (allocation?.status === "closed") throw workflowError("This project has an approved financial closeout and cannot start new procurement.");
     await assertNewAttemptAllowed({ prHeaderId: pr.id, modeKey: modeKey, transaction });
     const created = await Rfq.create({
       referenceNo: await nextReference(modeKey, transaction),

@@ -11,9 +11,11 @@ import {
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
 import { PrHeader } from "../models/prModel.js";
-import { buildLedger, availableFor, programmedFor } from "../services/budgetLedger.js";
-import { REENACTABLE_EXPENSE_CLASSES } from "../services/budgetPreparationWorkflow.js";
-import { auditFromRequest } from "../services/auditLog.js";
+import { buildLedger, availableFor, programmedFor, allocationBalanceFor } from "../services/budgetLedger.js";
+import { fiscalYearFilter } from "../services/financialCalculations.js";
+import { withAuditTransaction } from "../services/auditLog.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
+import { activeDepartment, recordState, lockAppropriationYear } from "../services/requisitionRecords.js";
 
 // The appropriation register: the ordinance lines the LGU may actually spend
 // against. Recorded by the Budget Officer from the enacted Appropriation
@@ -62,7 +64,8 @@ export const listAppropriations = async (req, res) => {
   const { fiscalYear, fund, departmentId, status, chargeable } = req.query;
 
   const where = {};
-  if (Number.isFinite(Number(fiscalYear))) where.fiscalYear = Number(fiscalYear);
+  const selectedYear = fiscalYearFilter(fiscalYear);
+  if (selectedYear !== null) where.fiscalYear = selectedYear;
   if (fund && FUNDS.includes(fund)) where.fund = fund;
   if (Number.isFinite(Number(departmentId))) where.departmentId = Number(departmentId);
   if (status) where.status = status;
@@ -79,12 +82,16 @@ export const listAppropriations = async (req, res) => {
   // "how much is left" from a separate endpoint and risk disagreeing.
   const serialized = [];
   for (const row of rows) {
-    const [available, programmed] = await Promise.all([
+    const [available, programmed, allocated] = await Promise.all([
       availableFor(row.id),
       programmedFor(row.id),
+      allocationBalanceFor(row.id),
     ]);
     serialized.push(
       serialize(row, {
+        allocated: allocated?.allocated ?? 0,
+        reserved: allocated?.reserved ?? 0,
+        unallocatedAvailable: allocated?.unallocatedAvailable ?? 0,
         obligated: available?.obligated ?? 0,
         available: available?.available ?? 0,
         programmed: programmed?.programmed ?? 0,
@@ -147,195 +154,60 @@ const validateStatusChange = (current, next) => {
 // obligations, and essential operating expenses. New appropriations and capital
 // outlay do not carry over, which is exactly the constraint that makes an LGU
 // under a reenacted budget unable to start new projects.
-export const reenactPriorYear = async (req, res) => {
-  const fiscalYear = Number(req.body?.fiscalYear);
-  if (!Number.isInteger(fiscalYear)) {
-    return res.status(400).json({ message: "A valid fiscal year is required." });
-  }
-
-  // Only where nothing has been enacted for the year. A reenactment alongside
-  // an enacted ordinance would double the LGU's spending authority.
-  const enacted = await Appropriation.findOne({
-    where: { fiscalYear, type: { [Op.in]: ["annual", "supplemental"] }, status: "enacted" },
-  });
-  if (enacted) {
-    return res.status(409).json({
-      message:
-        `Ordinance ${enacted.ordinanceNo} has been enacted for ${fiscalYear}. Sec. 323 reenactment ` +
-        `applies only while the Sanggunian has not passed the annual appropriations.`,
-    });
-  }
-
-  if (await Appropriation.findOne({ where: { fiscalYear, type: "reenacted" } })) {
-    return res.status(409).json({ message: `${fiscalYear} has already been reenacted.` });
-  }
-
-  const priorYear = fiscalYear - 1;
-  const source = await Appropriation.findAll({
-    where: {
-      fiscalYear: priorYear,
-      status: "enacted",
-      // Capital Outlay is deliberately excluded — see above.
-      expenseClass: { [Op.in]: REENACTABLE_EXPENSE_CLASSES },
-    },
-  });
-
-  if (source.length === 0) {
-    return res.status(409).json({
-      message: `No enacted Personal Services or MOOE appropriations found for ${priorYear} to reenact.`,
-    });
-  }
-
-  const created = await Promise.all(
-    source.map((line) =>
-      Appropriation.create({
-        fiscalYear,
-        ordinanceNo: `${line.ordinanceNo} (reenacted for ${fiscalYear} under LGC Sec. 323)`,
-        ordinanceDate: line.ordinanceDate,
-        type: "reenacted",
-        fund: line.fund,
-        expenseClass: line.expenseClass,
-        papCode: line.papCode,
-        uacsCode: line.uacsCode,
-        title: line.title,
-        amount: line.amount,
-        // Reenactment is by operation of law, so the line is live immediately —
-        // there is no further act for anyone to perform.
-        status: "enacted",
-        remarks:
-          `Deemed reenacted from FY ${priorYear} under LGC Sec. 323 pending enactment of the ` +
-          `${fiscalYear} Appropriation Ordinance.`,
-        departmentId: line.departmentId,
-        recordedById: req.currentUser.id,
-      })
-    )
-  );
-
-  await auditFromRequest(req, {
-    actionType: "budget.appropriations.reenacted",
-    entityRef: "appropriation",
-    entityId: created[0]?.id ?? null,
-    summary:
-      `FY ${priorYear} appropriations deemed reenacted for ${fiscalYear} under LGC Sec. 323 — ` +
-      `${created.length} line(s), capital outlay excluded`,
-    afterState: {
-      fiscalYear,
-      linesReenacted: created.length,
-      totalAmount: created.reduce((sum, line) => sum + Number(line.amount), 0),
-      excluded: "capitalOutlay",
-    },
-  });
-
-  res.status(201).json({
-    fiscalYear,
-    reenactedFrom: priorYear,
-    lines: created.length,
-    totalAmount: created.reduce((sum, line) => sum + Number(line.amount), 0),
-    notice:
-      "Capital Outlay was not reenacted. Under LGC Sec. 323 only salaries of existing positions, " +
-      "statutory and contractual obligations and essential operating expenses carry over, so no new " +
-      "capital project may be started until the Appropriation Ordinance is passed.",
-  });
+export const reenactPriorYear = async () => {
+  throw workflowError("Reenactment requires a documented budget control request, reviewed recurring income, eligible prior-year lines and independent approval. Use Budget controls to prepare the request.", 403);
 };
+
+const appropriationValues = (payload) => ({
+  fiscalYear: Number(payload.fiscalYear), ordinanceNo: payload.ordinanceNo.trim(), ordinanceDate: payload.ordinanceDate || null, type: payload.type ?? "annual",
+  fund: payload.fund ?? "generalFund", expenseClass: payload.expenseClass ?? "mooe", papCode: payload.papCode?.trim() || null, uacsCode: payload.uacsCode?.trim() || null,
+  title: payload.title.trim(), amount: Number(payload.amount), status: payload.status ?? "draft", remarks: payload.remarks?.trim() || null, departmentId: payload.departmentId ? Number(payload.departmentId) : null,
+});
 
 export const createAppropriation = async (req, res) => {
   const error = validate(req.body);
-  if (error) return res.status(400).json({ message: error });
-
-  if (req.body.departmentId) {
-    const department = await Department.findByPk(Number(req.body.departmentId));
-    if (!department) return res.status(400).json({ message: "That office does not exist." });
-  }
-
-  const appropriation = await Appropriation.create({
-    fiscalYear: Number(req.body.fiscalYear),
-    ordinanceNo: req.body.ordinanceNo.trim(),
-    ordinanceDate: req.body.ordinanceDate ?? null,
-    type: req.body.type ?? "annual",
-    fund: req.body.fund ?? "generalFund",
-    expenseClass: req.body.expenseClass ?? "mooe",
-    papCode: req.body.papCode?.trim() || null,
-    uacsCode: req.body.uacsCode?.trim() || null,
-    title: req.body.title.trim(),
-    amount: Number(req.body.amount),
-    status: req.body.status === "enacted" ? "enacted" : "draft",
-    remarks: req.body.remarks?.trim() || null,
-    departmentId: req.body.departmentId ? Number(req.body.departmentId) : null,
-    recordedById: req.currentUser.id,
+  if (error) throw workflowError(error, 400);
+  if (req.body.status != null && req.body.status !== "draft") throw workflowError("Direct records must remain drafts. Annual appropriations are released by the existing budget and ordinance workflow; documented corrections or migrations require an independently approved budget control request.", 403);
+  if (req.body.type === "reenacted") throw workflowError("Use the prior-year reenactment action to preserve the source appropriation and prevent duplicate authority.", 400);
+  const appropriation = await withAuditTransaction(async (transaction, audit) => {
+    await lockAppropriationYear(Number(req.body.fiscalYear), transaction);
+    if (req.body.departmentId) await activeDepartment(req.body.departmentId, { transaction });
+    const created = await Appropriation.create({ ...appropriationValues(req.body), recordedById: req.currentUser.id }, { transaction });
+    await audit(actorAudit(req, { actionType: "appropriation.recorded", entityRef: "appropriation", entityId: created.id, summary: `${created.ordinanceNo}: appropriation recorded`, beforeState: null, afterState: recordState(created) }));
+    return created;
   });
-
-  await auditFromRequest(req, {
-    actionType: "appropriation.recorded",
-    entityRef: "appropriation",
-    entityId: appropriation.id,
-    summary: `${appropriation.ordinanceNo} — ${appropriation.title} (₱${Number(appropriation.amount).toLocaleString()})`,
-    afterState: {
-      status: appropriation.status,
-      amount: Number(appropriation.amount),
-      fund: appropriation.fund,
-      fiscalYear: appropriation.fiscalYear,
-    },
-  });
-
   res.status(201).json(serialize(await Appropriation.findByPk(appropriation.id, withIncludes)));
 };
 
 export const updateAppropriation = async (req, res) => {
-  const appropriation = await Appropriation.findByPk(req.params.id, withIncludes);
-  if (!appropriation) return res.status(404).json({ message: "Appropriation not found." });
-
-  if (appropriation.status === "closed") {
-    return res.status(409).json({ message: "A closed appropriation can no longer be amended." });
-  }
-
-  const merged = { ...serialize(appropriation), ...req.body };
-  const error = validate(merged);
-  if (error) return res.status(400).json({ message: error });
-
-  const statusError = validateStatusChange(appropriation.status, req.body.status);
-  if (statusError) return res.status(409).json({ message: statusError });
-
-  // Reducing an appropriation below what has already been committed against it
-  // would create a negative balance that no later transaction could resolve.
-  const newAmount = Number(merged.amount);
-  const balances = await availableFor(appropriation.id);
-  if (newAmount < balances.obligated) {
-    return res.status(409).json({
-      message:
-        `₱${balances.obligated.toLocaleString()} is already obligated against this line. ` +
-        `It cannot be reduced to ₱${newAmount.toLocaleString()} without first cancelling those commitments.`,
-      obligated: balances.obligated,
-    });
-  }
-
-  const before = { amount: Number(appropriation.amount), status: appropriation.status };
-
-  await appropriation.update({
-    fiscalYear: Number(merged.fiscalYear),
-    ordinanceNo: merged.ordinanceNo.trim(),
-    ordinanceDate: merged.ordinanceDate ?? null,
-    type: merged.type,
-    fund: merged.fund,
-    expenseClass: merged.expenseClass,
-    papCode: merged.papCode?.trim() || null,
-    uacsCode: merged.uacsCode?.trim() || null,
-    title: merged.title.trim(),
-    amount: newAmount,
-    status: merged.status,
-    remarks: merged.remarks?.trim() || null,
-    departmentId: merged.departmentId ? Number(merged.departmentId) : null,
+  const observed = await Appropriation.findByPk(req.params.id);
+  if (!observed) throw workflowError("Appropriation not found.", 404);
+  const updated = await withAuditTransaction(async (transaction, audit) => {
+    for (const year of [...new Set([observed.fiscalYear, Number(req.body.fiscalYear ?? observed.fiscalYear)])].sort((a, b) => a - b)) await lockAppropriationYear(year, transaction);
+    const appropriation = await Appropriation.findByPk(observed.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (appropriation.fiscalYear !== observed.fiscalYear) throw workflowError("The appropriation changed. Reload before amending it.");
+    if (appropriation.status === "closed") throw workflowError("A closed appropriation can no longer be amended.");
+    if (appropriation.status !== "draft" || (req.body.status && req.body.status !== "draft")) throw workflowError("Enacted appropriations can only be changed through the authorized budget workflow or an independently approved correction or transfer request.", 403);
+    const beforeState = recordState(appropriation), merged = { ...beforeState, ...req.body };
+    const error = validate(merged);
+    if (error) throw workflowError(error, 400);
+    const statusError = validateStatusChange(appropriation.status, merged.status);
+    if (statusError) throw workflowError(statusError);
+    const values = appropriationValues(merged);
+    if (values.departmentId && values.departmentId !== appropriation.departmentId) await activeDepartment(values.departmentId, { transaction });
+    if (values.type !== appropriation.type && (values.type === "reenacted" || appropriation.type === "reenacted")) throw workflowError("An appropriation's reenactment origin cannot be changed.");
+    const balances = await availableFor(appropriation.id, { transaction });
+    const planned = await programmedFor(appropriation.id, { transaction });
+    if (values.amount < Math.max(balances.obligated, planned.programmed)) throw workflowError("The appropriation cannot be reduced below its existing obligations or programmed procurement plans.", 409, { obligated: balances.obligated, programmed: planned.programmed });
+    if (balances.obligated > 0 || planned.programmed > 0) {
+      const changedAuthority = ["fiscalYear", "fund", "expenseClass", "departmentId", "type"].filter((key) => values[key] !== beforeState[key]);
+      if (changedAuthority.length) throw workflowError(`This appropriation already supports records. Its ${changedAuthority.join(", ")} cannot be reassigned while those records remain active.`);
+    }
+    await appropriation.update(values, { transaction });
+    await audit(actorAudit(req, { actionType: "appropriation.amended", entityRef: "appropriation", entityId: appropriation.id, summary: `${appropriation.ordinanceNo}: appropriation amended`, beforeState, afterState: recordState(appropriation) }));
+    return appropriation;
   });
-
-  await auditFromRequest(req, {
-    actionType: "appropriation.amended",
-    entityRef: "appropriation",
-    entityId: appropriation.id,
-    summary: `${appropriation.ordinanceNo} amended`,
-    beforeState: before,
-    afterState: { amount: newAmount, status: merged.status },
-  });
-
-  res.json(serialize(await Appropriation.findByPk(appropriation.id, withIncludes)));
+  res.json(serialize(await Appropriation.findByPk(updated.id, withIncludes)));
 };
 
 // Live balances for one line — used by the APP entry form to show what is left
@@ -344,36 +216,33 @@ export const getAppropriationBalance = async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ message: "Invalid appropriation reference." });
 
-  const [available, programmed] = await Promise.all([availableFor(id), programmedFor(id)]);
+  const [available, programmed, allocated] = await Promise.all([availableFor(id), programmedFor(id), allocationBalanceFor(id)]);
   if (!available) return res.status(404).json({ message: "Appropriation not found." });
 
-  res.json({ ...available, ...programmed });
+  res.json({ ...available, ...programmed, ...allocated });
 };
 
 // ── Budget monitor ───────────────────────────────────────────────────────────
 const ALERT_WINDOW_DAYS = 90;
 const HIGH_UNOBLIGATED_RATIO = 0.5;
 
-const daysUntilYearEnd = () => {
-  const now = new Date();
-  return Math.max(0, Math.ceil((new Date(now.getFullYear(), 11, 31) - now) / 86400000));
-};
+const daysUntilYearEnd = (year) => year === null ? null : Math.max(0, Math.ceil((Date.UTC(year + 1, 0, 1) - 8 * 3600000 - Date.now()) / 86400000));
 
 export const getBudgetMonitor = async (req, res) => {
-  const fiscalYear = Number(req.query.fiscalYear) || new Date().getFullYear();
+  const fiscalYear = fiscalYearFilter(req.query.fiscalYear);
   const ledger = await buildLedger({
-    fiscalYear,
+    fiscalYear: fiscalYear ?? "all",
     fund: req.query.fund,
     departmentId: req.query.departmentId,
   });
 
-  const remainingDays = daysUntilYearEnd();
+  const remainingDays = daysUntilYearEnd(fiscalYear);
 
   // Risk is about maturity: an unobligated balance is unremarkable in February
   // and serious in November, because what is not committed by year-end reverts.
   const withRisk = (row) => {
     const ratio = row.appropriated > 0 ? row.unobligated / row.appropriated : 0;
-    const maturing = remainingDays <= ALERT_WINDOW_DAYS && ratio > 0;
+    const maturing = remainingDays !== null && remainingDays <= ALERT_WINDOW_DAYS && ratio > 0;
     return {
       ...row,
       unobligatedRatio: Number(ratio.toFixed(4)),
@@ -387,7 +256,7 @@ export const getBudgetMonitor = async (req, res) => {
   };
 
   res.json({
-    fiscalYear,
+    fiscalYear: fiscalYear ?? "all",
     daysToYearEnd: remainingDays,
     alertWindowDays: ALERT_WINDOW_DAYS,
     totals: ledger.totals,
@@ -399,7 +268,8 @@ export const getBudgetMonitor = async (req, res) => {
 // The obligation register — every ORS raised, with its status. This is the
 // document trail COA asks for, and it did not exist before.
 export const listObligations = async (req, res) => {
-  const { fiscalYear, status } = req.query;
+  const { status } = req.query;
+  const fiscalYear = fiscalYearFilter(req.query.fiscalYear);
 
   const where = {};
   if (status) where.status = status;
@@ -410,7 +280,7 @@ export const listObligations = async (req, res) => {
       {
         model: Appropriation,
         as: "appropriation",
-        ...(Number.isFinite(Number(fiscalYear)) ? { where: { fiscalYear: Number(fiscalYear) } } : {}),
+        ...(fiscalYear !== null ? { where: { fiscalYear } } : {}),
         include: [{ model: Department, as: "office" }],
       },
       { model: PrHeader, as: "requisition", attributes: ["id", "prNumber", "status"] },
@@ -432,6 +302,7 @@ export const listObligations = async (req, res) => {
       particulars: obligation.particulars,
       prNumber: obligation.requisition?.prNumber ?? null,
       prStatus: obligation.requisition?.status ?? null,
+      fiscalYear: obligation.appropriation?.fiscalYear ?? null,
       ordinanceNo: obligation.appropriation?.ordinanceNo ?? null,
       appropriationTitle: obligation.appropriation?.title ?? null,
       departmentName: obligation.appropriation?.office?.name ?? null,
@@ -441,8 +312,10 @@ export const listObligations = async (req, res) => {
 
 export const dispatchUnexpendedAlerts = async (req, res) => {
   const { notifyByPermission, NOTIFICATION_EVENTS } = await import("../services/notifier.js");
-  const fiscalYear = Number(req.query.fiscalYear) || new Date().getFullYear();
-  const remainingDays = daysUntilYearEnd();
+  const fiscalYear = fiscalYearFilter(req.query.fiscalYear);
+  const remainingDays = daysUntilYearEnd(fiscalYear);
+
+  if (fiscalYear !== fiscalYearFilter(undefined)) throw workflowError("Year-end reminders may only be dispatched for the current fiscal year.", 400);
 
   if (remainingDays > ALERT_WINDOW_DAYS) {
     return res.json({

@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { createDocumentFiscalYearResolver } from "../services/documentFiscalYear.js";
+import { fiscalYearFilter } from "../services/financialCalculations.js";
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
 import {
@@ -86,6 +88,16 @@ export const listDocuments = async (req, res) => {
   const search = searchCondition(req.query.search, ["documentNo", "title", "documentType"]);
   if (search) where[Op.and] = [search];
 
+  const resolveYear = createDocumentFiscalYearResolver();
+  const selectedYear = req.query.fiscalYear == null ? null : fiscalYearFilter(req.query.fiscalYear);
+  if (selectedYear !== null) {
+    const references = await GeneratedDocument.findAll({ where, attributes: ['id', 'entityRef', 'entityId'] });
+    const matching = [];
+    for (const doc of references) if (Number(await resolveYear(doc)) === selectedYear) matching.push(doc.id);
+    where.id = { [Op.in]: matching };
+  }
+  const serializeWithYear = async doc => ({ ...serialize(doc), fiscalYear: await resolveYear(doc) });
+
   // Record-detail and legacy callers still expect a plain array. The table
   // screen opts into this bounded envelope explicitly with page/pageSize.
   const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
@@ -95,7 +107,7 @@ export const listDocuments = async (req, res) => {
       ...withIncludes,
       order: [["createdAt", "DESC"]],
     });
-    return res.json(documents.map((doc) => serialize(doc)));
+    return res.json(await Promise.all(documents.map(serializeWithYear)));
   }
 
   const paging = parseListParams(req.query, {
@@ -118,7 +130,7 @@ export const listDocuments = async (req, res) => {
   });
 
   return res.json(pageEnvelope({
-    rows: rows.map((doc) => serialize(doc)),
+    rows: await Promise.all(rows.map(serializeWithYear)),
     total: count,
     page: paging.page,
     pageSize: paging.pageSize,

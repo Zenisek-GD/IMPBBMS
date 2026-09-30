@@ -1,4 +1,5 @@
 export { TrustedDevice, LoginSession } from "./authSecurityModel.js";
+export { RateLimitBucket } from "./rateLimitModel.js";
 export { TwgDeclaration, TwgAssessment } from "./twgModel.js";
 export { ProcurementAttempt, NegotiatedReview, FailureRecord, BacDecisionVote } from "./procurementAttemptModel.js";
 export { EvaluationPlan, EvaluatorDeclaration, EvaluationReturn, EvaluationCriteriaAmendment } from "./evaluationWorkflowModel.js";
@@ -95,6 +96,8 @@ export {
 } from "./publicMessageModel.js";
 export { Contract, Delivery } from "./contractModel.js";
 export { Invoice, Payment } from "./paymentModel.js";
+export { MutationReceipt } from "./mutationReceiptModel.js";
+export { ProjectAllocation, BudgetControlRequest, BUDGET_CONTROL_KINDS, CLOSEOUT_CLASSIFICATIONS } from "./budgetControlModel.js";
 export { PendingItem } from "./pendingItemModel.js";
 export { AuditLog } from "./auditLogModel.js";
 export {

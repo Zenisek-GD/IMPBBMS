@@ -3,6 +3,10 @@ import { Receipt, Banknote, Plus, ShieldAlert } from 'lucide-react'
 import * as financeApi from '../../api/finance'
 import { INVOICE_STATUS_TONES } from '../../api/finance'
 import { fetchContracts } from '../../api/contracts'
+import useDraftRecovery from '../../hooks/useDraftRecovery'
+import DraftRecoveryNotice from '../../components/ui/DraftRecoveryNotice'
+import { useActionQueue } from '../../context/useActionQueue'
+import WorkspaceFiscalYear from '../../components/ui/WorkspaceFiscalYear'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
@@ -19,15 +23,18 @@ import { useServerTable } from '../../components/ui/useServerTable'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
-function SubmitInvoiceModal({ onClose, onSubmitted }) {
+function SubmitInvoiceModal({ invoice, onClose, onSubmitted }) {
+  const { fiscalYear } = useActionQueue()
   const [contracts, setContracts] = useState([])
-  const [form, setForm] = useState({ contractId: '', deliveryId: '', amount: '', supplierInvoiceRef: '' })
+  const [form, setForm] = useState({ contractId: invoice?.contractId ?? '', deliveryId: invoice?.deliveryId ?? '', amount: invoice?.amount ?? '', supplierInvoiceRef: invoice?.supplierInvoiceRef ?? '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const draft = useDraftRecovery({ key: `invoice-${invoice?.id ?? 'new'}`, value: form, onRestore: (saved) => setForm({ ...saved, ...(invoice ? { contractId: invoice.contractId, deliveryId: invoice.deliveryId } : {}) }), dirty: Boolean(form.amount || form.supplierInvoiceRef || form.contractId) })
 
   useEffect(() => {
+    if (invoice) return
     let cancelled = false
-    fetchContracts()
+    fetchContracts({ fiscalYear })
       .then((data) => {
         if (!cancelled) setContracts(data.filter((contract) => contract.status === 'active'))
       })
@@ -35,15 +42,18 @@ function SubmitInvoiceModal({ onClose, onSubmitted }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [invoice, fiscalYear])
 
   const selected = contracts.find((contract) => String(contract.id) === String(form.contractId))
   // Only an accepted delivery can be invoiced (Section 6).
   const acceptedDeliveries = (selected?.deliveries ?? []).filter((d) => d.status === 'accepted')
 
   return (
-    <Modal title="Submit invoice" onClose={onClose}>
+    <Modal title={invoice ? `Correct ${invoice.invoiceNo}` : "Submit invoice"} onClose={onClose}>
       <div className="flex flex-col gap-4">
+        <DraftRecoveryNotice draft={draft} />
+        {invoice && <div className="rounded border border-warning/30 p-3 text-sm"><p>{invoice.contractNo}</p><p className="mt-1 text-text-secondary">Returned: {invoice.remarks}</p></div>}
+        {!invoice && <>
         <div>
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
             Contract
@@ -86,6 +96,7 @@ function SubmitInvoiceModal({ onClose, onSubmitted }) {
           )}
         </div>
 
+        </>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
@@ -126,15 +137,19 @@ function SubmitInvoiceModal({ onClose, onSubmitted }) {
             type="button"
             disabled={saving || !form.contractId || !form.deliveryId || !form.amount}
             onClick={async () => {
+              if (saving) return
               setError('')
               setSaving(true)
               try {
-                await financeApi.submitInvoice({
+                const payload = {
                   contractId: Number(form.contractId),
                   deliveryId: Number(form.deliveryId),
                   amount: Number(form.amount),
                   supplierInvoiceRef: form.supplierInvoiceRef,
-                })
+                }
+                if (invoice) await financeApi.resubmitInvoice(invoice.id, payload)
+                else await financeApi.submitInvoice(payload)
+                draft.clearDraft()
                 onSubmitted()
                 onClose()
               } catch (err) {
@@ -145,7 +160,7 @@ function SubmitInvoiceModal({ onClose, onSubmitted }) {
             }}
             className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            {saving ? 'SUBMITTING...' : 'SUBMIT INVOICE'}
+            {saving ? 'SUBMITTING...' : invoice ? 'RESUBMIT INVOICE' : 'SUBMIT INVOICE'}
           </button>
         </div>
       </div>
@@ -154,20 +169,27 @@ function SubmitInvoiceModal({ onClose, onSubmitted }) {
 }
 
 export default function Invoices() {
+  const { fiscalYear } = useActionQueue()
   const permissions = usePermissions()
   const [submitting, setSubmitting] = useState(false)
   const [returning, setReturning] = useState(null)
+  const [correcting, setCorrecting] = useState(null)
+  const [busy, setBusy] = useState(false)
   const [remarks, setRemarks] = useState('')
   const [actionError, setActionError] = useState('')
 
   const run = async (fn) => {
+    if (busy) return false
+    setBusy(true)
     setActionError('')
     try {
       await fn()
       refresh()
+      return true
     } catch (err) {
       setActionError(err.response?.data?.message ?? 'That action could not be completed.')
-    }
+      return false
+    } finally { setBusy(false) }
   }
 
   // Certification and release are separate permissions held by separate
@@ -180,6 +202,7 @@ export default function Invoices() {
 
   const table = useServerTable(financeApi.fetchInvoices, {
     urlKey: 'invoices',
+    baseParams: { fiscalYear },
     filters: [
       {
         key: 'status',
@@ -213,6 +236,7 @@ export default function Invoices() {
         }
       />
 
+      <WorkspaceFiscalYear />
       {canProcess && (
         <div className="flex items-start gap-3 rounded-lg border border-border-muted bg-chip/40 p-4">
           <ShieldAlert size={16} className="mt-0.5 shrink-0 text-navy" />
@@ -294,11 +318,15 @@ export default function Invoices() {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex w-max items-center gap-2">
+                        {isSupplier && invoice.status === 'returned' && (
+                          <button type="button" onClick={() => setCorrecting(invoice)} className="text-[11px] font-medium text-accent hover:underline">CORRECT AND RESUBMIT</button>
+                        )}
                         {canCertify && invoice.status === 'submitted' && (
                           <>
                             <Button
                               size="table"
                               variant="success"
+                              disabled={busy}
                               onClick={() => run(() => financeApi.certifyInvoice(invoice.id, 'certify'))}
                             >
                               Certify
@@ -306,6 +334,7 @@ export default function Invoices() {
                             <Button
                               size="table"
                               variant="warning"
+                              disabled={busy}
                               onClick={() => setReturning(invoice)}
                             >
                               Return
@@ -317,6 +346,7 @@ export default function Invoices() {
                             size="table"
                             variant="success"
                             icon={Banknote}
+                            disabled={busy}
                             onClick={() =>
                               run(() =>
                                 financeApi.releasePayment(invoice.payment.id, { method: 'LDDAP-ADA' })
@@ -337,6 +367,7 @@ export default function Invoices() {
         <Pagination {...paginationProps} label="invoices" />
       </Card>
 
+      {correcting && <SubmitInvoiceModal invoice={correcting} onClose={() => setCorrecting(null)} onSubmitted={refresh} />}
       {submitting && <SubmitInvoiceModal onClose={() => setSubmitting(false)} onSubmitted={refresh} />}
 
       {returning && (
@@ -354,14 +385,16 @@ export default function Invoices() {
             </Button>
             <button
               type="button"
+              disabled={busy || !remarks.trim()}
               onClick={async () => {
-                await run(() => financeApi.certifyInvoice(returning.id, 'return', remarks))
-                setReturning(null)
-                setRemarks('')
+                if (await run(() => financeApi.certifyInvoice(returning.id, 'return', remarks))) {
+                  setReturning(null)
+                  setRemarks('')
+                }
               }}
               className="min-h-11 w-full rounded-sm bg-danger px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-white sm:w-auto"
             >
-              RETURN INVOICE
+              {busy ? 'RETURNING?' : 'RETURN INVOICE'}
             </button>
           </div>
         </Modal>

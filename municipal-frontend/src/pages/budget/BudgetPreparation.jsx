@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Plus, Landmark, Users, Trash2, AlertTriangle, Gavel, CalendarClock } from 'lucide-react'
 import * as budgetApi from '../../api/budgetPreparation'
 import {
@@ -9,6 +9,8 @@ import {
 } from '../../api/budgetPreparation'
 import { fetchAipEntries } from '../../api/planning'
 import { usePermissions } from '../../context/usePermissions'
+import { useAuth } from '../../context/useAuth'
+import { fetchOfficeDirectory } from '../../api/departments'
 import DashboardPage from '../../components/ui/DashboardPage'
 import WorkHoursDateTimeInput from '../../components/ui/WorkHoursDateTimeInput'
 import PageHeader from '../../components/ui/PageHeader'
@@ -23,6 +25,11 @@ import SortableTh, { Th } from '../../components/ui/SortableTh'
 import NextStep from '../../components/ui/NextStep'
 import { budgetNext } from '../../config/nextSteps'
 import { useTableControls } from '../../components/ui/useTableControls'
+import useFormRecovery from '../../hooks/useFormRecovery'
+import DraftRecoveryNotice from '../../components/ui/DraftRecoveryNotice'
+import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
+import { useActionQueue } from '../../context/useActionQueue'
+import { currentFiscalYear } from '../../utils/fiscalYear'
 
 // Steps 6 to 14: from an office asking for money to the Sanggunian granting it.
 //
@@ -75,6 +82,11 @@ function Stepper({ budget }) {
 }
 
 function ProposalForm({ budget, existing, onClose, onSaved }) {
+  const { user } = useAuth()
+  const permissions = usePermissions()
+  const canChooseOffice = permissions.has('budget.prepareExecutive') && !existing
+  const [departments, setDepartments] = useState([])
+  const [departmentId, setDepartmentId] = useState(existing?.departmentId ?? user?.departmentId ?? '')
   const [aipEntries, setAipEntries] = useState([])
   const [lines, setLines] = useState(
     existing?.lines?.length
@@ -82,8 +94,20 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
       : [emptyLine()]
   )
   const [justification, setJustification] = useState(existing?.justification ?? '')
+  const recovery = useFormRecovery(`budget-proposal-${budget.id}-${existing?.id ?? 'new'}`, { departmentId, lines, justification }, draft => {
+    setDepartmentId(draft.departmentId); setLines(draft.lines); setJustification(draft.justification)
+  })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!canChooseOffice) return
+    let cancelled = false
+    fetchOfficeDirectory().then((rows) => {
+      if (!cancelled) setDepartments(rows.filter((office) => !budget.proposals.some((proposal) => proposal.departmentId === office.id)))
+    }).catch(() => { if (!cancelled) setError('Could not load the office directory.') })
+    return () => { cancelled = true }
+  }, [canChooseOffice, budget.proposals])
 
   useEffect(() => {
     let cancelled = false
@@ -119,13 +143,15 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
             Cancel
           </Button>
           <Button
-            disabled={saving}
+            disabled={saving || !departmentId || (canChooseOffice && !departments.some((office) => office.id === Number(departmentId)))}
             onClick={async () => {
+              if (saving) return
               setError('')
               setSaving(true)
               try {
                 const payload = {
                   executiveBudgetId: budget.id,
+                  departmentId: Number(departmentId),
                   justification,
                   lines: lines.map((line) => ({
                     title: line.title,
@@ -133,10 +159,16 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
                     fund: line.fund ?? 'generalFund',
                     proposedAmount: Number(line.proposedAmount),
                     aipEntryId: line.aipEntryId ? Number(line.aipEntryId) : null,
+                    papCode: line.papCode ?? '',
+                    uacsCode: line.uacsCode ?? '',
+                    remarks: line.remarks ?? '',
+                    isDevelopmentFund: Boolean(line.isDevelopmentFund),
+                    isLdrrmf: Boolean(line.isLdrrmf),
                   })),
                 }
                 if (existing) await budgetApi.updateProposal(existing.id, payload)
                 else await budgetApi.createProposal(payload)
+                recovery.clearDraft()
                 onSaved()
                 onClose()
               } catch (err) {
@@ -151,6 +183,7 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
         </>
       }
     >
+      {canChooseOffice && <LargeFormPage.Section title="Requesting office"><label className="text-xs text-text-secondary">Office<select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} className={`mt-1 ${inputClass}`}><option value="">Select an office without a proposal</option>{departments.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}</select></label></LargeFormPage.Section>}
       {overCeiling && (
         <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-4">
           <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" />
@@ -161,6 +194,7 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
           </p>
         </div>
       )}
+      <DraftRecoveryNotice draft={recovery} />
 
       <LargeFormPage.Section
         title="Proposal lines"
@@ -271,7 +305,11 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
     Object.fromEntries(proposal.lines.map((line) => [line.id, line[field] ?? line.proposedAmount]))
   )
   const [notes, setNotes] = useState('')
+  const recovery = useFormRecovery(`budget-amounts-${proposal.id}-${field}`, { amounts, notes }, draft => {
+    setAmounts(draft.amounts); setNotes(draft.notes)
+  })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const total = Object.values(amounts).reduce((sum, value) => sum + (Number(value) || 0), 0)
 
@@ -290,7 +328,10 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
             Cancel
           </Button>
           <Button
+            disabled={saving}
             onClick={async () => {
+              if (saving) return
+              setSaving(true)
               setError('')
               try {
                 await onConfirm({
@@ -300,18 +341,22 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
                   })),
                   notes: notes.trim() || undefined,
                 })
+                recovery.clearDraft()
                 onClose()
               } catch (err) {
                 setError(err.response?.data?.message ?? 'Could not record those figures.')
+              } finally {
+                setSaving(false)
               }
             }}
           >
-            Record
+            {saving ? 'Saving…' : 'Record'}
           </Button>
         </>
       }
     >
       <LargeFormPage.Section title="Figures">
+        <DraftRecoveryNotice draft={recovery} />
         <div className="flex flex-col gap-3">
           {proposal.lines.map((line) => (
             <div key={line.id} className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
@@ -357,13 +402,23 @@ function StageForm({ budget, stage, options, onClose, onConfirm }) {
     ordinanceDate: '',
     provincialReviewOutcome: 'approved',
     provincialRemarks: '',
+    remarks: '',
   })
+  const recovery = useFormRecovery(`budget-stage-${budget.id}-${stage.action}`, values, setValues)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
   const set = (field, value) => setValues((current) => ({ ...current, [field]: value }))
 
   return (
     <Modal title={stage.actionLabel} onClose={onClose}>
+      <DraftRecoveryNotice draft={recovery} />
       <div className="flex flex-col gap-3">
+        {stage.action === 'return' && (
+          <label className="text-xs text-text-secondary">
+            Reason for returning the budget and reopening its proposals
+            <textarea rows={4} value={values.remarks} onChange={e => set('remarks', e.target.value)} className={`mt-1 ${inputClass}`} />
+          </label>
+        )}
         {stage.action === 'holdForum' && (
           <>
             <p className="text-xs text-text-faint">
@@ -461,18 +516,24 @@ function StageForm({ budget, stage, options, onClose, onConfirm }) {
           </Button>
           <button
             type="button"
+            disabled={saving || (stage.action === 'return' && !values.remarks.trim())}
             onClick={async () => {
+              if (saving) return
+              setSaving(true)
               setError('')
               try {
                 await onConfirm(values)
+                recovery.clearDraft()
                 onClose()
               } catch (err) {
                 setError(err.response?.data?.message ?? 'Could not complete that stage.')
+              } finally {
+                setSaving(false)
               }
             }}
             className="min-h-11 w-full rounded-sm bg-accent px-4 py-2 text-center text-[11px] font-medium tracking-[0.03em] text-accent-fg sm:w-auto"
           >
-            {stage.actionLabel}
+            {saving ? 'Saving…' : stage.actionLabel}
           </button>
         </div>
       </div>
@@ -480,30 +541,43 @@ function StageForm({ budget, stage, options, onClose, onConfirm }) {
   )
 }
 
-function ProceedingForm({ budget, onClose, onSaved }) {
+const proceedingTypesFor = permissions => [
+  ...(permissions.has('budget.conductForum') ? ['forum'] : []),
+  ...(permissions.has('budget.conductHearing') ? ['hearing'] : []),
+  ...(permissions.has('budget.finaliseExecutive') || permissions.has('budget.conductHearing') ? ['deliberation'] : []),
+]
+const proceedingsEditable = status => ['draft', 'returned', 'pendingMbcReview', 'pendingPlanningConsolidation', 'pendingBudgetForum', 'pendingBudgetHearing', 'pendingFinalisation'].includes(status)
+const localDateTime = value => {
+  if (!value) return ''
+  const date = new Date(value)
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+function ProceedingForm({ budget, proceeding, permissions, onClose, onSaved }) {
   const [values, setValues] = useState({
-    type: 'hearing',
-    scheduledAt: '',
-    venue: '',
-    agenda: '',
-    minutes: '',
+    type: proceeding?.type ?? proceedingTypesFor(permissions)[0],
+    scheduledAt: localDateTime(proceeding?.scheduledAt),
+    heldAt: localDateTime(proceeding?.heldAt),
+    venue: proceeding?.venue ?? '',
+    agenda: proceeding?.agenda ?? '',
+    minutes: proceeding?.minutes ?? '',
   })
+  const recovery = useFormRecovery(`budget-proceeding-${budget.id}-${proceeding?.id ?? 'new'}`, values, setValues)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
   const set = (field, value) => setValues((current) => ({ ...current, [field]: value }))
 
   return (
-    <Modal title="Record a proceeding" onClose={onClose}>
+    <Modal title={proceeding ? 'Amend proceeding record' : 'Record a proceeding'} onClose={onClose}>
+      <DraftRecoveryNotice draft={recovery} />
       <div className="flex flex-col gap-3">
         <label className="text-xs text-text-secondary">
           Type
-          <select value={values.type} onChange={(e) => set('type', e.target.value)} className={`mt-1 ${inputClass}`}>
-            <option value="forum">Budget forum</option>
-            <option value="hearing">Budget hearing</option>
-            <option value="deliberation">Deliberation</option>
+          <select disabled={Boolean(proceeding)} value={values.type} onChange={(e) => set('type', e.target.value)} className={`mt-1 ${inputClass}`}>
+            {proceedingTypesFor(permissions).map(type => <option key={type} value={type}>{({ forum: 'Budget forum', hearing: 'Budget hearing', deliberation: 'Deliberation' })[type]}</option>)}
           </select>
         </label>
         <label className="text-xs text-text-secondary">
-          Held on
+          Scheduled for
           <WorkHoursDateTimeInput
             value={values.scheduledAt}
             onChange={(e) => set('scheduledAt', e.target.value)}
@@ -511,8 +585,16 @@ function ProceedingForm({ budget, onClose, onSaved }) {
           />
         </label>
         <label className="text-xs text-text-secondary">
+          Actually held on (leave blank until completed)
+          <input type="datetime-local" value={values.heldAt} max={localDateTime(new Date())} onChange={(e) => set('heldAt', e.target.value)} className={`mt-1 ${inputClass}`} />
+        </label>
+        <label className="text-xs text-text-secondary">
           Venue
           <input value={values.venue} onChange={(e) => set('venue', e.target.value)} className={`mt-1 ${inputClass}`} />
+        </label>
+        <label className="text-xs text-text-secondary">
+          Agenda
+          <textarea rows={2} value={values.agenda} onChange={(e) => set('agenda', e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         <label className="text-xs text-text-secondary">
           Minutes
@@ -525,23 +607,29 @@ function ProceedingForm({ budget, onClose, onSaved }) {
           </Button>
           <button
             type="button"
+            disabled={saving || !values.scheduledAt || (values.heldAt && new Date(values.heldAt) > new Date())}
             onClick={async () => {
+              if (saving) return
+              setSaving(true)
               setError('')
               try {
-                await budgetApi.recordProceeding(budget.id, {
+                const payload = {
                   ...values,
-                  scheduledAt: values.scheduledAt || new Date().toISOString(),
-                  heldAt: values.scheduledAt || new Date().toISOString(),
-                })
+                  scheduledAt: new Date(values.scheduledAt).toISOString(),
+                  heldAt: values.heldAt ? new Date(values.heldAt).toISOString() : null,
+                }
+                if (proceeding) await budgetApi.updateProceeding(proceeding.id, payload)
+                else await budgetApi.recordProceeding(budget.id, payload)
+                recovery.clearDraft()
                 onSaved()
                 onClose()
               } catch (err) {
                 setError(err.response?.data?.message ?? 'Could not record it.')
-              }
+              } finally { setSaving(false) }
             }}
             className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg"
           >
-            RECORD
+            {saving ? 'SAVING…' : proceeding ? 'SAVE AMENDMENT' : 'RECORD'}
           </button>
         </div>
       </div>
@@ -558,7 +646,7 @@ function ProceedingForm({ budget, onClose, onSaved }) {
 // A municipality has one row here per office, so this list is as long as the
 // LGU's organisational chart. It was previously unsorted, unfiltered and
 // unpaged, which is workable at ten offices and not at forty.
-function ProposalsTable({ budget, permissions, canPropose, run, setEditingProposal, setAmountsFor }) {
+function ProposalsTable({ budget, permissions, canPropose, departmentId, working, run, setEditingProposal, setAmountsFor }) {
   const table = useTableControls(budget.proposals, {
     searchKeys: ['departmentName', 'justification'],
     filters: [
@@ -642,7 +730,7 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex w-max flex-wrap gap-2">
-                      {proposal.status === 'draft' && budget.proposalsOpen && canPropose && (
+                      {proposal.status === 'draft' && budget.proposalsOpen && canPropose && (permissions.has('budget.prepareExecutive') || proposal.departmentId === departmentId) && (
                         <>
                           <Button
                             size="table"
@@ -653,6 +741,7 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                           </Button>
                           <Button
                             size="table"
+                            disabled={working}
                             onClick={() => run(() => budgetApi.submitProposal(proposal.id)).catch(() => {})}
                           >
                             Submit proposal
@@ -661,7 +750,7 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                       )}
                       {budget.status === 'pendingMbcReview' &&
                         permissions.has('budget.reviewProposal') &&
-                        proposal.status !== 'draft' && (
+                        proposal.status === 'submitted' && (
                           <Button
                             size="table"
                             onClick={() =>
@@ -678,7 +767,7 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
                         )}
                       {budget.status === 'pendingFinalisation' &&
                         permissions.has('budget.finaliseExecutive') &&
-                        proposal.status !== 'draft' && (
+                        proposal.status === 'heard' && (
                           <Button
                             size="table"
                             variant="success"
@@ -710,7 +799,12 @@ function ProposalsTable({ budget, permissions, canPropose, run, setEditingPropos
 
 export default function BudgetPreparation() {
   const permissions = usePermissions()
+  const { fiscalYear, setFiscalYear } = useActionQueue()
+  const { user } = useAuth()
+  const [working, setWorking] = useState(false)
+  const running = useRef(false)
   const [budgets, setBudgets] = useState([])
+  const [loadedYear, setLoadedYear] = useState(null)
   const [options, setOptions] = useState({})
   const [loading, setLoading] = useState(true)
   const [refreshToken, setRefreshToken] = useState(0)
@@ -726,22 +820,27 @@ export default function BudgetPreparation() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([budgetApi.fetchBudgets(), budgetApi.fetchBudgetOptions()])
+    Promise.all([budgetApi.fetchBudgets({ fiscalYear }), budgetApi.fetchBudgetOptions()])
       .then(([budgetRows, optionRows]) => {
         if (cancelled) return
         setBudgets(budgetRows)
+        setLoadedYear(fiscalYear)
+        setError('')
         setOptions(optionRows)
         setLoading(false)
       })
       .catch(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) { setLoading(false); setBudgets([]); setLoadedYear(fiscalYear); setError('Could not load budgets for the selected fiscal year.') }
       })
     return () => {
       cancelled = true
     }
-  }, [refreshToken])
+  }, [refreshToken, fiscalYear])
 
   const run = async (fn) => {
+    if (running.current) return
+    running.current = true
+    setWorking(true)
     setError('')
     try {
       await fn()
@@ -749,6 +848,9 @@ export default function BudgetPreparation() {
     } catch (err) {
       setError(err.response?.data?.message ?? 'That action could not be completed.')
       throw err
+    } finally {
+      running.current = false
+      setWorking(false)
     }
   }
 
@@ -801,12 +903,13 @@ export default function BudgetPreparation() {
           canOpen && (
             <Button
               icon={Plus}
+              disabled={working}
               onClick={() =>
                 run(() =>
                   budgetApi.createBudget({
-                    fiscalYear: new Date().getFullYear() + 1,
+                    fiscalYear: currentFiscalYear() + 1,
                     ceilingGrowthPct: 5,
-                  })
+                  }).then(result => { setFiscalYear(result.fiscalYear ?? currentFiscalYear() + 1); return result })
                 ).catch(() => {})
               }
             >
@@ -815,6 +918,7 @@ export default function BudgetPreparation() {
           )
         }
       />
+      <FiscalYearFilter value={fiscalYear} onChange={setFiscalYear} />
 
       {error && (
         <p role="alert" className="rounded border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -822,7 +926,7 @@ export default function BudgetPreparation() {
         </p>
       )}
 
-      {loading ? (
+      {loading || loadedYear !== fiscalYear ? (
         <Card bodyClassName="p-8">
           <p className="text-center text-[13px] text-text-faint">Loading budgets...</p>
         </Card>
@@ -835,10 +939,10 @@ export default function BudgetPreparation() {
         </Card>
       ) : (
         budgets.map((budget) => {
-          const stage = BUDGET_STAGES.find((s) => s.key === budget.status)
+          const stage = BUDGET_STAGES.find((s) => s.key === (budget.status === 'returned' ? 'draft' : budget.status))
           const canAct = stage?.action && permissions.has(stage.permission)
           const myProposal = budget.proposals.find(
-            (p) => !canOpen && p.departmentId // an office sees only its own; the API already filtered
+            (p) => p.departmentId === user?.departmentId
           )
 
           return (
@@ -850,7 +954,7 @@ export default function BudgetPreparation() {
               action={
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge tone={BUDGET_STATUS_TONES[budget.status]}>{budget.statusLabel}</Badge>
-                  {budget.proposalsOpen && canPropose && !myProposal && (
+                  {budget.proposalsOpen && canPropose && (canOpen || !myProposal) && (
                     <Button
                       size="sm"
                       onClick={() => setProposing(budget)}
@@ -858,18 +962,24 @@ export default function BudgetPreparation() {
                       New proposal
                     </Button>
                   )}
-                  {(permissions.has('budget.conductForum') || permissions.has('budget.conductHearing')) && (
+                  {proceedingsEditable(budget.status) && proceedingTypesFor(permissions).length > 0 && (
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => setRecordingProceeding(budget)}
+                      onClick={() => setRecordingProceeding({ budget })}
                     >
                       Record proceeding
                     </Button>
                   )}
+                  {canAct && !['draft', 'returned', 'enacted'].includes(budget.status) && (
+                    <button type="button" className="text-[11px] font-medium text-danger hover:underline" onClick={() => setStageFormFor({ budget, stage: { action: 'return', actionLabel: 'RETURN FOR REVISION' } })}>
+                      RETURN FOR REVISION
+                    </button>
+                  )}
                   {canAct && (
                     <Button
                       size="sm"
+                      disabled={working}
                       onClick={() =>
                         stage.opensForm
                           ? setStageFormFor({ budget, stage })
@@ -933,6 +1043,8 @@ export default function BudgetPreparation() {
                 budget={budget}
                 permissions={permissions}
                 canPropose={canPropose}
+                departmentId={user?.departmentId}
+                working={working}
                 run={run}
                 setEditingProposal={setEditingProposal}
                 setAmountsFor={setAmountsFor}
@@ -951,6 +1063,9 @@ export default function BudgetPreparation() {
                         {proceeding.typeLabel}
                         {proceeding.departmentName ? ` — ${proceeding.departmentName}` : ''}
                       </p>
+                      {proceedingsEditable(budget.status) && proceedingTypesFor(permissions).includes(proceeding.type) && (
+                        <button type="button" className="mt-1 text-accent hover:underline" onClick={() => setRecordingProceeding({ budget, proceeding })}>Amend record</button>
+                      )}
                       {proceeding.minutes && <p className="mt-0.5 text-text-secondary">{proceeding.minutes}</p>}
                       <p className="mt-0.5 text-text-faint">
                         <Users size={10} className="mr-1 inline" />
@@ -980,7 +1095,9 @@ export default function BudgetPreparation() {
       )}
       {recordingProceeding && (
         <ProceedingForm
-          budget={recordingProceeding}
+          budget={recordingProceeding.budget}
+          proceeding={recordingProceeding.proceeding}
+          permissions={permissions}
           onClose={() => setRecordingProceeding(null)}
           onSaved={refresh}
         />

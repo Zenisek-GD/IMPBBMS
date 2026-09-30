@@ -3,6 +3,8 @@ import { FileSignature, Plus, Truck, PenLine, Send, GitBranch, ShieldCheck, Tria
 import * as contractsApi from '../../api/contracts'
 import { CONTRACT_STATUS_LABELS, CONTRACT_STATUS_TONES } from '../../api/contracts'
 import { fetchAwards } from '../../api/bidding'
+import { useActionQueue } from '../../context/useActionQueue'
+import WorkspaceFiscalYear from '../../components/ui/WorkspaceFiscalYear'
 import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
@@ -395,6 +397,7 @@ function WarrantySecurityModal({ contract, onClose, onPosted }) {
 }
 
 export default function Contracts() {
+  const { fiscalYear } = useActionQueue()
   const permissions = usePermissions()
   const [drafting, setDrafting] = useState(false)
   const [delivering, setDelivering] = useState(null)
@@ -421,6 +424,7 @@ export default function Contracts() {
   // a filter of its own rather than something a reader has to spot by scanning
   // two badges down a column.
   const table = useServerTable(contractsApi.fetchContracts, {
+    baseParams: { fiscalYear },
     urlKey: 'contracts',
     filters: [
       {
@@ -445,6 +449,7 @@ export default function Contracts() {
 
   return (
     <DashboardPage>
+      <WorkspaceFiscalYear />
       <PageHeader
         title="Contracts"
         subtitle="Drafted from an issued award; active once both parties have signed."

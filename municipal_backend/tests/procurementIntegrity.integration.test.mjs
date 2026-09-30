@@ -33,7 +33,11 @@ test('bid acceptance commits security, verification and audit atomically', { ski
   const user = await m.User.create({ name: 'Bidder', email: 'bidder@example.test', password: 'ExamplePassword123!', roleId: role.id, status: 'active' });
   user.Role = role;
   const vendor = await m.Vendor.create({ businessName: 'Integrity vendor', userId: user.id, registrationStatus: 'verified', philgepsExpiry: '2035-01-01' });
-  const rfq = await m.Rfq.create({ referenceNo: 'RFQ-INTEGRITY-1', title: 'Audit atomicity', abc: 1000, category: 'goods', closingDate: '2030-01-01T01:00:00Z', openingDate: '2030-01-01T02:00:00Z', status: 'published' });
+  const mode = await m.ProcurementMode.create({ key: 'competitiveBidding', name: 'Competitive Bidding', requiresBidSecurity: true });
+  const fiscalYear = Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Asia/Manila' }).format(new Date()));
+  const appropriation = await m.Appropriation.create({ fiscalYear, ordinanceNo: 'ORD-INTEGRITY', title: 'Audit test funding', amount: 1000, status: 'enacted' });
+  const appEntry = await m.AppEntry.create({ fiscalYear, projectTitle: 'Audit atomicity', abc: 1000, targetStartQuarter: 'Q1', targetCompletionQuarter: 'Q4', appropriationId: appropriation.id, status: 'approved' });
+  const rfq = await m.Rfq.create({ appEntryId: appEntry.id, procurementModeId: mode.id, referenceNo: 'RFQ-INTEGRITY-1', title: 'Audit atomicity', abc: 1000, category: 'goods', closingDate: '2030-01-01T01:00:00Z', openingDate: '2030-01-01T02:00:00Z', status: 'published' });
   const ticket = crypto.randomBytes(24).toString('hex');
   const challenge = await m.OtpChallenge.create({ userId: user.id, reference: crypto.randomUUID(), purpose: 'bidSubmission', codeHash: 'test', deliveredTo: user.email, expiresAt: new Date(Date.now() + 600000), consumedAt: new Date(), ticketHash: crypto.createHash('sha256').update(ticket).digest('hex'), ticketExpiresAt: new Date(Date.now() + 600000), contextRef: 'rfq', contextId: rfq.id });
   const invoke = async () => {

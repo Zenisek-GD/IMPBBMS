@@ -8,7 +8,8 @@ import mysql from "mysql2/promise";
 // database. The exact name guard also prevents a cleanup typo becoming broad.
 const scratch = `impbbms_vendor_list_test_${crypto.randomBytes(8).toString("hex")}`;
 process.env.DB_HOST = "127.0.0.1";
-process.env.DB_PORT = "3306";
+const testPort = Number(process.env.PROCUREMENT_TEST_DB_PORT ?? process.env.DB_PORT ?? 33317);
+process.env.DB_PORT = String(testPort);
 process.env.DB_NAME = scratch;
 process.env.DB_USER = "root";
 process.env.DB_PASSWORD = "";
@@ -27,7 +28,7 @@ const response = () => ({
 });
 
 test("vendor, invoice, message, official-document, award, and contract lists page, filter, and retain scoped operational data", { timeout: 60_000 }, async (t) => {
-  const admin = await mysql.createConnection({ host: "127.0.0.1", port: 3306, user: "root", password: "" });
+  const admin = await mysql.createConnection({ host: "127.0.0.1", port: testPort, user: "root", password: "" });
   assert.match(scratch, /^impbbms_vendor_list_test_[a-f0-9]{16}$/);
   await admin.query(`CREATE DATABASE \`${scratch}\``);
 
@@ -105,8 +106,18 @@ test("vendor, invoice, message, official-document, award, and contract lists pag
   assert.ok(Array.isArray(legacy.body));
   assert.equal(legacy.body.length, 3);
 
+  // Financial list defaults are scoped by the enacted funding year, not the
+  // invoice submission date. Give this list fixture its actual funding graph.
+  const fiscalYear = Number(new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Asia/Manila' }).format(new Date()));
+  const appropriation = await models.Appropriation.create({ fiscalYear, ordinanceNo: "ORD-LIST-1", title: "List test funding", amount: 10000, status: "enacted" });
+  const appEntry = await models.AppEntry.create({ fiscalYear, projectTitle: "List test supplies", abc: 10000, targetStartQuarter: "Q1", targetCompletionQuarter: "Q4", status: "approved", appropriationId: appropriation.id });
+  const rfq = await models.Rfq.create({ appEntryId: appEntry.id, referenceNo: "RFQ-LIST-1", title: "List test supplies", abc: 10000, closingDate: new Date(), status: "awarded" });
+  const fundingAward = await Award.create({ noaNumber: "NOA-INVOICE-FUNDING", noaDate: `${fiscalYear}-01-01`, amount: 3000, status: "issued", vendorId: submitted.id, rfqId: rfq.id });
+  const invoiceContract = await Contract.create({ contractNo: "CT-TEST-001", amount: 3000, status: "active", vendorId: submitted.id, awardId: fundingAward.id, signedByLguAt: new Date("2026-01-06T00:00:00Z") });
+
   const unpaidInvoice = await Invoice.create({
     invoiceNo: "INV-TEST-001",
+    contractId: invoiceContract.id,
     amount: 1000,
     submittedAt: new Date("2026-01-03T00:00:00Z"),
     status: "submitted",
@@ -114,6 +125,7 @@ test("vendor, invoice, message, official-document, award, and contract lists pag
   });
   const preparedInvoice = await Invoice.create({
     invoiceNo: "INV-TEST-002",
+    contractId: invoiceContract.id,
     amount: 2000,
     submittedAt: new Date("2026-01-04T00:00:00Z"),
     status: "certified",
@@ -135,6 +147,7 @@ test("vendor, invoice, message, official-document, award, and contract lists pag
   assert.equal(invoices.body.total, 1);
   assert.equal(invoices.body.rows[0].id, preparedInvoice.id);
   assert.equal(invoices.body.rows[0].payment.status, "prepared");
+  assert.equal(invoices.body.rows[0].fiscalYear, fiscalYear);
 
   const withoutVoucher = response();
   await listInvoices(
@@ -222,22 +235,17 @@ test("vendor, invoice, message, official-document, award, and contract lists pag
     { query: { page: "1", pageSize: "25", status: "pendingHopeApproval" }, permissions: new Set(["bidding.viewPublished"]) },
     restrictedAwards
   );
-  assert.equal(restrictedAwards.body.total, 0);
+  assert.equal(restrictedAwards.body.total, 1, "Only the issued funding award is visible to published-record readers");
+  assert.equal(restrictedAwards.body.rows[0].noaNumber, "NOA-INVOICE-FUNDING");
 
   const legacyAwards = response();
   await listAwards({ query: {}, permissions: new Set(["bidding.view"]) }, legacyAwards);
   assert.ok(Array.isArray(legacyAwards.body));
-  assert.equal(legacyAwards.body.length, 1);
+  assert.equal(legacyAwards.body.length, 2);
 
   await Contract.create({
-    contractNo: "CT-TEST-001",
-    amount: 2000,
-    status: "active",
-    vendorId: submitted.id,
-    signedByLguAt: new Date("2026-01-06T00:00:00Z"),
-  });
-  await Contract.create({
     contractNo: "CT-TEST-002",
+    awardId: fundingAward.id,
     amount: 1000,
     status: "draft",
     vendorId: submitted.id,
@@ -249,6 +257,7 @@ test("vendor, invoice, message, official-document, award, and contract lists pag
   );
   assert.equal(contracts.body.total, 1);
   assert.equal(contracts.body.rows[0].contractNo, "CT-TEST-001");
+  assert.equal(contracts.body.rows[0].fiscalYear, fiscalYear);
 
   const publishedContracts = response();
   await listContracts(

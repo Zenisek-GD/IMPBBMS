@@ -33,6 +33,27 @@ import {
   Eye,
   ShieldAlert,
 } from 'lucide-react'
+import { canReadRecordPage } from './recordAccess.js'
+
+const sharedRecordLinks = [
+  { label: 'Development Plan & AIP', href: '/planning', icon: Target },
+  { label: 'Budget Preparation', href: '/budget/preparation', icon: Landmark },
+  { label: 'Allocations & Transfers', href: '/budget/controls', icon: PiggyBank },
+  { label: 'Appropriation Ledger', href: '/budget/appropriations', icon: Landmark },
+  { label: 'Annual Procurement Plan', href: '/app-entries', icon: ClipboardList },
+  { label: 'Purchase Requisitions', href: '/purchase-requisitions', icon: FileText },
+  { label: 'Invoices', href: '/invoices', icon: Receipt },
+]
+
+export function applyRecordPermissions(sections, permissions = []) {
+  const visible = sections.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => canReadRecordPage(item.href, permissions) !== false),
+  })).filter((section) => section.items.length > 0)
+  const existing = new Set(visible.flatMap((section) => section.items.map((item) => item.href)))
+  const additional = sharedRecordLinks.filter((item) => canReadRecordPage(item.href, permissions) && !existing.has(item.href))
+  return additional.length ? [...visible, { heading: 'Records', items: additional }] : visible
+}
 
 // One nav config per role from the system design doc, Section 2.1 / Section 11.
 // `key` values must match the Role.key rows seeded by municipal_backend/seed.js.

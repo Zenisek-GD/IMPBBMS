@@ -30,6 +30,8 @@ export const fetchPrograms = (params = {}) =>
 
 export const createProgram = (payload) =>
   apiClient.post('/planning/investment-programs', payload).then((res) => res.data)
+export const updateProgram = (id, payload) =>
+  apiClient.patch(`/planning/investment-programs/${id}`, payload).then((res) => res.data)
 
 export const createAipEntry = (programId, payload) =>
   apiClient.post(`/planning/investment-programs/${programId}/entries`, payload).then((res) => res.data)

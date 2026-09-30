@@ -31,6 +31,7 @@ import express from "express";
 import path from "path";
 import session from "express-session";
 import { DatabaseSessionStore, startAuthExpirationSweep } from "./services/sessionStore.js";
+import { startDatabaseRateLimitSweep } from "./services/databaseRateLimiter.js";
 import { startProcurementDeadlineSweep } from "./services/procurementDeadlineSweep.js";
 import cors from "cors";
 import { validateProductionConfig } from "./config/security.js";
@@ -72,10 +73,9 @@ if (process.env.CLOUDFLARE_WORKER !== "true") {
 // Production configuration is validated above before serving requests.
 const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-only-insecure-secret";
 
-// A MemoryStore is suitable only for the single, long-running local Node
-// process. Worker isolates are intentionally ephemeral, so Cloudflare uses a
-// D1-backed store loaded only in that runtime. Dynamic import keeps Node local
-// development free of Worker-only module imports.
+// Standalone Node persists sessions in MySQL. Cloudflare uses a D1-backed
+// store loaded only in that runtime; dynamic import keeps Node deployments
+// free of Worker-only module imports.
 const sessionStore = process.env.CLOUDFLARE_WORKER === "true"
   ? (await import("./services/cloudflareSessionStore.js")).createCloudflareSessionStore()
   : new DatabaseSessionStore();
@@ -144,10 +144,13 @@ if (!process.env.ELECTRON && process.env.CLOUDFLARE_WORKER !== "true" && SCAN_MI
 }
 
 if (process.env.CLOUDFLARE_WORKER !== "true") startAuthExpirationSweep();
+if (process.env.NODE_ENV === "production" && process.env.CLOUDFLARE_WORKER !== "true") startDatabaseRateLimitSweep();
 if (process.env.CLOUDFLARE_WORKER !== "true") startProcurementDeadlineSweep();
 
 export default app;
 
 if (!process.env.ELECTRON && process.env.CLOUDFLARE_WORKER !== "true") {
-  app.listen(PORT, () => console.log(`🔥 XianFire running at http://localhost:${PORT}`));
+  app.listen(PORT, process.env.LISTEN_HOST || "0.0.0.0", () => {
+    console.log(`API listening on port ${PORT}`);
+  });
 }

@@ -1,21 +1,27 @@
 const workflowConflict = () => Object.assign(new Error("This financial record changed. Reload it before trying again."), { code: "WORKFLOW_CONFLICT" });
 import { Op } from "sequelize";
-import { sequelize } from "../models/db.js";
+import { Award, Rfq } from "../models/biddingModel.js";
+import { fundingIncludes, fundingYearCondition, fundingYearOf } from "../services/fundingYear.js";
+import { money, paymentGross, difference } from "../services/financialCalculations.js";
 import { Invoice, Payment } from "../models/paymentModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { User } from "../models/userModel.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { withAuditTransaction, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
 import { computeDeductions } from "../services/deductions.js";
 import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 
-const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+const round2 = money;
+// A plain Sequelize result can still reference the instance's live values.
+// Freeze the historical state before any update changes that instance.
+const recordSnapshot = (record) => JSON.parse(JSON.stringify(record.get({ plain: true })));
 
 const invoiceIncludes = {
   include: [
-    { model: Contract, as: "contract" },
+    { model: Contract, as: "contract", include: [{ model: Award, as: "award", include: [{ model: Rfq, as: "rfq", include: fundingIncludes() }] }] },
     { model: Delivery, as: "delivery" },
     { model: Vendor, as: "vendor" },
     {
@@ -32,12 +38,15 @@ const invoiceIncludes = {
 const serialize = (invoice) => ({
   id: invoice.id,
   invoiceNo: invoice.invoiceNo,
+  fiscalYear: fundingYearOf(invoice.contract?.award?.rfq),
   supplierInvoiceRef: invoice.supplierInvoiceRef,
   amount: Number(invoice.amount),
   submittedAt: invoice.submittedAt,
   status: invoice.status,
   remarks: invoice.remarks,
   contractNo: invoice.contract?.contractNo ?? null,
+  contractId: invoice.contractId,
+  deliveryId: invoice.deliveryId,
   contractAmount: invoice.contract ? Number(invoice.contract.amount) : null,
   vendorName: invoice.vendor?.businessName ?? null,
   payment: invoice.payment
@@ -46,14 +55,13 @@ const serialize = (invoice) => ({
         disbursementNo: invoice.payment.disbursementNo,
         // The voucher in full: what was claimed, what was withheld, what is
         // actually paid. Showing only the net would hide the withholding.
-        grossAmount: Number(invoice.payment.grossAmount),
+        grossAmount: paymentGross(invoice.payment),
         ewtAmount: Number(invoice.payment.ewtAmount),
         vatWithheldAmount: Number(invoice.payment.vatWithheldAmount),
         retentionAmount: Number(invoice.payment.retentionAmount),
         liquidatedDamages: Number(invoice.payment.liquidatedDamages),
-        totalDeductions: round2(
-          Number(invoice.payment.grossAmount) - Number(invoice.payment.amount)
-        ),
+        otherDeductions: Number(invoice.payment.otherDeductions),
+        totalDeductions: difference(paymentGross(invoice.payment), invoice.payment.amount),
         deductionBreakdown: invoice.payment.deductionBreakdown,
         amount: Number(invoice.payment.amount),
         status: invoice.payment.status,
@@ -68,6 +76,8 @@ const serialize = (invoice) => ({
 export const listInvoices = async (req, res) => {
   const { status, search } = req.query;
   const where = {};
+  const fundingScope = fundingYearCondition(req.query.fiscalYear, "contract.award.rfq");
+  if (fundingScope) where[Op.and] = [fundingScope];
   if (status) where.status = status;
   const searched = searchCondition(search, [
     "invoiceNo",
@@ -200,14 +210,16 @@ export const submitInvoice = async (req, res) => {
 
   const year = new Date().getFullYear();
 
-  const invoice = await withSequenceRetry(() => sequelize.transaction(async (transaction) => {
+  const invoice = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
     // All invoices for this contract serialize on the parent row, including
     // invoices against different deliveries. Recheck the ceiling under the lock.
     await contract.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    await delivery.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (delivery.status !== "accepted" || delivery.contractId !== contract.id || contract.vendorId !== vendor.id || (delivery.acceptedValue != null && value > Number(delivery.acceptedValue) + 0.005)) throw workflowConflict();
     const duplicate = await Invoice.findOne({ where: { deliveryId: delivery.id, status: { [Op.ne]: "cancelled" } }, transaction });
     const currentBilled = Number(await Invoice.sum("amount", { where: { contractId: contract.id, status: { [Op.ne]: "cancelled" } }, transaction }) ?? 0);
     if (duplicate || value > Number(contract.amount) - currentBilled) throw workflowConflict();
-    return Invoice.create({
+    const created = await Invoice.create({
       invoiceNo: await nextSequenceNo(Invoice, "invoiceNo", "INV", year, { transaction }),
       supplierInvoiceRef: supplierInvoiceRef ?? null,
       amount: value,
@@ -217,6 +229,8 @@ export const submitInvoice = async (req, res) => {
       vendorId: vendor.id,
       status: "submitted",
     }, { transaction });
+    await audit(actorAudit(req, { actionType: "invoice.submitted", entityRef: "invoice", entityId: created.id, summary: `${created.invoiceNo} submitted for ${contract.contractNo}.`, afterState: created.get({ plain: true }) }));
+    return created;
   }));
 
   // Goes to the Accountant, who acts on it next. The Treasurer has nothing to
@@ -234,6 +248,38 @@ export const submitInvoice = async (req, res) => {
   res.status(201).json(serialize(await Invoice.findByPk(invoice.id, invoiceIncludes)));
 };
 
+// Correct the existing returned claim without creating a second invoice for
+// the same accepted delivery or discarding the original review history.
+export const resubmitInvoice = async (req, res) => {
+  const observed = await Invoice.findByPk(req.params.id);
+  if (!observed) throw workflowError("Invoice not found.", 404);
+  const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
+  if (!vendor || vendor.id !== observed.vendorId) throw workflowError("You may only correct your own invoice.", 403);
+  const value = round2(req.body.amount);
+  if (!Number.isFinite(value) || value <= 0) throw workflowError("A positive invoice amount is required.", 400);
+  const updated = await withAuditTransaction(async (transaction, audit) => {
+    const contract = await Contract.findByPk(observed.contractId, { transaction, lock: transaction.LOCK.UPDATE });
+    const delivery = await Delivery.findByPk(observed.deliveryId, { transaction, lock: transaction.LOCK.UPDATE });
+    const invoice = await Invoice.findByPk(observed.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!invoice || invoice.status !== "returned" || invoice.vendorId !== vendor.id || invoice.contractId !== observed.contractId || invoice.deliveryId !== observed.deliveryId) throw workflowConflict();
+    if (!contract || contract.vendorId !== vendor.id || !delivery || delivery.contractId !== contract.id || delivery.status !== "accepted") throw workflowError("The invoice must still refer to your accepted delivery.");
+    if (delivery.acceptedValue != null && value > Number(delivery.acceptedValue) + 0.005) throw workflowError("The invoice exceeds the value accepted for this delivery.", 400);
+    const billed = Number(await Invoice.sum("amount", { where: { contractId: contract.id, id: { [Op.ne]: invoice.id }, status: { [Op.ne]: "cancelled" } }, transaction }) ?? 0);
+    if (value > Number(contract.amount) - billed + 0.005) throw workflowError("The corrected invoice exceeds the remaining contract amount.", 400);
+    if (await Payment.findOne({ where: { invoiceId: invoice.id, status: { [Op.ne]: "cancelled" } }, transaction })) throw workflowConflict();
+    const beforeState = recordSnapshot(invoice);
+    await invoice.update({ amount: value, supplierInvoiceRef: String(req.body.supplierInvoiceRef ?? invoice.supplierInvoiceRef ?? "").trim() || null,
+      status: "submitted", submittedAt: new Date(), remarks: null }, { transaction });
+    await audit(actorAudit(req, { actionType: "invoice.resubmitted", entityRef: "invoice", entityId: invoice.id,
+      summary: `${invoice.invoiceNo} corrected and resubmitted.`, beforeState, afterState: invoice.get({ plain: true }) }));
+    return invoice;
+  });
+  await notifyByPermission("payment.certify", { type: NOTIFICATION_EVENTS.PAYMENT_STATUS,
+    title: `Corrected invoice received — ${updated.invoiceNo}`, body: "The supplier has corrected the returned claim for a new review.",
+    link: "/invoices", refEntity: "invoice", refId: updated.id, severity: "info" });
+  res.json(serialize(await Invoice.findByPk(updated.id, invoiceIncludes)));
+};
+
 // Accounting certifies the invoice and prepares the disbursement voucher.
 export const certifyInvoice = async (req, res) => {
   const { decision, remarks } = req.body;
@@ -245,15 +291,17 @@ export const certifyInvoice = async (req, res) => {
   if (!["certify", "return"].includes(decision)) {
     return res.status(400).json({ message: "Decision must be certify or return." });
   }
-  if (decision === "return" && !remarks?.trim()) {
+  if (decision === "return" && (typeof remarks !== "string" || !remarks.trim())) {
     return res.status(400).json({ message: "Remarks are required when returning an invoice." });
   }
 
   if (decision === "return") {
-    await sequelize.transaction(async (transaction) => {
+    await withAuditTransaction(async (transaction, audit) => {
       await invoice.reload({ transaction, lock: transaction.LOCK.UPDATE });
       if (invoice.status !== "submitted") throw workflowConflict();
+      const beforeState = recordSnapshot(invoice);
       await invoice.update({ status: "returned", remarks: remarks.trim() }, { transaction });
+      await audit(actorAudit(req, { actionType: "invoice.returned", entityRef: "invoice", entityId: invoice.id, summary: `${invoice.invoiceNo} returned for correction.`, beforeState, afterState: invoice.get({ plain: true }) }));
     });
     await notifyUsers([invoice.vendor?.userId], {
       type: NOTIFICATION_EVENTS.PAYMENT_STATUS,
@@ -272,18 +320,22 @@ export const certifyInvoice = async (req, res) => {
   // The voucher is computed here, at certification, because certification is
   // the act of saying what is properly payable. The Treasurer later releases
   // the net — they do not recompute it, and cannot change it.
-  const deductions = computeDeductions({
+  let deductions = computeDeductions({
     grossAmount: Number(invoice.amount),
     vendor: invoice.vendor,
     contract: invoice.contract,
   });
 
   await withSequenceRetry(() =>
-    sequelize.transaction(async (transaction) => {
+    withAuditTransaction(async (transaction, audit) => {
+      await invoice.contract.reload({ transaction, lock: transaction.LOCK.UPDATE });
       await invoice.reload({ transaction, lock: transaction.LOCK.UPDATE });
       if (invoice.status !== "submitted") throw workflowConflict();
+      if (await Payment.findOne({ where: { invoiceId: invoice.id, status: { [Op.ne]: "cancelled" } }, transaction })) throw workflowConflict();
+      deductions = computeDeductions({ grossAmount: Number(invoice.amount), vendor: invoice.vendor, contract: invoice.contract });
+      const beforeState = recordSnapshot(invoice);
       await invoice.update({ status: "certified", remarks: remarks?.trim() ?? null }, { transaction });
-      await Payment.create(
+      const voucher = await Payment.create(
       {
         disbursementNo: await nextSequenceNo(Payment, "disbursementNo", "DV", year, { transaction }),
         grossAmount: deductions.grossAmount,
@@ -302,6 +354,8 @@ export const certifyInvoice = async (req, res) => {
         },
         { transaction }
       );
+      await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.INVOICE_CERTIFIED, entityRef: "invoice", entityId: invoice.id, summary: `${invoice.invoiceNo} certified.`, beforeState, afterState: invoice.get({ plain: true }) }));
+      await audit(actorAudit(req, { actionType: "payment.prepared", entityRef: "payment", entityId: voucher.id, summary: `${voucher.disbursementNo} prepared for ${invoice.invoiceNo}.`, afterState: voucher.get({ plain: true }) }));
     })
   );
 
@@ -313,15 +367,6 @@ export const certifyInvoice = async (req, res) => {
     refEntity: "invoice",
     refId: invoice.id,
     severity: "info",
-  });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.INVOICE_CERTIFIED,
-    entityRef: "invoice",
-    entityId: invoice.id,
-    summary: `${invoice.invoiceNo} certified — ₱${Number(invoice.amount).toLocaleString()}`,
-    beforeState: { status: "submitted" },
-    afterState: { status: "certified" },
   });
 
   res.json(serialize(await Invoice.findByPk(invoice.id, invoiceIncludes)));
@@ -377,23 +422,29 @@ export const releasePayment = async (req, res) => {
     Number(contract?.retentionHeld ?? 0) + Number(payment.retentionAmount ?? 0);
 
   const deliveries = contract?.deliveries ?? [];
-  const deliveredInFull =
+  let deliveredInFull =
     deliveries.length > 0 && deliveries.every((delivery) => delivery.status === "accepted");
   // Float tolerance: DECIMAL round-trips through JS numbers, and a contract
   // settled to the last centavo should not be left open by a rounding artefact.
   let paidInFull = paidAfterThis >= contractAmount - 0.005;
   let closes = deliveredInFull && paidInFull;
 
-  await sequelize.transaction(async (transaction) => {
+  await withAuditTransaction(async (transaction, audit) => {
+    if (contract) await contract.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    const currentInvoice = await Invoice.findByPk(payment.invoiceId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!currentInvoice || currentInvoice.status !== "certified") throw workflowConflict();
     await payment.reload({ transaction, lock: transaction.LOCK.UPDATE });
-    if (payment.status !== "prepared") throw workflowConflict();
+    if (payment.status !== "prepared" || payment.preparedById === req.currentUser.id) throw workflowConflict();
+    const beforeState = recordSnapshot(payment);
     if (contract) {
       await contract.reload({ transaction, lock: transaction.LOCK.UPDATE });
       paidAfterThis = Number(contract.amountPaid ?? 0) + Number(payment.grossAmount);
       retentionAfterThis = Number(contract.retentionHeld ?? 0) + Number(payment.retentionAmount ?? 0);
       if (paidAfterThis > Number(contract.amount) + 0.005) throw workflowConflict();
       paidInFull = paidAfterThis >= Number(contract.amount) - 0.005;
-      closes = deliveredInFull && paidInFull;
+      const currentDeliveries = await Delivery.findAll({ where: { contractId: contract.id }, transaction });
+      deliveredInFull = currentDeliveries.length > 0 && currentDeliveries.every(row => row.status === "accepted");
+      closes = contract.status === "active" && deliveredInFull && paidInFull;
     }
     await payment.update(
       {
@@ -418,11 +469,7 @@ export const releasePayment = async (req, res) => {
         { transaction }
       );
     }
-  });
-
-  const outstanding = Math.max(0, contractAmount - paidAfterThis);
-
-  await auditFromRequest(req, {
+  await audit(actorAudit(req, {
     actionType: AUDIT_ACTIONS.PAYMENT_RELEASED,
     entityRef: "payment",
     entityId: payment.id,
@@ -430,7 +477,7 @@ export const releasePayment = async (req, res) => {
       `${payment.disbursementNo} released — net ₱${Number(payment.amount).toLocaleString()} ` +
       `of ₱${Number(payment.grossAmount).toLocaleString()} gross` +
       (closes ? ` (final payment, ${contract.contractNo} closed)` : ""),
-    beforeState: { status: "prepared", preparedById: payment.preparedById },
+    beforeState,
     afterState: {
       status: "released",
       releasedById: req.currentUser.id,
@@ -445,11 +492,16 @@ export const releasePayment = async (req, res) => {
       netReleased: Number(payment.amount),
       // The running position: what this disbursement left outstanding.
       contractPaidToDate: paidAfterThis,
-      contractOutstanding: outstanding,
+      contractOutstanding: Math.max(0, Number(contract?.amount ?? 0) - paidAfterThis),
       contractRetentionHeld: retentionAfterThis,
       contractClosed: closes,
     },
+  }));
   });
+
+  const outstanding = Math.max(0, contractAmount - paidAfterThis);
+
+
 
   await notifyUsers([payment.invoice?.vendor?.userId], {
     type: NOTIFICATION_EVENTS.PAYMENT_STATUS,

@@ -145,7 +145,7 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
       await call(governance.declareFailureOfBidding,chair,{id:record.id},{decision:"approved",remarks:"Required personal approvals complete."});
     };
     await officiallyFail(rfq,"Resolution No. Resolution No. 2026-001");
-    assert.equal((await call(bidding.cancelRfq,secretariat,{id:rfq.id},{reason:"Cancel old attempt"})).statusCode,409);
+    await assert.rejects(call(bidding.cancelRfq,secretariat,{id:rfq.id},{reason:"Cancel old attempt"}), (error) => error.status === 409 && /failed procurement attempt cannot be cancelled/.test(error.message));
     assert.equal((await rfq.reload()).status,"failed");
     assert.equal((await m.BacResolution.findOne({where:{entityRef:"rfq",entityId:rfq.id}})).resolutionNo,"2026-001");
     await assert.rejects(call(governance.submitNegotiatedReview,secretariat,{id:rfq.id},{justification:"Review",legalBasis:"Approved local policy",supportingDocuments:[]}), /attempt|failed/i);

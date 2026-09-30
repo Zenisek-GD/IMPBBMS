@@ -1,3 +1,4 @@
+import { fiscalYearFilter } from "../services/financialCalculations.js";
 import { Op } from "sequelize";
 import { AppEntry, QUARTERS, PLAN_STAGE_LABELS, PLAN_CYCLE_LABELS } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
@@ -16,10 +17,11 @@ import {
   RELEASED_APP_STATUSES,
 } from "../services/appWorkflow.js";
 import { notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
-import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
+import { AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
 import { assertBacAction, committeeSnapshot } from "../services/procurementGovernance.js";
 import { actorAudit, workflowError } from "../services/workflowSupport.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
+import { APP_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, recordState } from "../services/requisitionRecords.js";
 
 // IRR Sec. 7.7 — the lump sum for foreseeable emergencies "shall not be more
 // than four percent (4%) of the Procuring Entity's total appropriations for
@@ -139,7 +141,7 @@ const pickEditable = (body, allowed) =>
 // Note this is *programmed* against, not *obligated* against. Planning and
 // committing are different acts checked at different moments: this one guards
 // the plan, and the Budget Officer's certification later guards the commitment.
-const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId, cycle = "final", fiscalYear } = {}) => {
+const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId, cycle = "final", fiscalYear, transaction } = {}) => {
   // ── The indicative cycle (IRR Sec. 7.7.1–7.7.2) ────────────────────────────
   // An indicative PPMP exists precisely because nothing has been appropriated
   // yet: it is prepared to SUPPORT the budget proposal. Requiring an enacted
@@ -163,7 +165,7 @@ const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId, 
     return { error: "An appropriation line is required. A plan cannot be filed against no budget." };
   }
 
-  const balance = await programmedFor(Number(appropriationId), { excludeAppEntryId });
+  const balance = await programmedFor(Number(appropriationId), { excludeAppEntryId, transaction });
   if (!balance) return { error: "That appropriation line does not exist." };
 
   if (balance.status !== "enacted") {
@@ -194,7 +196,7 @@ const validateAppropriation = async (appropriationId, abc, { excludeAppEntryId, 
 // spend it on this. Without both, an office could file a PPMP line for anything
 // at all so long as some budget line had room — which is how an appropriation
 // for a health centre ends up buying something else entirely.
-const validateAipLink = async (aipEntryId, fiscalYear) => {
+const validateAipLink = async (aipEntryId, fiscalYear, { transaction } = {}) => {
   if (!aipEntryId) {
     return {
       error:
@@ -203,7 +205,7 @@ const validateAipLink = async (aipEntryId, fiscalYear) => {
   }
 
   const aipEntry = await AipEntry.findByPk(Number(aipEntryId), {
-    include: [{ model: InvestmentProgram, as: "program" }],
+    include: [{ model: InvestmentProgram, as: "program" }], transaction,
   });
   if (!aipEntry) return { error: "That investment program entry does not exist." };
 
@@ -225,10 +227,10 @@ const validateAipLink = async (aipEntryId, fiscalYear) => {
 // Requisitions that are still live against this plan line. Reopening or
 // cancelling a line that money has already been committed against would leave
 // those requisitions charged to a plan that no longer exists.
-const liveRequisitionsFor = (appEntryId) =>
+const liveRequisitionsFor = (appEntryId, transaction) =>
   PrHeader.findAll({
     where: { appEntryId, status: { [Op.in]: LIVE_PR_STATUSES } },
-    attributes: ["id", "prNumber", "status"],
+    attributes: ["id", "prNumber", "status"], transaction,
   });
 
 // Section 4.3 validation rules, enforced server-side.
@@ -239,7 +241,7 @@ const validateEntry = ({ fiscalYear, abc, targetStartQuarter, targetCompletionQu
   if (abc === undefined || abc === null || abc === "") return "ABC is required.";
 
   const numericAbc = Number(abc);
-  if (Number.isNaN(numericAbc)) return "ABC must be a number.";
+  if (!Number.isFinite(numericAbc)) return "ABC must be a finite number.";
   // Section 4.3: "ABC must be greater than 0."
   if (numericAbc <= 0) return "ABC must be greater than 0.";
 
@@ -297,7 +299,8 @@ export const listAppEntries = async (req, res) => {
   const { fiscalYear, status, department, search } = req.query;
   const where = {};
 
-  if (fiscalYear) where.fiscalYear = Number(fiscalYear);
+  const year = fiscalYearFilter(fiscalYear);
+  if (year !== null) where.fiscalYear = year;
   if (status) where.status = status;
   if (department) where.implementingUnitId = Number(department);
   if (req.query.procurementMode) where.procurementMode = req.query.procurementMode;
@@ -314,8 +317,8 @@ export const listAppEntries = async (req, res) => {
   const canSeeAll = ["app.consolidate", "app.certify", "app.approve", "audit.viewAll"].some((permission) =>
     req.permissions.has(permission)
   );
-  if (!canSeeAll && req.permissions.has("app.create") && req.currentUser.departmentId) {
-    where.implementingUnitId = req.currentUser.departmentId;
+  if (!canSeeAll && req.permissions.has("app.create")) {
+    where.implementingUnitId = req.currentUser.departmentId ?? -1;
   }
 
   const paged = ["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
@@ -337,48 +340,21 @@ export const listAppEntries = async (req, res) => {
 // budget year." Posting happens automatically on approval; this records the
 // submission, which is a separate act with its own deadline.
 export const recordGppbSubmission = async (req, res) => {
-  const fiscalYear = Number(req.body?.fiscalYear) || new Date().getFullYear();
+  const fiscalYear = Number(req.body?.fiscalYear ?? new Date().getFullYear());
+  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) throw workflowError("A valid fiscal year is required.", 400);
   const reference = req.body?.reference?.trim() || null;
-
-  const entries = await AppEntry.findAll({
-    where: { fiscalYear, planCycle: "final", status: { [Op.in]: ["approved", "locked"] } },
+  const submittedAt = new Date(), deadline = new Date(Date.UTC(fiscalYear, 0, 31, 23, 59, 59));
+  const result = await withAuditTransaction(async (transaction, audit) => {
+    const entries = await AppEntry.findAll({ where: { fiscalYear, planCycle: "final", status: { [Op.in]: ["approved", "locked"] }, gppbSubmittedAt: null }, order: [["id", "ASC"]], transaction, lock: transaction.LOCK.UPDATE });
+    if (!entries.length) throw workflowError(`No approved final APP lines for ${fiscalYear} remain awaiting GPPB submission.`);
+    const beforeState = { entries: entries.map(recordState) };
+    for (const entry of entries) await entry.update({ gppbSubmittedAt: submittedAt }, { transaction });
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.APP_TRANSITION, entityRef: "appEntry", entityId: entries[0].id,
+      summary: `FY ${fiscalYear} approved APP submitted to the GPPB`, beforeState, afterState: { entries: entries.map(recordState), fiscalYear, reference, submittedAt, late: submittedAt > deadline } }));
+    return { fiscalYear, lines: entries.length, submittedAt, deadline, onTime: submittedAt <= deadline,
+      notice: submittedAt > deadline ? "Submitted after the end-of-January deadline. The submission date is retained in the record." : "Submitted within the end-of-January deadline." };
   });
-
-  if (entries.length === 0) {
-    return res.status(409).json({
-      message: `No approved final APP lines for ${fiscalYear}. There is nothing to submit.`,
-    });
-  }
-
-  const submittedAt = new Date();
-  const deadline = new Date(Date.UTC(fiscalYear, 0, 31, 23, 59, 59));
-  const late = submittedAt > deadline;
-
-  await AppEntry.update(
-    { gppbSubmittedAt: submittedAt },
-    { where: { id: { [Op.in]: entries.map((entry) => entry.id) } } }
-  );
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.APP_TRANSITION,
-    entityRef: "appEntry",
-    entityId: entries[0].id,
-    summary:
-      `FY ${fiscalYear} approved APP submitted to the GPPB — ${entries.length} line(s)` +
-      (late ? " (AFTER the end-of-January deadline)" : ""),
-    afterState: { fiscalYear, lines: entries.length, submittedAt, reference, late },
-  });
-
-  res.json({
-    fiscalYear,
-    lines: entries.length,
-    submittedAt,
-    deadline,
-    onTime: !late,
-    notice: late
-      ? "Submitted after the end-of-January deadline in IRR Sec. 7.7.5. The submission stands; the delay is on the record."
-      : "Submitted within the Sec. 7.7.5 deadline.",
-  });
+  res.json(result);
 };
 
 // IRR Sec. 7.7 — the APP "shall include provisions for foreseeable emergencies
@@ -431,115 +407,73 @@ export const getModeSuggestion = async (req, res) => {
   res.json({ lgu, ...suggestProcurementMode(abc, lgu, category) });
 };
 
+const lockFundingLines = async (ids, transaction) => {
+  for (const id of [...new Set(ids.filter(Boolean).map(Number))].sort((a, b) => a - b)) await Appropriation.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+};
+
+const validatePlanLinks = async (payload, { excludeAppEntryId, transaction } = {}) => {
+  await activeDepartment(payload.implementingUnitId, { transaction });
+  if (!payload.projectTitle?.trim()) throw workflowError("Project title is required.", 400);
+  const error = validateEntry(payload);
+  if (error) throw workflowError(error, 400);
+  if (!Number.isInteger(Number(payload.fiscalYear)) || Number(payload.fiscalYear) < 2000 || Number(payload.fiscalYear) > 2100) throw workflowError("A valid fiscal year is required.", 400);
+  if (!["indicative", "final"].includes(payload.planCycle)) throw workflowError("Choose a valid procurement plan cycle.", 400);
+  const funding = await validateAppropriation(payload.appropriationId, payload.abc, { excludeAppEntryId, cycle: payload.planCycle, fiscalYear: payload.fiscalYear, transaction });
+  if (funding.error) throw workflowError(funding.error, 400, { balance: funding.balance });
+  const programmed = await validateAipLink(payload.aipEntryId, payload.fiscalYear, { transaction });
+  if (programmed.error) throw workflowError(programmed.error, 400);
+  if (programmed.aipEntry.implementingUnitId && Number(programmed.aipEntry.implementingUnitId) !== Number(payload.implementingUnitId)) throw workflowError("The investment program entry belongs to another implementing department.", 400);
+  if (payload.appropriationId) {
+    const fundingLine = await Appropriation.findByPk(payload.appropriationId, { transaction });
+    if (fundingLine.fiscalYear !== Number(payload.fiscalYear)) throw workflowError("The appropriation and procurement plan must use the same fiscal year.", 400);
+    if (fundingLine.departmentId && Number(fundingLine.departmentId) !== Number(payload.implementingUnitId)) throw workflowError("The appropriation is assigned to another department.", 400);
+  }
+  if (payload.indicativeOriginId) {
+    const origin = await AppEntry.findByPk(payload.indicativeOriginId, { transaction });
+    if (!origin || origin.planCycle !== "indicative" || origin.fiscalYear !== Number(payload.fiscalYear) || Number(origin.implementingUnitId) !== Number(payload.implementingUnitId)) throw workflowError("The indicative origin must be a plan for the same department and fiscal year.", 400);
+  }
+  const modeError = await validateModeAgainstCeilings(payload);
+  if (modeError) throw workflowError(modeError, 400);
+};
+
 export const createAppEntry = async (req, res) => {
   const payload = pickEditable(req.body, EDITABLE_APP_FIELDS);
-
-  const validationError = validateEntry(payload);
-  if (validationError) return res.status(400).json({ message: validationError });
-
-  if (!payload.projectTitle?.trim()) {
-    return res.status(400).json({ message: "Project title is required." });
-  }
-
-  // Requesters file against their own office; reviewers may nominate one.
-  const implementingUnitId = payload.implementingUnitId ?? req.currentUser.departmentId;
-  if (!implementingUnitId) {
-    return res.status(400).json({ message: "An implementing unit is required." });
-  }
-
-  const department = await Department.findByPk(implementingUnitId);
-  if (!department || department.status !== "active") {
-    return res.status(400).json({ message: "That implementing unit is not available." });
-  }
-
-  const fiscalYear = Number(payload.fiscalYear ?? new Date().getFullYear());
-
-  // Which of the two cycles this line belongs to. Indicative lines support the
-  // budget proposal; final lines are charged against the enacted ordinance.
-  const planCycle = payload.planCycle === "indicative" ? "indicative" : "final";
-
-  const funding = await validateAppropriation(payload.appropriationId, payload.abc, {
-    cycle: planCycle,
-    fiscalYear,
+  payload.implementingUnitId = Number(payload.implementingUnitId ?? req.currentUser.departmentId);
+  payload.fiscalYear = Number(payload.fiscalYear ?? new Date().getFullYear());
+  payload.planCycle = payload.planCycle ?? "final";
+  assertDepartmentScope(req, payload.implementingUnitId, APP_CENTRAL_PERMISSIONS, "procurement plans");
+  const entry = await withAuditTransaction(async (transaction, audit) => {
+    await lockFundingLines([payload.appropriationId], transaction);
+    await validatePlanLinks(payload, { transaction });
+    const created = await AppEntry.create({ ...payload, abc: Number(payload.abc), appropriationId: payload.appropriationId ? Number(payload.appropriationId) : null,
+      aipEntryId: Number(payload.aipEntryId), createdById: req.currentUser.id, status: "draft" }, { transaction });
+    await audit(actorAudit(req, { actionType: "app.created", entityRef: "appEntry", entityId: created.id, summary: `${created.projectTitle}: procurement plan created`, beforeState: null, afterState: recordState(created) }));
+    return created;
   });
-  if (funding.error) return res.status(400).json({ message: funding.error, balance: funding.balance });
-
-  const programmed = await validateAipLink(payload.aipEntryId, fiscalYear);
-  if (programmed.error) return res.status(400).json({ message: programmed.error });
-
-  const modeError = await validateModeAgainstCeilings(payload);
-  if (modeError) return res.status(400).json({ message: modeError });
-
-  const entry = await AppEntry.create({
-    ...payload,
-    abc: Number(payload.abc),
-    planCycle,
-    appropriationId: payload.appropriationId ? Number(payload.appropriationId) : null,
-    aipEntryId: Number(payload.aipEntryId),
-    implementingUnitId,
-    createdById: req.currentUser.id,
-    fiscalYear,
-    status: "draft",
-  });
-
-  const created = await AppEntry.findByPk(entry.id, withIncludes);
-  res.status(201).json(serialize(created));
+  res.status(201).json(serialize(await AppEntry.findByPk(entry.id, withIncludes)));
 };
 
 export const updateAppEntry = async (req, res) => {
-  const entry = await AppEntry.findByPk(req.params.id, withIncludes);
-  if (!entry) return res.status(404).json({ message: "APP entry not found." });
-
-  // Section 4.3: an approved APP entry is locked and cannot be edited.
-  if (!isEditable(entry.status)) {
-    return res.status(409).json({
-      message: `This entry is in "${entry.status}" and can no longer be edited.`,
-    });
-  }
-
-  // An office files its own PPMP lines. `app.create` is not a licence to edit
-  // another office's plan — including its ABC, which is what the appropriation
-  // and AIP balance checks are measured against.
-  const canEditAnyUnit = ["app.consolidate", "app.certify", "app.approve"].some((permission) =>
-    req.permissions.has(permission)
-  );
-  if (!canEditAnyUnit && entry.implementingUnitId !== req.currentUser.departmentId) {
-    return res.status(403).json({ message: "This plan line belongs to another office." });
-  }
-
+  const initial = await AppEntry.findByPk(req.params.id);
+  if (!initial) throw workflowError("APP entry not found.", 404);
   const body = pickEditable(req.body, EDITABLE_APP_FIELDS);
-  if (body.planCycle !== undefined && body.planCycle !== entry.planCycle) {
-    return res.status(409).json({ message: "The plan cycle cannot be changed after creation. Create a new plan line for the other cycle." });
-  }
-  const merged = { ...serialize(entry), ...body };
-  const validationError = validateEntry(merged);
-  if (validationError) return res.status(400).json({ message: validationError });
-
-  // Re-checked on every edit: raising the ABC, or moving the entry to a
-  // different budget line, can both overrun an appropriation that was fine a
-  // moment ago. The entry excludes itself so its own current ABC does not count
-  // against the balance it is being measured against.
-  const funding = await validateAppropriation(merged.appropriationId, merged.abc, {
-    excludeAppEntryId: entry.id,
-    cycle: entry.planCycle,
-    fiscalYear: merged.fiscalYear,
+  const entry = await withAuditTransaction(async (transaction, audit) => {
+    await lockFundingLines([initial.appropriationId, body.appropriationId], transaction);
+    const current = await AppEntry.findByPk(initial.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (current.appropriationId !== initial.appropriationId) throw workflowError("The plan's funding changed. Reload before editing.");
+    if (!isEditable(current.status)) throw workflowError(`This entry is in "${current.status}" and can no longer be edited.`);
+    assertDepartmentScope(req, current.implementingUnitId, APP_CENTRAL_PERMISSIONS, "procurement plans");
+    if (body.planCycle !== undefined && body.planCycle !== current.planCycle) throw workflowError("The plan cycle cannot be changed after creation. Create a new plan line for the other cycle.");
+    const beforeState = recordState(current);
+    const merged = { ...beforeState, ...body };
+    assertDepartmentScope(req, merged.implementingUnitId, APP_CENTRAL_PERMISSIONS, "procurement plans");
+    await validatePlanLinks(merged, { excludeAppEntryId: current.id, transaction });
+    await current.update({ ...body, abc: Number(merged.abc), fiscalYear: Number(merged.fiscalYear), implementingUnitId: Number(merged.implementingUnitId),
+      appropriationId: merged.appropriationId ? Number(merged.appropriationId) : null, aipEntryId: Number(merged.aipEntryId) }, { transaction });
+    await audit(actorAudit(req, { actionType: "app.updated", entityRef: "appEntry", entityId: current.id, summary: `${current.projectTitle}: procurement plan updated`, beforeState, afterState: recordState(current) }));
+    return current;
   });
-  if (funding.error) return res.status(400).json({ message: funding.error, balance: funding.balance });
-
-  if (body.aipEntryId !== undefined || body.fiscalYear !== undefined) {
-    const programmed = await validateAipLink(merged.aipEntryId, merged.fiscalYear);
-    if (programmed.error) return res.status(400).json({ message: programmed.error });
-  }
-
-  await entry.update({
-    ...body,
-    ...(body.abc !== undefined ? { abc: Number(body.abc) } : {}),
-    ...(body.appropriationId !== undefined ? { appropriationId: Number(body.appropriationId) } : {}),
-    ...(body.aipEntryId !== undefined ? { aipEntryId: Number(body.aipEntryId) } : {}),
-  });
-
-  const updated = await AppEntry.findByPk(entry.id, withIncludes);
-  res.json(serialize(updated));
+  res.json(serialize(await AppEntry.findByPk(entry.id, withIncludes)));
 };
 
 // Every status change goes through the state machine — no direct status writes.
@@ -578,7 +512,18 @@ export const transitionAppEntry = async (req, res) => {
 
   // Section 13: state-changing operations run inside a transaction.
   await withAuditTransaction(async (transaction, audit) => {
+    const fundingId = entry.appropriationId;
+    await lockFundingLines([fundingId], transaction);
     await entry.reload({ transaction, lock: transaction.LOCK.UPDATE });
+    if (entry.appropriationId !== fundingId) throw workflowError("The plan's funding changed. Reload before continuing.");
+    const beforeState = recordState(entry);
+    const permission = permissionForTransition(action, entry.status);
+    if (!permission || !req.permissions.has(permission)) throw workflowError("You do not have permission to perform this action.", 403);
+    if (["submit", "revise", "cancel"].includes(action)) assertDepartmentScope(req, entry.implementingUnitId, APP_CENTRAL_PERMISSIONS, "procurement plans");
+    const transition = evaluateTransition({ action, currentStatus: entry.status, remarks });
+    if (!transition.ok) throw workflowError(transition.message);
+    if (action === "submit") await validatePlanLinks(recordState(entry), { excludeAppEntryId: entry.id, transaction });
+    if (["revise", "cancel"].includes(action) && (await liveRequisitionsFor(entry.id, transaction)).length) throw workflowError("Live requisitions still use this plan. Return or complete them before changing it.");
     if (entry.status !== previousStatus) throw workflowError("This plan has already moved to another stage. Refresh before continuing.");
     if (["consolidate", "certify", "approve"].includes(action) && entry.createdById === req.currentUser.id) throw workflowError("Another authorized officer must review your procurement plan.", 403);
     const committee = action === "consolidate" ? await assertBacAction(req, { transaction }) : null;
@@ -642,8 +587,8 @@ export const transitionAppEntry = async (req, res) => {
     entityRef: "appEntry",
     entityId: entry.id,
     summary: `${entry.projectTitle}: ${action}`,
-    beforeState: { status: previousStatus },
-    afterState: { status: entry.status, remarks: remarks?.trim() ?? null, ...(committee ? { members: committeeSnapshot(committee), quorum: committee.quorum, presidingMemberId: committee.presidingId } : {}) },
+    beforeState,
+    afterState: { ...recordState(entry), remarks: remarks?.trim() ?? null, ...(committee ? { members: committeeSnapshot(committee), quorum: committee.quorum, presidingMemberId: committee.presidingId } : {}) },
     }));
   });
 

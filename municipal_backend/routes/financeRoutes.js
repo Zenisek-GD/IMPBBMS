@@ -2,6 +2,7 @@ import express from "express";
 import {
   listInvoices,
   submitInvoice,
+  resubmitInvoice,
   certifyInvoice,
   releasePayment,
 } from "../controllers/paymentController.js";
@@ -22,8 +23,13 @@ import {
   resolvePendingItem,
 } from "../controllers/pendingItemController.js";
 import { requirePermission, requireAnyPermission } from "../middleware/permissionMiddleware.js";
+import { listBudgetControls, createBudgetControl, updateBudgetControl, transitionBudgetControl } from "../controllers/budgetControlController.js";
 
 const router = express.Router();
+router.get("/budget-controls", requirePermission("budget.view"), listBudgetControls);
+router.post("/budget-controls", requirePermission("budget.requestControl"), createBudgetControl);
+router.patch("/budget-controls/:id", requirePermission("budget.requestControl"), updateBudgetControl);
+router.post("/budget-controls/:id/transition", requireAnyPermission("budget.requestControl", "budget.approveControl"), transitionBudgetControl);
 
 // ── Invoices & payment ──────────────────────────────────────────────────────
 // Certification and release are distinct permissions held by distinct roles:
@@ -33,6 +39,7 @@ const router = express.Router();
 // granted both permissions to a single account.
 router.get("/invoices", requireAnyPermission("payment.view", "delivery.submitInvoice"), listInvoices);
 router.post("/invoices", requirePermission("delivery.submitInvoice"), submitInvoice);
+router.post("/invoices/:id/resubmit", requirePermission("delivery.submitInvoice"), resubmitInvoice);
 router.post("/invoices/:id/certify", requirePermission("payment.certify"), certifyInvoice);
 router.post("/payments/:paymentId/release", requirePermission("payment.release"), releasePayment);
 

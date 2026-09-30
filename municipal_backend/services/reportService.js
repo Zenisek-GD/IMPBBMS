@@ -1,4 +1,6 @@
 import { Op } from "sequelize";
+import { Appropriation } from "../models/appropriationModel.js";
+import { buildLedger } from "./budgetLedger.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
 import { PrHeader } from "../models/prModel.js";
@@ -16,10 +18,11 @@ import { bidDisclosure, planScope, anyPermission } from "./reportPolicy.js";
 const iso = (value) => value ? new Date(value).toISOString() : null;
 const yearOf = (value) => value ? Number(new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 4)) : null;
 const number = (value) => value == null ? null : Number(value);
-const columns = (keys) => keys.map((key) => ({ key, label: LABELS[key] || key, type: ["amount", "abc", "score", "qualityScore", "financialScore", "combinedScore"].includes(key) ? "number" : "text" }));
+const columns = (keys) => keys.map((key) => ({ key, label: LABELS[key] || key, type: ["amount", "abc", "score", "qualityScore", "financialScore", "combinedScore", "appropriated", "programmed", "allocated", "unallocated", "obligated", "grossExpenses", "supplierPaid", "taxesWithheld", "retention", "unpaid", "unexpended", "recognizedSavings"].includes(key) ? "number" : "text" }));
 const LABELS = {
+  appropriated: "Enacted appropriation", programmed: "APP planned", allocated: "Approved allocations", unallocated: "Available for allocation", obligated: "Obligated", grossExpenses: "Gross expenses", supplierPaid: "Supplier net paid", taxesWithheld: "Taxes withheld", retention: "Outstanding retention", unpaid: "Unpaid obligations", unexpended: "Unexpended appropriation", recognizedSavings: "Approved contract savings", fund: "Fund", expenseClass: "Expense class",
   reference: "Reference", project: "Procurement project", category: "Category", method: "Procurement method", status: "Status",
-  department: "Office / department", year: "Year", date: "Record date / time", abc: "Approved budget", amount: "Amount (PHP)",
+  department: "Office / department", year: "Fiscal year", date: "Record date / time", abc: "Planned procurement (ABC)", amount: "Amount (PHP)",
   attempt: "Attempt", outcome: "Outcome", deadline: "Submission deadline", opening: "Bid opening", publication: "Published",
   bidder: "Bidder", score: "Evaluation score", evaluator: "Evaluator", qualityScore: "Quality score", financialScore: "Financial score",
   combinedScore: "Combined score", recommendation: "TWG recommendation", declaration: "No conflict declared", declaredAt: "Declaration time",
@@ -30,6 +33,7 @@ const LABELS = {
 };
 const COMMON = ["reference", "project", "category", "method", "department", "year", "status", "attempt", "date"];
 const SOURCE_COLUMNS = {
+  budget: ["reference", "project", "department", "year", "status", "fund", "expenseClass", "appropriated", "programmed", "allocated", "unallocated", "obligated", "grossExpenses", "supplierPaid", "taxesWithheld", "retention", "unpaid", "unexpended", "recognizedSavings"],
   procurement: [...COMMON, "abc", "outcome", "deadline", "opening"],
   plans: ["reference", "project", "department", "year", "category", "method", "status", "abc", "date"],
   bids: [...COMMON, "bidder", "amount", "outcome"],
@@ -46,8 +50,8 @@ const SOURCE_COLUMNS = {
 export const columnsForReport = (report) => columns(SOURCE_COLUMNS[report.source]);
 const rfqIncludes = [
   { model: ProcurementMode, as: "mode" },
-  { model: AppEntry, as: "appEntry", include: [{ model: Department, as: "implementingUnit" }] },
-  { model: PrHeader, as: "purchaseRequisition", include: [{ model: Department, as: "department" }, { model: AppEntry, as: "appEntry" }] },
+  { model: AppEntry, as: "appEntry", include: [{ model: Department, as: "implementingUnit" }, { model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }] },
+  { model: PrHeader, as: "purchaseRequisition", include: [{ model: Department, as: "department" }, { model: AppEntry, as: "appEntry", include: [{ model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }] }] },
 ];
 const rfqInclude = { model: Rfq, as: "rfq", include: rfqIncludes, required: true };
 const outcomeOf = (status) => ["awarded", "active", "completed", "issued", "accepted"].includes(status) ? "successful" : ["failed", "technicalFailed", "postDisqualified"].includes(status) ? "failed" : ["cancelled", "rescinded"].includes(status) ? "cancelled" : "ongoing";
@@ -73,25 +77,29 @@ const TIMELINE_ACTIONS = {
 };
 
 function procurementRow(rfq, attemptMap) {
-  const app = rfq.appEntry || rfq.purchaseRequisition?.appEntry;
+  const app = rfq.purchaseRequisition?.appEntry ?? rfq.appEntry;
   const attempt = attemptMap.get(Number(rfq.id));
   return {
     id: `rfq-${rfq.id}`, reference: rfq.referenceNo, project: rfq.title, category: rfq.category,
-    method: rfq.mode?.name || rfq.mode?.key || app?.procurementMode || "", department: rfq.appEntry?.implementingUnit?.name || rfq.purchaseRequisition?.department?.name || "",
-    year: app?.fiscalYear || yearOf(rfq.createdAt), status: rfq.status, date: iso(rfq.createdAt), abc: number(rfq.abc),
+    method: rfq.mode?.name || rfq.mode?.key || app?.procurementMode || "", department: rfq.purchaseRequisition?.department?.name || rfq.appEntry?.implementingUnit?.name || "",
+    year: app?.appropriation?.fiscalYear ?? app?.fiscalYear ?? null, status: rfq.status, date: iso(rfq.createdAt), abc: number(rfq.abc),
     attempt: attempt?.attemptNumber ?? 1, outcome: outcomeOf(rfq.status), deadline: iso(rfq.closingDate), opening: iso(rfq.openingDate),
   };
 }
 
 export async function loadReportRows(report, user, permissions) {
   const source = report.source;
+  if (source === "budget") {
+    const ledger = await buildLedger({ fiscalYear: "all" });
+    return ledger.lines.map((line) => ({ ...line, reference: line.ordinanceNo, project: line.title, department: line.departmentName, year: line.fiscalYear }));
+  }
   if (source === "plans") {
     const scope = planScope(user, permissions);
     const where = {};
     if (scope.publishedOnly) where.status = { [Op.in]: ["approved", "locked"] };
     if (scope.departmentId != null) where.implementingUnitId = scope.departmentId;
-    const entries = await AppEntry.findAll({ where, include: [{ model: Department, as: "implementingUnit" }] });
-    return entries.map((entry) => ({ id: `plan-${entry.id}`, reference: entry.papCode || `APP-${entry.id}`, project: entry.projectTitle, department: entry.implementingUnit?.name || "", year: entry.fiscalYear, category: entry.category, method: entry.procurementMode, status: entry.status, abc: number(entry.abc), date: iso(entry.createdAt) }));
+    const entries = await AppEntry.findAll({ where, include: [{ model: Department, as: "implementingUnit" }, { model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }] });
+    return entries.map((entry) => ({ id: `plan-${entry.id}`, reference: entry.papCode || `APP-${entry.id}`, project: entry.projectTitle, department: entry.implementingUnit?.name || "", year: entry.appropriation?.fiscalYear ?? entry.fiscalYear, category: entry.category, method: entry.procurementMode, status: entry.status, abc: number(entry.abc), date: iso(entry.createdAt) }));
   }
   if (source === "audit") {
     const logs = await AuditLog.findAll({ attributes: ["id", "sequence", "recordedAt", "actorName", "actorRole", "actionType", "entityRef", "entityId", "outcome", "summary", "hash"], order: [["sequence", "DESC"]] });

@@ -51,6 +51,7 @@ export function useServerTable(fetcher, options = {}) {
     pageSizeOptions = [10, 25, 50, 100],
     urlKey = null,
     debounceMs = 400,
+    baseParams = {},
   } = options
 
   const [urlInitial] = useState(() => readUrlState(urlKey))
@@ -83,6 +84,7 @@ export function useServerTable(fetcher, options = {}) {
   }, [query, debounceMs])
 
   const requestKey = JSON.stringify({
+    base: baseParams,
     q: debounced,
     f: filterValues,
     s: sort,
@@ -97,6 +99,8 @@ export function useServerTable(fetcher, options = {}) {
     fetcher({
       ...(asked.q ? { search: asked.q } : {}),
       ...asked.f,
+      // Workspace scope wins over old or manually edited URL filters.
+      ...asked.base,
       ...(asked.s ? { sort: `${asked.s.key}:${asked.s.direction}` } : {}),
       page: asked.p,
       pageSize: asked.ps,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePermissions } from '../../context/usePermissions'
 import { fetchPrs } from '../../api/purchaseRequisitions'
 import { fetchAppEntries } from '../../api/appEntries'
@@ -8,10 +8,9 @@ import { fetchRfqs, fetchVendors } from '../../api/bidding'
 import { fetchContracts } from '../../api/contracts'
 import { fetchDocuments } from '../../api/documentGeneration'
 import { fetchInvoices, fetchBudgetMonitor, fetchPendingItems } from '../../api/finance'
-import { fetchAuditLog, fetchMyWork } from '../../api/insights'
+import { fetchAuditLog } from '../../api/insights'
 import { fetchPublicOverview } from '../../api/publicProjects'
-import { fetchNotifications } from '../../api/notifications'
-import * as queues from './queues'
+import { useActionQueue } from '../../context/useActionQueue'
 
 // ── WHAT EACH DASHBOARD NEEDS, AND NOTHING MORE ──────────────────────────────
 // Every source is gated on a permission the caller actually holds. That is not
@@ -26,17 +25,17 @@ import * as queues from './queues'
 // is waiting on you".
 
 const SOURCES = {
-  prs: { permission: 'pr.view', load: () => fetchPrs() },
-  appEntries: { permission: 'app.view', load: () => fetchAppEntries() },
-  budgets: { permission: 'budget.view', load: () => fetchBudgets() },
-  programs: { permission: 'planning.view', load: () => fetchPrograms() },
-  rfqs: { permission: 'bidding.view', load: () => fetchRfqs() },
+  prs: { permission: 'pr.view', load: (fiscalYear) => fetchPrs({ fiscalYear }) },
+  appEntries: { permission: 'app.view', load: (fiscalYear) => fetchAppEntries({ fiscalYear }) },
+  budgets: { permission: 'budget.view', load: (fiscalYear) => fetchBudgets({ fiscalYear }) },
+  programs: { permission: 'planning.view', load: (fiscalYear) => fetchPrograms({ fiscalYear }) },
+  rfqs: { permission: 'bidding.view', load: (fiscalYear) => fetchRfqs({ fiscalYear }) },
   vendors: { anyOf: ['bidding.publish', 'bidders.createAccount'], load: () => fetchVendors() },
-  contracts: { permission: 'contract.view', load: () => fetchContracts() },
-  documents: { anyOf: ['document.generate', 'document.approve', 'document.publish'], load: () => fetchDocuments() },
-  invoices: { permission: 'payment.view', load: () => fetchInvoices() },
-  budgetMonitor: { permission: 'budget.view', load: () => fetchBudgetMonitor() },
-  pendingItems: { anyOf: ['pr.view', 'budget.view'], load: () => fetchPendingItems() },
+  contracts: { permission: 'contract.view', load: (fiscalYear) => fetchContracts({ fiscalYear }) },
+  documents: { anyOf: ['document.generate', 'document.approve', 'document.publish'], load: (fiscalYear) => fetchDocuments({ fiscalYear }) },
+  invoices: { permission: 'payment.view', load: (fiscalYear) => fetchInvoices({ fiscalYear }) },
+  budgetMonitor: { permission: 'budget.view', load: (fiscalYear) => fetchBudgetMonitor({ fiscalYear }) },
+  pendingItems: { anyOf: ['pr.view', 'budget.view'], load: (fiscalYear) => fetchPendingItems({ fiscalYear }) },
   // ── Recent system activity ────────────────────────────────────────────────
   // Deliberately NOT `audit.viewAll`, which ten roles hold. The activity feed
   // is oversight, and oversight belongs to the Administrator, the Mayor as Head
@@ -44,12 +43,12 @@ const SOURCES = {
   // job is reading this trail. Every other role sees its own work instead.
   audit: { anyOf: ['audit.viewLogs', 'audit.export'], load: () => fetchAuditLog({ limit: 8, scope: 'system' }) },
   // Public, so no gate — and it is the one figure every role can be shown.
-  publicOverview: { load: () => fetchPublicOverview() },
-  notifications: { load: () => fetchNotifications({ unreadOnly: true, limit: 8 }) },
+  publicOverview: { load: (fiscalYear) => fetchPublicOverview({ fiscalYear }) },
+
   // This is intentionally not gated in the browser. Every active account gets
   // an inbox; the server reads fresh permissions and returns only its own
   // authorised work items.
-  myWork: { load: () => fetchMyWork({ limit: 100 }) },
+
 }
 
 const allowed = (permissions, source) => {
@@ -60,6 +59,8 @@ const allowed = (permissions, source) => {
 
 export function useDashboardData(needs) {
   const permissions = usePermissions()
+  const actions = useActionQueue()
+  const { fiscalYear, refresh, generatedAt } = actions
   const [state, setState] = useState({ data: {}, failedSources: [] })
   const [attempt, setAttempt] = useState(0)
 
@@ -73,13 +74,13 @@ export function useDashboardData(needs) {
     // The inbox is part of every role's workday. It is fetched separately from
     // workflow queues because a returned item or a deadline reminder can exist
     // even when the user has no record transition to perform right now.
-    const wanted = [...new Set([...(key ? key.split(',') : []), 'notifications', 'myWork'])]
+    const wanted = [...new Set([...(key ? key.split(',') : [])])]
 
     const jobs = wanted
       .filter((name) => SOURCES[name] && allowed(permissions, SOURCES[name]))
       .map((name) =>
         SOURCES[name]
-          .load()
+          .load(fiscalYear)
           .then((value) => ({ name, value, failed: false }))
           // A single failing source must not blank the whole dashboard.
           .catch(() => ({ name, value: undefined, failed: true }))
@@ -87,33 +88,19 @@ export function useDashboardData(needs) {
 
     Promise.all(jobs).then((results) => {
       if (cancelled) return
-      setState({ key, attempt, permissions, data: Object.fromEntries(results.map(({ name, value }) => [name, value])), failedSources: results.filter((result) => result.failed).map((result) => result.name) })
+      setState({ key, attempt, permissions, fiscalYear, data: Object.fromEntries(results.map(({ name, value }) => [name, value])), failedSources: results.filter((result) => result.failed).map((result) => result.name) })
     })
 
     return () => {
       cancelled = true
     }
-  }, [key, permissions, attempt])
+  }, [key, permissions, attempt, fiscalYear, generatedAt])
 
-  const data = state.data
-
-  // Workflow ownership for APP, PR, planning, solicitation, awards and vendor
-  // onboarding comes from the server. Several lower-risk operational queues
-  // (budget preparation, document production, contracts and invoice handling)
-  // have no server-side transition map yet, so their existing page-specific
-  // summaries remain presentation-only supplements rather than disappearing
-  // from an officer's home screen. Their write endpoints still re-authorize.
-  const queue = useMemo(
-    () => [
-      ...(data.myWork?.items ?? []),
-      ...queues.budgetQueue(data.budgets, permissions),
-      ...queues.evaluationQueue(data.rfqs, permissions),
-      ...queues.contractQueue(data.contracts, permissions),
-      ...queues.documentQueue(data.documents, permissions),
-      ...queues.invoiceQueue(data.invoices, permissions),
-    ],
-    [data, permissions]
-  )
-
-  return { loading: state.key !== key || state.attempt !== attempt || state.permissions !== permissions, data, queue, failedSources: state.failedSources, retry: () => setAttempt((current) => current + 1) }
+  const data = { ...state.data, notifications: { notifications: actions.notifications.filter((notice) => !notice.readAt) } }
+  return {
+    loading: state.key !== key || state.attempt !== attempt || state.permissions !== permissions || state.fiscalYear !== fiscalYear || actions.loading,
+    data, queue: actions.items,
+    failedSources: [...state.failedSources, ...(actions.error ? ['myWork'] : [])],
+    retry: () => { setAttempt((current) => current + 1); refresh() },
+  }
 }

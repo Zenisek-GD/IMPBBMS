@@ -1,6 +1,7 @@
 import { REPORTS, canReadReport, filterReportRows, csvCell } from "../services/reportPolicy.js";
 import { columnsForReport, loadReportRows } from "../services/reportService.js";
 import { auditFromRequest } from "../services/auditLog.js";
+import { fiscalYearFilter } from "../services/financialCalculations.js";
 
 export const listReportCatalog = (req, res) => res.json(REPORTS.filter((report) => canReadReport(report, req.permissions)).map((report) => ({
   key: report.key, title: report.title, columns: columnsForReport(report),
@@ -17,7 +18,8 @@ export async function getReport(req, res) {
 
   const columns = columnsForReport(report);
   const rawRows = await loadReportRows(report, req.currentUser, req.permissions);
-  const rows = filterReportRows(rawRows, req.query, columns);
+  const year = fiscalYearFilter(req.query.year);
+  const rows = filterReportRows(rawRows, { ...req.query, year: year ?? undefined }, columns);
   const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 10));
   const page = Math.min(Math.max(1, Math.ceil(rows.length / pageSize)), Math.max(1, Number.parseInt(req.query.page, 10) || 1));
   // Explicit projection prevents future ORM fields from silently becoming exports.
@@ -34,5 +36,5 @@ export async function getReport(req, res) {
   }
   const filterKeys = ["year", "category", "method", "status", "department", "bidder", "action", "attempt", "outcome"];
   const filters = Object.fromEntries(filterKeys.filter((key) => columns.some((column) => column.key === key) || key === "year").map((key) => [key, [...new Set(rawRows.map((row) => row[key]).filter((value) => value != null && value !== ""))].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }))]));
-  return res.json({ key: report.key, title: report.title, generatedAt: new Date().toISOString(), timezone: "Asia/Manila", columns, rows: (format === "print" ? rows : rows.slice((page - 1) * pageSize, page * pageSize)).map(project), total: rows.length, page, pageSize, filters });
+  return res.json({ fiscalYear: year ?? "all", key: report.key, title: report.title, generatedAt: new Date().toISOString(), timezone: "Asia/Manila", columns, rows: (format === "print" ? rows : rows.slice((page - 1) * pageSize, page * pageSize)).map(project), total: rows.length, page, pageSize, filters });
 }

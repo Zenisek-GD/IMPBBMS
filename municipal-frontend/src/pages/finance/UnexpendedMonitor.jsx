@@ -1,4 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
+import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
+import { useActionQueue } from '../../context/useActionQueue'
+import { currentFiscalYear } from '../../utils/fiscalYear'
 import { TrendingUp, BellRing, CalendarClock, Landmark } from 'lucide-react'
 import * as financeApi from '../../api/finance'
 import { SEVERITY_TONES } from '../../api/finance'
@@ -26,7 +29,9 @@ const VIEWS = [
 
 export default function UnexpendedMonitor() {
   const permissions = usePermissions()
-  const [data, setData] = useState(null)
+  const { fiscalYear, setFiscalYear } = useActionQueue()
+  const [snapshot, setData] = useState(null)
+  const data = snapshot && String(snapshot.fiscalYear) === String(fiscalYear) ? snapshot : null
   const [notice, setNotice] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [view, setView] = useState('offices')
@@ -39,7 +44,7 @@ export default function UnexpendedMonitor() {
 
   useEffect(() => {
     let cancelled = false
-    financeApi.fetchBudgetMonitor()
+    financeApi.fetchBudgetMonitor({ fiscalYear })
       .then((result) => {
         if (cancelled) return
         setData(result)
@@ -49,17 +54,17 @@ export default function UnexpendedMonitor() {
         if (!cancelled) setLoadError(err?.response?.data?.message ?? 'The budget utilisation monitor could not be loaded.')
       })
     return () => { cancelled = true }
-  }, [refreshToken])
+  }, [refreshToken, fiscalYear])
 
   const canDispatch = permissions.has('budget.certify')
-  const inAlertWindow = data && data.daysToYearEnd <= data.alertWindowDays
+  const inAlertWindow = data && data.daysToYearEnd != null && data.daysToYearEnd <= data.alertWindowDays
   const rows = data ? (view === 'offices' ? data.offices : data.lines) : []
   const highRiskLines = data?.lines.filter((line) => line.severity === 'high').length ?? 0
   const mediumRiskLines = data?.lines.filter((line) => line.severity === 'medium').length ?? 0
   const appropriated = Number(data?.totals.appropriated ?? 0)
   const programmedRate = appropriated > 0 ? (Number(data?.totals.programmed ?? 0) / appropriated) * 100 : 0
   const obligationRate = appropriated > 0 ? (Number(data?.totals.obligated ?? 0) / appropriated) * 100 : 0
-  const disbursementRate = appropriated > 0 ? (Number(data?.totals.disbursed ?? 0) / appropriated) * 100 : 0
+  const disbursementRate = appropriated > 0 ? (Number(data?.totals.grossExpenses ?? 0) / appropriated) * 100 : 0
 
   const table = useTableControls(rows, {
     searchKeys: ['departmentCode', 'departmentName', 'title', 'papCode', 'ordinanceNo'],
@@ -68,7 +73,7 @@ export default function UnexpendedMonitor() {
       appropriated: (row) => Number(row.appropriated ?? 0),
       programmed: (row) => Number(row.programmed ?? 0),
       obligated: (row) => Number(row.obligated ?? 0),
-      disbursed: (row) => Number(row.disbursed ?? 0),
+      grossExpenses: (row) => Number(row.grossExpenses ?? 0),
       unobligated: (row) => Number(row.unobligated ?? 0),
       utilisationRate: (row) => Number(row.utilisationRate ?? 0),
       label: (row) => (view === 'offices' ? row.departmentCode : (row.papCode ?? row.ordinanceNo)),
@@ -96,7 +101,7 @@ export default function UnexpendedMonitor() {
     <DashboardPage>
       <PageHeader
         title="Budget Utilisation Monitor"
-        subtitle="Appropriated, programmed, obligated and disbursed, as fiscal year-end approaches."
+        subtitle="Enacted appropriations, project allocations, obligations, gross expenses and remaining liabilities."
         meta={data ? [
           { label: 'Fiscal year', value: `FY${data.fiscalYear}` },
           {
@@ -106,9 +111,10 @@ export default function UnexpendedMonitor() {
               : `${mediumRiskLines} monitored line${mediumRiskLines === 1 ? '' : 's'}`,
           },
         ] : []}
-        actions={canDispatch && <Button variant="warning" icon={BellRing} onClick={dispatchAlerts}>Send alerts</Button>}
+        actions={canDispatch && fiscalYear === String(currentFiscalYear()) && <Button variant="warning" icon={BellRing} onClick={dispatchAlerts}>Send alerts</Button>}
       />
 
+      <FiscalYearFilter value={fiscalYear} onChange={setFiscalYear} />
       {notice && <p role={notice.tone === 'danger' ? 'alert' : 'status'} className={`rounded border px-4 py-3 text-sm ${noticeClass}`}>{notice.text}</p>}
 
       {loadError && (
@@ -125,8 +131,8 @@ export default function UnexpendedMonitor() {
           <div className={`flex items-start gap-3 rounded-lg border p-4 ${inAlertWindow ? 'border-warning/30 bg-warning/10' : 'border-border-muted bg-chip/40'}`}>
             <CalendarClock size={16} className="mt-0.5 shrink-0 text-navy" />
             <p className="text-[13px] text-text-secondary">
-              <strong className="text-navy">{data.daysToYearEnd} days</strong> to the end of FY{data.fiscalYear}.
-              {inAlertWindow ? ' Recurring maturity alerts are active.' : ` Alerts begin within ${data.alertWindowDays} days of year-end.`}
+              {data.fiscalYear === 'all' ? 'Combined fiscal years: choose a single year for year-end monitoring.' : <><strong className="text-navy">{data.daysToYearEnd} days</strong> to the end of FY{data.fiscalYear}.</>}
+              {data.fiscalYear !== 'all' && (inAlertWindow ? ' Review balances and required closeouts.' : ` Alerts begin within ${data.alertWindowDays} days of year-end.`)}
             </p>
           </div>
 
@@ -138,7 +144,7 @@ export default function UnexpendedMonitor() {
               <section className="p-5">
                 <p className="text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">Authority & planning</p>
                 <p className="mt-1 text-xl font-semibold text-navy">{peso(data.totals.appropriated)}</p>
-                <p className="text-xs text-text-faint">Authorised by ordinance</p>
+                <p className="text-xs text-text-faint">Authorised by ordinance</p><p className="mt-2 text-xs text-text-secondary">{peso(data.totals.allocated)} approved project allocations; {peso(data.totals.unallocated)} available for allocation.</p>
                 <div className="mt-4 space-y-3">
                   <ProgressRow label="Programmed in the APP" value={percent(programmedRate / 100)} percent={programmedRate} />
                   <p className="text-xs text-text-faint">{peso(data.totals.programmed)} planned procurement; this is not yet a commitment.</p>
@@ -149,9 +155,10 @@ export default function UnexpendedMonitor() {
                 <p className="mt-1 text-xl font-semibold text-navy">{peso(data.totals.obligated)}</p>
                 <p className="text-xs text-text-faint">Committed by certified ORS</p>
                 <div className="mt-4 space-y-3">
-                  <ProgressRow label="Released from treasury" value={percent(disbursementRate / 100)} percent={disbursementRate} tone="success" />
+                  <ProgressRow label="Gross expenses" value={percent(disbursementRate / 100)} percent={disbursementRate} tone="success" />
                   <ProgressRow label="Committed" value={percent(obligationRate / 100)} percent={obligationRate} />
-                  <p className="text-xs text-text-faint">{peso(data.totals.disbursed)} disbursed; {peso(data.totals.unpaid)} still unpaid.</p>
+                  <p className="text-xs text-text-faint">{peso(data.totals.grossExpenses)} gross expenses; {peso(data.totals.supplierPaid)} net supplier payments.
+                  </p><p className="text-xs text-text-faint">{peso(data.totals.taxesWithheld)} taxes withheld; {peso(data.totals.retention)} retention; {peso(data.totals.unpaid)} unpaid obligations.</p>
                 </div>
               </section>
               <section className="bg-warning/5 p-5">
@@ -189,7 +196,7 @@ export default function UnexpendedMonitor() {
                     <SortableTh {...table.sortProps('appropriated')}>Appropriated</SortableTh>
                     <SortableTh {...table.sortProps('programmed')}>Programmed</SortableTh>
                     <SortableTh {...table.sortProps('obligated')}>Obligated</SortableTh>
-                    <SortableTh {...table.sortProps('disbursed')}>Disbursed</SortableTh>
+                    <SortableTh {...table.sortProps('grossExpenses')}>Gross expenses</SortableTh>
                     <SortableTh {...table.sortProps('unobligated')}>Unobligated</SortableTh>
                     <SortableTh {...table.sortProps('utilisationRate')}>Utilisation</SortableTh>
                     <SortableTh {...table.sortProps('severity')}>Risk</SortableTh>
@@ -203,7 +210,7 @@ export default function UnexpendedMonitor() {
                         <td className="px-4 py-3 text-[13px] font-semibold whitespace-nowrap text-navy">{peso(row.appropriated)}</td>
                         <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">{peso(row.programmed)}</td>
                         <td className="px-4 py-3 text-[13px] whitespace-nowrap">{peso(row.obligated)}</td>
-                        <td className="px-4 py-3 text-[13px] whitespace-nowrap">{peso(row.disbursed)}</td>
+                        <td className="px-4 py-3 text-[13px] whitespace-nowrap">{peso(row.grossExpenses)}</td>
                         <td className="px-4 py-3 text-[13px] font-semibold whitespace-nowrap text-warning">{peso(row.unobligated)}</td>
                         <td className="w-48 px-4 py-3"><ProgressRow label="" value={percent(row.utilisationRate)} percent={Math.round((row.utilisationRate ?? 0) * 100)} tone={row.utilisationRate > 0.7 ? 'success' : 'navy'} /></td>
                         <td className="px-4 py-3"><Badge tone={SEVERITY_TONES[row.severity]}>{row.severity}</Badge></td>
@@ -222,7 +229,7 @@ export default function UnexpendedMonitor() {
               <strong className="text-text-secondary">Appropriated</strong> is what the Sanggunian authorised by ordinance - the real budget.{' '}
               <strong className="text-text-secondary">Programmed</strong> is what the Annual Procurement Plan intends to buy, which commits nothing.{' '}
               <strong className="text-text-secondary">Obligated</strong> is what certified Obligation Requests have committed, and{' '}
-              <strong className="text-text-secondary">disbursed</strong> is what the Treasurer has released. Near year-end, unobligated balance is the figure that needs action.
+              <strong className="text-text-secondary">gross expenses</strong> include the supplier payment and recorded deductions. Withheld taxes and retention remain liabilities until settled. Unused balances require approved financial closeout before recognition as savings or reuse.
             </p>
           </div>
         </>

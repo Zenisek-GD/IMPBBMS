@@ -1,5 +1,3 @@
-import { Op } from "sequelize";
-import { sequelize } from "../models/db.js";
 import {
   ExecutiveBudget,
   BudgetProposal,
@@ -23,18 +21,27 @@ import {
 import { InvestmentProgram, AipEntry } from "../models/investmentProgramModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
+import { reconcileReenactedAppropriations } from "../services/budgetControls.js";
+import { fiscalYearFilter } from "../services/financialCalculations.js";
 import {
   evaluateTransition,
   permissionForTransition,
   proposalsEditableIn,
+  proceedingPermissions,
+  proceedingsEditableIn,
   PROPOSAL_STAGE_FOR_BUDGET_STATE,
   BUDGET_TRANSITIONS,
   generalLimitationFindings,
 } from "../services/budgetPreparationWorkflow.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
-import { notifyByPermission, notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
+import { withAuditTransaction, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 
+import { actorAudit, workflowError } from '../services/workflowSupport.js';
+import { lockBudget, returnBudgetForRevision, snapshot } from '../services/budgetRecordSupport.js';
+import { lockAppropriationYear } from '../services/requisitionRecords.js';
+
+const fail = (status, body) => { const { message, ...details } = body; throw workflowError(message, status, details); };
 const num = (value) => (value === null || value === undefined ? 0 : Number(value));
 const peso = (value) => `₱${num(value).toLocaleString()}`;
 
@@ -55,6 +62,8 @@ const serializeLine = (line) => ({
   finalAmount: line.finalAmount === null ? null : num(line.finalAmount),
   remarks: line.remarks,
   aipEntryId: line.aipEntryId,
+  isDevelopmentFund: Boolean(line.isDevelopmentFund),
+  isLdrrmf: Boolean(line.isLdrrmf),
   aipEntryTitle: line.aipEntry?.title ?? null,
   aipEstimatedCost: line.aipEntry ? num(line.aipEntry.estimatedCost) : null,
 });
@@ -216,7 +225,8 @@ export const getBudgetPreparationOptions = async (req, res) => {
 // ── Executive budget ─────────────────────────────────────────────────────────
 export const listBudgets = async (req, res) => {
   const where = {};
-  if (Number.isFinite(Number(req.query.fiscalYear))) where.fiscalYear = Number(req.query.fiscalYear);
+  const fiscalYear = fiscalYearFilter(req.query.fiscalYear);
+  if (fiscalYear !== null) where.fiscalYear = fiscalYear;
   if (req.query.status) where.status = req.query.status;
 
   const budgets = await ExecutiveBudget.findAll({
@@ -235,53 +245,23 @@ export const getBudget = async (req, res) => {
 };
 
 export const createBudget = async (req, res) => {
+  if (!req.permissions.has('budget.prepareExecutive')) throw workflowError('You do not have permission to open an executive budget.', 403);
   const fiscalYear = Number(req.body.fiscalYear);
-  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) {
-    return res.status(400).json({ message: "A valid fiscal year is required." });
-  }
-
-  const type = BUDGET_TYPES.includes(req.body.type) ? req.body.type : "annual";
-
-  // One annual budget per year. Supplemental budgets are deliberately not
-  // limited: a year can carry several, which is the whole point of them.
-  if (type === "annual") {
-    const existing = await ExecutiveBudget.findOne({ where: { fiscalYear, type: "annual" } });
-    if (existing) {
-      return res.status(409).json({
-        message: `An annual budget for ${fiscalYear} already exists. Create a supplemental budget instead.`,
-      });
-    }
-  }
-
-  // The budget is built on the investment program. Without an adopted AIP there
-  // is no agreed list of projects to appropriate for, which is the gap that let
-  // the old system appropriate for anything at all.
-  const program = await InvestmentProgram.findOne({ where: { fiscalYear, status: "adopted" } });
-  if (!program) {
-    return res.status(409).json({
-      message: `No adopted Annual Investment Program for ${fiscalYear}. Adopt one before opening the budget.`,
-    });
-  }
-
-  const budget = await ExecutiveBudget.create({
-    fiscalYear,
-    type,
-    title: req.body.title?.trim() || `${type === "annual" ? "Annual" : "Supplemental"} Budget ${fiscalYear}`,
-    investmentProgramId: program.id,
-    ceilingGrowthPct:
-      req.body.ceilingGrowthPct === undefined || req.body.ceilingGrowthPct === null
-        ? null
-        : Number(req.body.ceilingGrowthPct),
-    preparedById: req.currentUser.id,
-    status: "draft",
-  });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.BUDGET_TRANSITION,
-    entityRef: "executiveBudget",
-    entityId: budget.id,
-    summary: `${budget.title} opened for proposals`,
-    afterState: { status: "draft", fiscalYear, type },
+  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) throw workflowError('A valid fiscal year is required.', 400);
+  const type = req.body.type ?? 'annual';
+  if (!BUDGET_TYPES.includes(type)) throw workflowError('Unknown budget type.', 400);
+  const ceilingGrowthPct = req.body.ceilingGrowthPct == null ? null : Number(req.body.ceilingGrowthPct);
+  if (ceilingGrowthPct !== null && (!Number.isFinite(ceilingGrowthPct) || ceilingGrowthPct < 0)) throw workflowError('The growth ceiling must be a nonnegative number.', 400);
+  const budget = await withAuditTransaction(async (transaction, audit) => {
+    await lockAppropriationYear(fiscalYear, transaction);
+    const program = await InvestmentProgram.findOne({ where: { fiscalYear, status: 'adopted' }, transaction, lock: transaction.LOCK.UPDATE });
+    if (!program) throw workflowError(`No adopted Annual Investment Program for ${fiscalYear}. Adopt one before opening the budget.`);
+    if (type === 'annual' && await ExecutiveBudget.findOne({ where: { fiscalYear, type }, transaction, lock: transaction.LOCK.UPDATE })) throw workflowError(`An annual budget for ${fiscalYear} already exists. Create a supplemental budget instead.`);
+    const row = await ExecutiveBudget.create({ fiscalYear, type, title: req.body.title?.trim() || `${type === 'annual' ? 'Annual' : 'Supplemental'} Budget ${fiscalYear}`,
+      investmentProgramId: program.id, ceilingGrowthPct, preparedById: req.currentUser.id, status: 'draft' }, { transaction });
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.BUDGET_TRANSITION, entityRef: 'executiveBudget', entityId: row.id,
+      summary: `${row.title} opened for proposals`, beforeState: null, afterState: snapshot(row) }));
+    return row;
   });
 
   // The budget call: every office that prepares a proposal is told the year is
@@ -309,10 +289,17 @@ export const createBudget = async (req, res) => {
 // so the register can answer "who authorised this, and against which request?"
 // without a human having retyped anything.
 const releaseAppropriations = async (budget, proposals, { userId, transaction }) => {
+  if (await Appropriation.findOne({ where: { executiveBudgetId: budget.id }, transaction, lock: transaction.LOCK.UPDATE })) {
+    throw workflowError('This budget already has released appropriations. A second release is not permitted.');
+  }
   const created = [];
 
-  for (const proposal of proposals) {
+  for (const proposal of proposals.filter((row) => row.status !== 'draft')) {
+    if (proposal.status !== 'finalised') throw workflowError('Only finalised proposals can release appropriations.');
     for (const line of proposal.lines ?? []) {
+      if (line.finalAmount === null || !Number.isFinite(num(line.finalAmount)) || num(line.finalAmount) < 0 || num(line.finalAmount) > num(line.proposedAmount)) {
+        throw workflowError('Every released line needs a valid final amount within its original proposal.');
+      }
       const amount = num(line.finalAmount);
       // A line struck out in deliberation is not appropriated. It stays on the
       // proposal as evidence of what was asked and refused.
@@ -343,17 +330,22 @@ const releaseAppropriations = async (budget, proposals, { userId, transaction })
     }
   }
 
+  created.reconciliation = await reconcileReenactedAppropriations(budget, created, transaction);
   return created;
 };
 
 export const transitionBudget = async (req, res) => {
+  const { budget, result, released } = await withAuditTransaction(async (transaction, audit) => {
   const { action, remarks } = req.body;
-  const budget = await ExecutiveBudget.findByPk(req.params.id, budgetIncludes);
-  if (!budget) return res.status(404).json({ message: "Budget not found." });
-
+  if (action === 'recordProvincialReview') {
+    const identity = await ExecutiveBudget.findByPk(req.params.id, { attributes: ['fiscalYear'], transaction });
+    if (!identity) throw workflowError('Budget not found.', 404);
+    await lockAppropriationYear(identity.fiscalYear, transaction);
+  }
+  const budget = await lockBudget(req.params.id, transaction);
   const requiredPermission = permissionForTransition(action, budget.status);
   if (!requiredPermission || !req.permissions.has(requiredPermission)) {
-    return res.status(403).json({ message: "You do not have permission to perform this action." });
+    return fail(403, { message: "You do not have permission to perform this action." });
   }
 
   const result = evaluateTransition({
@@ -363,22 +355,23 @@ export const transitionBudget = async (req, res) => {
     budget,
     payload: req.body,
   });
-  if (!result.ok) return res.status(409).json({ message: result.message });
+  if (!result.ok) return fail(409, { message: result.message });
 
-  const previousStatus = budget.status;
+  const before = snapshot(budget);
+  const activeProposals = budget.proposals.filter((proposal) => proposal.status !== "draft");
   const changes = { status: result.to };
 
   // ── Stage-specific rules ───────────────────────────────────────────────────
   if (action === "closeProposals") {
     const submitted = (budget.proposals ?? []).filter((p) => p.status !== "draft");
     if (submitted.length === 0) {
-      return res.status(409).json({
+      return fail(409, {
         message: "No office has submitted a proposal yet. There is nothing for the Budget Council to review.",
       });
     }
     const stillDraft = (budget.proposals ?? []).filter((p) => p.status === "draft");
     if (stillDraft.length > 0 && !req.body.proceedWithoutAll) {
-      return res.status(409).json({
+      return fail(409, {
         message: `${stillDraft.length} office(s) have not submitted: ${stillDraft
           .map((p) => p.office?.code ?? p.departmentId)
           .join(", ")}. Resend the call, or confirm proceeding without them.`,
@@ -397,7 +390,7 @@ export const transitionBudget = async (req, res) => {
         (proposal.lines ?? []).some((line) => line.recommendedAmount === null)
     );
     if (unreviewed.length > 0) {
-      return res.status(409).json({
+      return fail(409, {
         message: `${unreviewed.length} proposal(s) still have unreviewed lines. Record a recommended amount on every line first.`,
         offices: unreviewed.map((p) => p.office?.code ?? String(p.departmentId)),
       });
@@ -410,7 +403,7 @@ export const transitionBudget = async (req, res) => {
     // development plan. A capital project that cites no AIP entry is exactly
     // what that check is for.
     const unlinked = [];
-    for (const proposal of budget.proposals ?? []) {
+    for (const proposal of activeProposals) {
       for (const line of proposal.lines ?? []) {
         if (line.expenseClass === "capitalOutlay" && !line.aipEntryId) {
           unlinked.push(`${proposal.office?.code ?? proposal.departmentId}: ${line.title}`);
@@ -418,7 +411,7 @@ export const transitionBudget = async (req, res) => {
       }
     }
     if (unlinked.length > 0 && !req.body.acknowledgeUnlinked) {
-      return res.status(409).json({
+      return fail(409, {
         message:
           "These capital outlay requests cite no investment program entry, so they fund projects the LGU never programmed. Link them, or acknowledge the exception explicitly.",
         unlinked,
@@ -433,16 +426,17 @@ export const transitionBudget = async (req, res) => {
     if (req.body.ceilingGrowthPct !== undefined && req.body.ceilingGrowthPct !== null) {
       changes.ceilingGrowthPct = Number(req.body.ceilingGrowthPct);
     }
+    if (changes.ceilingGrowthPct !== undefined && (!Number.isFinite(changes.ceilingGrowthPct) || changes.ceilingGrowthPct < 0)) throw workflowError('The growth ceiling must be a nonnegative number.', 400);
     changes.forumHeldAt = new Date();
   }
 
   if (action === "concludeHearing") {
     // A hearing that left no minutes did not happen as far as the record is
     // concerned, and the record is the point.
-    const hearings = (budget.proceedings ?? []).filter((p) => p.type === "hearing" && p.minutes?.trim());
+    const hearings = (budget.proceedings ?? []).filter((p) => p.type === "hearing" && p.heldAt && p.minutes?.trim() && (!budget.forumHeldAt || new Date(p.heldAt) >= new Date(budget.forumHeldAt)));
     if (hearings.length === 0) {
-      return res.status(409).json({
-        message: "Record at least one budget hearing with its minutes before concluding the hearings.",
+      return fail(409, {
+        message: "Record at least one held budget hearing with minutes from the current forum cycle before concluding the hearings.",
       });
     }
     changes.hearingConcludedAt = new Date();
@@ -454,7 +448,7 @@ export const transitionBudget = async (req, res) => {
         proposal.status !== "draft" && (proposal.lines ?? []).some((line) => line.finalAmount === null)
     );
     if (missing.length > 0) {
-      return res.status(409).json({
+      return fail(409, {
         message: `${missing.length} proposal(s) still have lines without a final amount. Strike a figure on every line, using 0 for lines that were refused.`,
         offices: missing.map((p) => p.office?.code ?? String(p.departmentId)),
       });
@@ -462,10 +456,10 @@ export const transitionBudget = async (req, res) => {
 
     // LGC Sec. 324(a): appropriations may not exceed the estimated income. The
     // ceiling the forum set is the operative figure here.
-    const finalTotal = (budget.proposals ?? []).reduce((sum, p) => sum + num(p.finalTotal), 0);
+    const finalTotal = activeProposals.reduce((sum, p) => sum + num(p.finalTotal), 0);
     const ceiling = num(budget.expenditureCeiling);
     if (ceiling > 0 && finalTotal > ceiling) {
-      return res.status(409).json({
+      return fail(409, {
         message: `The finalised total of ${peso(finalTotal)} exceeds the expenditure ceiling of ${peso(
           ceiling
         )} set at the budget forum. Reduce the final figures or reconvene the Finance Committee.`,
@@ -483,7 +477,7 @@ export const transitionBudget = async (req, res) => {
     // them yet should not be blocked from finalising by a check it cannot
     // satisfy. What it should not be able to do is finalise without being told.
     const lgu = await getLguProfile();
-    const totalsByClass = (budget.proposals ?? []).reduce(
+    const totalsByClass = activeProposals.reduce(
       (totals, proposal) => {
         for (const line of proposal.lines ?? []) {
           const amount = num(line.finalAmount);
@@ -510,13 +504,14 @@ export const transitionBudget = async (req, res) => {
       // Recorded on the budget so the Mayor and the Sanggunian see them, and in
       // the audit trail so a later reviewer can see they were known about.
       changes.limitationFindings = findings;
-      await auditFromRequest(req, {
+      await audit(actorAudit(req, {
         actionType: "budget.limitations.flagged",
         entityRef: "executiveBudget",
         entityId: budget.id,
         summary: `FY ${budget.fiscalYear} budget finalised with ${findings.length} statutory limitation finding(s)`,
+        beforeState: { findings: budget.limitationFindings },
         afterState: { findings },
-      });
+      }));
     } else {
       changes.limitationFindings = null;
     }
@@ -532,31 +527,33 @@ export const transitionBudget = async (req, res) => {
   if (action === "enactOrdinance") {
     changes.ordinanceNo = req.body.ordinanceNo.trim();
     changes.ordinanceDate = req.body.ordinanceDate ?? new Date().toISOString().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(changes.ordinanceDate) || !Number.isFinite(new Date(changes.ordinanceDate).getTime())) throw workflowError('A valid ordinance date is required.', 400);
     changes.sanggunianActedAt = new Date();
   }
 
   if (action === "recordProvincialReview") {
     const outcome = req.body.provincialReviewOutcome;
     if (!PROVINCIAL_REVIEW_OUTCOMES.includes(outcome)) {
-      return res.status(400).json({ message: "Unknown provincial review outcome." });
+      return fail(400, { message: "Unknown provincial review outcome." });
     }
     if (outcome !== "approved" && outcome !== "deemedApproved" && !req.body.provincialRemarks?.trim()) {
-      return res.status(400).json({
+      return fail(400, {
         message: "Record what the Sangguniang Panlalawigan declared inoperative and on what ground.",
       });
     }
     // An ordinance declared inoperative in full authorises nothing. Releasing
     // appropriations from it would be the single worst thing this module could
     // do, so it is refused outright rather than flagged.
-    if (outcome === "declaredInoperativeInFull") {
-      return res.status(409).json({
+    if (outcome === "declaredInoperativeInFull" || outcome === "declaredInoperativeInPart") {
+      return fail(409, {
         message:
-          "An ordinance declared inoperative in full releases no appropriations. Return the budget for revision and re-enactment instead.",
+          "An ordinance declared inoperative cannot release all proposed appropriations. Use Return for revision to correct the proposals and obtain renewed approval before release.",
       });
     }
 
     changes.provincialReviewOutcome = outcome;
     changes.provincialReviewedAt = req.body.provincialReviewedAt ?? new Date();
+    if (!Number.isFinite(new Date(changes.provincialReviewedAt).getTime())) throw workflowError('A valid provincial review date is required.', 400);
     changes.provincialRemarks = req.body.provincialRemarks?.trim() || null;
     changes.enactedAt = new Date();
   }
@@ -564,57 +561,28 @@ export const transitionBudget = async (req, res) => {
   if (action === "return") changes.returnRemarks = remarks.trim();
 
   // ── Apply ──────────────────────────────────────────────────────────────────
-  let released = [];
-  await sequelize.transaction(async (transaction) => {
-    await budget.update(changes, { transaction });
 
-    // Each office's copy advances with the budget, so a department head can see
-    // where their request has got to without reading the budget's own status.
-    const proposalStage = PROPOSAL_STAGE_FOR_BUDGET_STATE[result.to];
-    if (proposalStage) {
-      await BudgetProposal.update(
-        { status: proposalStage },
-        {
-          where: { executiveBudgetId: budget.id, status: { [Op.ne]: "draft" } },
-          transaction,
-        }
-      );
-    }
-
-    if (action === "recordProvincialReview") {
-      released = await releaseAppropriations(budget, budget.proposals ?? [], {
-        userId: req.currentUser.id,
-        transaction,
-      });
-    }
+  if (action === 'return') await returnBudgetForRevision(budget, remarks.trim(), transaction);
+  else await budget.update(changes, { transaction });
+  const proposalStage = PROPOSAL_STAGE_FOR_BUDGET_STATE[result.to];
+  if (proposalStage) {
+    for (const proposal of activeProposals) await proposal.update({ status: proposalStage }, { transaction });
+  }
+  const released = action === 'recordProvincialReview'
+    ? await releaseAppropriations(budget, budget.proposals, { userId: req.currentUser.id, transaction }) : [];
+  await audit(actorAudit(req, {
+    actionType: AUDIT_ACTIONS.BUDGET_TRANSITION, entityRef: 'executiveBudget', entityId: budget.id,
+    summary: `${budget.title}: ${action}`, beforeState: before, afterState: snapshot(budget),
+  }));
+  if (released.length) await audit(actorAudit(req, {
+    actionType: AUDIT_ACTIONS.APPROPRIATIONS_RELEASED, entityRef: 'executiveBudget', entityId: budget.id,
+    summary: `${released.length} appropriation lines released under ${budget.ordinanceNo}`,
+    beforeState: { appropriations: [], reenacted: (released.reconciliation ?? []).map(row => row.before) }, afterState: { appropriations: released.map(snapshot), reenacted: (released.reconciliation ?? []).map(row => row.after) },
+  }));
+  return { budget, result, released };
   });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.BUDGET_TRANSITION,
-    entityRef: "executiveBudget",
-    entityId: budget.id,
-    summary: `${budget.title}: ${action}`,
-    beforeState: { status: previousStatus },
-    afterState: {
-      status: result.to,
-      remarks: remarks?.trim() ?? null,
-      ...(changes.ordinanceNo ? { ordinanceNo: changes.ordinanceNo } : {}),
-      ...(changes.provincialReviewOutcome
-        ? { provincialReviewOutcome: changes.provincialReviewOutcome }
-        : {}),
-    },
-  });
-
   if (released.length > 0) {
     const total = released.reduce((sum, row) => sum + num(row.amount), 0);
-    await auditFromRequest(req, {
-      actionType: AUDIT_ACTIONS.APPROPRIATIONS_RELEASED,
-      entityRef: "executiveBudget",
-      entityId: budget.id,
-      summary: `${released.length} appropriation line(s) released under ${changes.ordinanceNo ?? budget.ordinanceNo} totalling ${peso(total)}`,
-      afterState: { lines: released.length, total, ordinanceNo: budget.ordinanceNo },
-    });
-
     await notifyByPermission("budget.view", {
       type: NOTIFICATION_EVENTS.BUDGET_ENACTED,
       title: `FY ${budget.fiscalYear} budget enacted`,
@@ -624,7 +592,13 @@ export const transitionBudget = async (req, res) => {
       refId: budget.id,
       severity: "success",
     });
-  } else if (result.to !== "returned") {
+  } else if (result.to === 'returned') {
+    await notifyByPermission('budget.proposeBudget', {
+      type: NOTIFICATION_EVENTS.BUDGET_STATUS, title: `${budget.title} returned for revision`,
+      body: `${req.body.remarks.trim()} Review and resubmit office proposals.`, link: '/budget/preparation',
+      refEntity: 'executiveBudget', refId: budget.id, severity: 'warning',
+    });
+  } else {
     // Hand the budget to whoever acts next, the same way the requisition chain
     // hands itself along. Without this each body has to go looking for work.
     const nextPermission = permissionForTransition(
@@ -647,93 +621,70 @@ export const transitionBudget = async (req, res) => {
   res.json(serializeBudget(await ExecutiveBudget.findByPk(budget.id, budgetIncludes)));
 };
 
-// ── Proceedings ──────────────────────────────────────────────────────────────
+const proceedingIncludes = { include: [
+  { model: Department, as: "office" },
+  { model: User, as: "recordedBy", attributes: ["id", "name"] },
+] };
+const proceedingValues = async (body, current, transaction) => {
+  const values = {};
+  for (const key of ['scheduledAt', 'heldAt']) {
+    const value = body[key] !== undefined ? body[key] : current?.[key];
+    if (!value && key === 'scheduledAt') throw workflowError('A schedule is required.', 400);
+    if (value && !Number.isFinite(new Date(value).getTime())) throw workflowError('Enter a valid proceeding date.', 400);
+    values[key] = value ? new Date(Math.floor(new Date(value).getTime() / 1000) * 1000) : null;
+  }
+  if (values.heldAt && new Date(values.heldAt) > new Date()) throw workflowError('A proceeding cannot be recorded as held in the future.', 400);
+  for (const key of ['venue', 'agenda', 'minutes']) {
+    if (body[key] !== undefined && body[key] !== null && typeof body[key] !== 'string') throw workflowError(`Enter valid ${key}.`, 400);
+    values[key] = body[key] !== undefined ? body[key]?.trim() || null : current?.[key] ?? null;
+  }
+  if (body.attendees !== undefined && (!Array.isArray(body.attendees) || body.attendees.some(row => typeof row !== 'string'))) throw workflowError('Attendees must be a list of names.', 400);
+  values.attendees = body.attendees ?? current?.attendees ?? null;
+  values.departmentId = body.departmentId !== undefined ? Number(body.departmentId) || null : current?.departmentId ?? null;
+  if (values.departmentId) {
+    const office = await Department.findByPk(values.departmentId, { transaction });
+    if (!office || office.status !== 'active') throw workflowError('That office is not available.', 400);
+  }
+  return values;
+};
+const requireProceedingEditor = (req, budget, type) => {
+  if (!proceedingPermissions(type).some(permission => req.permissions.has(permission))) throw workflowError('You do not have permission to record this proceeding.', 403);
+  if (!proceedingsEditableIn(budget.status)) throw workflowError('These proceedings support a budget already sent for approval. Return the budget for revision before amending its record.');
+};
+
 export const recordProceeding = async (req, res) => {
-  const budget = await ExecutiveBudget.findByPk(req.params.id);
-  if (!budget) return res.status(404).json({ message: "Budget not found." });
-
-  const { type } = req.body;
-  if (!PROCEEDING_TYPES.includes(type)) {
-    return res.status(400).json({ message: "Unknown proceeding type." });
-  }
-  if (!req.body.scheduledAt) return res.status(400).json({ message: "A schedule is required." });
-
-  // A forum is the Finance Committee's; a hearing is too. Recording one is
-  // gated on the permission for that kind of meeting, not on a single
-  // "can touch the budget" permission.
-  const permission = type === "forum" ? "budget.conductForum" : "budget.conductHearing";
-  if (!req.permissions.has(permission)) {
-    return res.status(403).json({ message: "You do not have permission to record this proceeding." });
-  }
-
-  if (req.body.departmentId) {
-    const department = await Department.findByPk(Number(req.body.departmentId));
-    if (!department) return res.status(400).json({ message: "That office does not exist." });
-  }
-
-  const proceeding = await BudgetProceeding.create({
-    executiveBudgetId: budget.id,
-    type,
-    scheduledAt: req.body.scheduledAt,
-    heldAt: req.body.heldAt ?? null,
-    venue: req.body.venue?.trim() || null,
-    agenda: req.body.agenda?.trim() || null,
-    minutes: req.body.minutes?.trim() || null,
-    attendees: Array.isArray(req.body.attendees) ? req.body.attendees : null,
-    departmentId: req.body.departmentId ? Number(req.body.departmentId) : null,
-    recordedById: req.currentUser.id,
+  const proceeding = await withAuditTransaction(async (transaction, audit) => {
+    const budget = await lockBudget(req.params.id, transaction);
+    const { type } = req.body;
+    if (!PROCEEDING_TYPES.includes(type)) throw workflowError('Unknown proceeding type.', 400);
+    requireProceedingEditor(req, budget, type);
+    const values = await proceedingValues(req.body, null, transaction);
+    const duplicate = budget.proceedings.some(row => row.type === type && Number(row.departmentId) === Number(values.departmentId) && new Date(row.scheduledAt).getTime() === new Date(values.scheduledAt).getTime());
+    if (duplicate) throw workflowError('This proceeding is already scheduled. Update its existing record.');
+    const row = await BudgetProceeding.create({ ...values, executiveBudgetId: budget.id, type, recordedById: req.currentUser.id }, { transaction });
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.BUDGET_PROCEEDING_RECORDED, entityRef: 'budgetProceeding', entityId: row.id,
+      summary: `${PROCEEDING_TYPE_LABELS[type]} recorded for ${budget.title}`, beforeState: null, afterState: snapshot(row) }));
+    return row;
   });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.BUDGET_PROCEEDING_RECORDED,
-    entityRef: "executiveBudget",
-    entityId: budget.id,
-    summary: `${PROCEEDING_TYPE_LABELS[type]} recorded for ${budget.title}`,
-    afterState: {
-      type,
-      scheduledAt: proceeding.scheduledAt,
-      attendees: (proceeding.attendees ?? []).length,
-      hasMinutes: Boolean(proceeding.minutes),
-    },
-  });
-
-  res.status(201).json(
-    serializeProceeding(
-      await BudgetProceeding.findByPk(proceeding.id, {
-        include: [
-          { model: Department, as: "office" },
-          { model: User, as: "recordedBy", attributes: ["id", "name"] },
-        ],
-      })
-    )
-  );
+  res.status(201).json(serializeProceeding(await BudgetProceeding.findByPk(proceeding.id, proceedingIncludes)));
 };
 
 export const updateProceeding = async (req, res) => {
-  const proceeding = await BudgetProceeding.findByPk(req.params.proceedingId);
-  if (!proceeding) return res.status(404).json({ message: "Proceeding not found." });
-
-  const permission = proceeding.type === "forum" ? "budget.conductForum" : "budget.conductHearing";
-  if (!req.permissions.has(permission)) {
-    return res.status(403).json({ message: "You do not have permission to amend this proceeding." });
-  }
-
-  await proceeding.update({
-    heldAt: req.body.heldAt ?? proceeding.heldAt,
-    venue: req.body.venue?.trim() ?? proceeding.venue,
-    agenda: req.body.agenda?.trim() ?? proceeding.agenda,
-    minutes: req.body.minutes?.trim() ?? proceeding.minutes,
-    attendees: Array.isArray(req.body.attendees) ? req.body.attendees : proceeding.attendees,
+  const proceeding = await withAuditTransaction(async (transaction, audit) => {
+    const identity = await BudgetProceeding.findByPk(req.params.proceedingId, { attributes: ['executiveBudgetId'], transaction });
+    if (!identity) throw workflowError('Proceeding not found.', 404);
+    const budget = await lockBudget(identity.executiveBudgetId, transaction);
+    const row = budget.proceedings.find(item => item.id === Number(req.params.proceedingId));
+    if (!row) throw workflowError('Proceeding not found.', 404);
+    requireProceedingEditor(req, budget, row.type);
+    if (req.body.type !== undefined && req.body.type !== row.type) throw workflowError('The proceeding type cannot be changed.', 400);
+    const beforeState = snapshot(row);
+    const values = await proceedingValues(req.body, row, transaction);
+    if (budget.proceedings.some(other => other.id !== row.id && other.type === row.type && Number(other.departmentId) === Number(values.departmentId) && new Date(other.scheduledAt).getTime() === new Date(values.scheduledAt).getTime())) throw workflowError('This proceeding is already scheduled. Update its existing record.');
+    await row.update(values, { transaction });
+    await audit(actorAudit(req, { actionType: 'budget.proceeding.updated', entityRef: 'budgetProceeding', entityId: row.id,
+      summary: `${PROCEEDING_TYPE_LABELS[row.type]} record amended for ${budget.title}`, beforeState, afterState: snapshot(row) }));
+    return row;
   });
-
-  res.json(
-    serializeProceeding(
-      await BudgetProceeding.findByPk(proceeding.id, {
-        include: [
-          { model: Department, as: "office" },
-          { model: User, as: "recordedBy", attributes: ["id", "name"] },
-        ],
-      })
-    )
-  );
+  res.json(serializeProceeding(await BudgetProceeding.findByPk(proceeding.id, proceedingIncludes)));
 };

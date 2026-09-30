@@ -65,7 +65,7 @@ export const getPublicFilters = async (req, res) => {
 };
 
 export const getPublicOverview = async (req, res) => {
-  const [lgu, summary] = await Promise.all([getLguProfile(), getPublicSummary()]);
+  const [lgu, summary] = await Promise.all([getLguProfile(), getPublicSummary({ fiscalYear: req.query.fiscalYear, department: req.query.department })]);
   res.json({ lgu, ...summary });
 };
 

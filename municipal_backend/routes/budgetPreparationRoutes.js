@@ -56,12 +56,12 @@ router.post(
 // but are separately accountable.
 router.post(
   "/budgets/:id/proceedings",
-  requireAnyPermission("budget.conductForum", "budget.conductHearing"),
+  requireAnyPermission("budget.conductForum", "budget.conductHearing", "budget.finaliseExecutive"),
   recordProceeding
 );
 router.patch(
   "/proceedings/:proceedingId",
-  requireAnyPermission("budget.conductForum", "budget.conductHearing"),
+  requireAnyPermission("budget.conductForum", "budget.conductHearing", "budget.finaliseExecutive"),
   updateProceeding
 );
 

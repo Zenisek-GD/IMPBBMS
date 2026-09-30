@@ -14,6 +14,8 @@
     "seed:demo": "node seedDemo.js",
     "seed:completed": "node seedDemo.js --completed-project",
     "reset:workflow": "node resetDemoData.js",
+    "reset:v2": "node resetV2.js",
+    "backup:database": "node backupDatabase.js",
     "create:model": "node create.js model",
     "create:controller": "node create.js controller",
     "migrate:auth": "node migrateAuthSecurity.js",

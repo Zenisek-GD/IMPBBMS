@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, useCallback } from 'react'
+import { Fragment, useEffect, useState, useCallback, useRef } from 'react'
 import ResolutionNumberInput from '../../components/ui/ResolutionNumberInput'
 import { Plus, Target, Star, ListTree, Route, Check } from 'lucide-react'
 import * as planningApi from '../../api/planning'
@@ -27,6 +27,8 @@ import NextStep, { NextInline } from '../../components/ui/NextStep'
 import ReasonModal from '../../components/ui/ReasonModal'
 import { planNext, aipNext } from '../../config/nextSteps'
 import { useTableControls } from '../../components/ui/useTableControls'
+import useFormRecovery from '../../hooks/useFormRecovery'
+import DraftRecoveryNotice from '../../components/ui/DraftRecoveryNotice'
 
 // Steps 1 to 3 of the municipal process on one screen, because they are one
 // conversation: the development plan states what the municipality is for, the
@@ -39,14 +41,17 @@ const peso = (value) => `₱${Number(value ?? 0).toLocaleString('en-PH', { maxim
 const inputClass =
   'min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none'
 
-function PlanForm({ sectors, onClose, onSaved }) {
+function PlanForm({ sectors, existing, onClose, onSaved }) {
   const thisYear = new Date().getFullYear()
-  const [title, setTitle] = useState(`Comprehensive Development Plan ${thisYear}–${thisYear + 2}`)
-  const [startYear, setStartYear] = useState(thisYear)
-  const [endYear, setEndYear] = useState(thisYear + 2)
-  const [vision, setVision] = useState('')
+  const [title, setTitle] = useState(existing?.title ?? `Comprehensive Development Plan ${thisYear}–${thisYear + 2}`)
+  const [startYear, setStartYear] = useState(existing?.startYear ?? thisYear)
+  const [endYear, setEndYear] = useState(existing?.endYear ?? thisYear + 2)
+  const [vision, setVision] = useState(existing?.vision ?? '')
   const emptyGoal = () => ({ sector: sectors[0]?.key ?? 'social', subsector: '', title: '', description: '' })
-  const [goals, setGoals] = useState([emptyGoal])
+  const [goals, setGoals] = useState(() => [emptyGoal()])
+  const recovery = useFormRecovery(`planning-plan-${existing?.id ?? 'new'}`, { title, startYear, endYear, vision, goals }, draft => {
+    setTitle(draft.title); setStartYear(draft.startYear); setEndYear(draft.endYear); setVision(draft.vision); setGoals(draft.goals)
+  })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const updateGoal = (index, key, value) => {
@@ -59,8 +64,8 @@ function PlanForm({ sectors, onClose, onSaved }) {
   // full page with logical sections — not inside a scroll-heavy modal.
   return (
     <LargeFormPage
-      title="New development plan"
-      purpose="Start with the plan and its first goal in one place. You can add more goals now or later while the plan is still a draft."
+      title={existing ? 'Edit development plan' : 'New development plan'}
+      purpose={existing ? 'Correct the draft before adoption. Previous values remain in the audit history.' : 'Start with the plan and its first goal in one place. You can add more goals now or later while the plan is still a draft.'}
       onBack={onClose}
       backLabel="Back to plans"
       error={error}
@@ -72,28 +77,31 @@ function PlanForm({ sectors, onClose, onSaved }) {
           <Button
             disabled={saving}
             onClick={async () => {
+              if (saving) return
               setError('')
               if (!title.trim()) {
                 setError('Enter a title for the development plan.')
                 return
               }
-              if (goals.some((goal) => !goal.title.trim())) {
+              if (!existing && goals.some((goal) => !goal.title.trim())) {
                 setError('Enter a goal title for every goal you added, or remove the empty goal.')
                 return
               }
               setSaving(true)
               try {
-                await planningApi.createPlan({ title, startYear, endYear, vision, goals })
+                if (existing) await planningApi.updatePlan(existing.id, { title, startYear, endYear, vision })
+                else await planningApi.createPlan({ title, startYear, endYear, vision, goals })
+                recovery.clearDraft()
                 onSaved()
                 onClose()
               } catch (err) {
-                setError(err.response?.data?.message ?? 'Could not create the plan.')
+                setError(err.response?.data?.message ?? 'Could not save the plan.')
               } finally {
                 setSaving(false)
               }
             }}
           >
-            {saving ? 'Creating plan…' : 'Create plan'}
+            {saving ? 'Saving…' : existing ? 'Save plan' : 'Create plan'}
           </Button>
         </>
       }
@@ -102,6 +110,7 @@ function PlanForm({ sectors, onClose, onSaved }) {
         title="Plan details"
         description="What this plan is called and which years it covers."
       >
+        <DraftRecoveryNotice draft={recovery} />
         <div className="flex flex-col gap-3">
           <label className="text-xs text-text-secondary">
             Title
@@ -151,7 +160,7 @@ function PlanForm({ sectors, onClose, onSaved }) {
           </span>
         </label>
       </details>
-      <LargeFormPage.Section
+      {!existing && <LargeFormPage.Section
         title="Goals of this plan"
         description="Add at least one practical result the municipality wants to achieve."
       >
@@ -192,20 +201,25 @@ function PlanForm({ sectors, onClose, onSaved }) {
         <Button className="mt-4" size="sm" variant="secondary" icon={Plus} onClick={() => setGoals((current) => [...current, emptyGoal()])}>
           Add another goal
         </Button>
-      </LargeFormPage.Section>
+      </LargeFormPage.Section>}
     </LargeFormPage>
   )
 }
 
-function GoalForm({ plan, sectors, onClose, onSaved }) {
-  const [sector, setSector] = useState(sectors[0]?.key ?? 'social')
-  const [subsector, setSubsector] = useState('')
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
+function GoalForm({ plan, existing, sectors, onClose, onSaved }) {
+  const [sector, setSector] = useState(existing?.sector ?? sectors[0]?.key ?? 'social')
+  const [subsector, setSubsector] = useState(existing?.subsector ?? '')
+  const [title, setTitle] = useState(existing?.title ?? '')
+  const [description, setDescription] = useState(existing?.description ?? '')
+  const recovery = useFormRecovery(`planning-goal-${plan.id}-${existing?.id ?? 'new'}`, { sector, subsector, title, description }, draft => {
+    setSector(draft.sector); setSubsector(draft.subsector); setTitle(draft.title); setDescription(draft.description)
+  })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   return (
-    <Modal title="Add a development goal" onClose={onClose}>
+    <Modal title={existing ? 'Edit development goal' : 'Add a development goal'} onClose={onClose}>
+      <DraftRecoveryNotice draft={recovery} />
       <div className="flex flex-col gap-3">
         <label className="text-xs text-text-secondary">
           Sector
@@ -235,19 +249,26 @@ function GoalForm({ plan, sectors, onClose, onSaved }) {
             CANCEL
           </Button>
           <Button
-            icon={Plus}
+            icon={existing ? undefined : Plus}
+            disabled={saving || !title.trim()}
             onClick={async () => {
+              if (saving) return
+              setSaving(true)
               setError('')
               try {
-                await planningApi.createGoal(plan.id, { sector, subsector, title, description })
+                if (existing) await planningApi.updateGoal(existing.id, { sector, subsector, title, description })
+                else await planningApi.createGoal(plan.id, { sector, subsector, title, description })
+                recovery.clearDraft()
                 onSaved()
                 onClose()
               } catch (err) {
                 setError(err.response?.data?.message ?? 'Could not add the goal.')
+              } finally {
+                setSaving(false)
               }
             }}
           >
-            Add goal
+            {saving ? 'Saving...' : existing ? 'Save goal' : 'Add goal'}
           </Button>
         </div>
       </div>
@@ -259,17 +280,23 @@ function GoalForm({ plan, sectors, onClose, onSaved }) {
 // point — "our top three priorities" is only answerable if the ranking is a
 // single decision rather than a per-goal toggle that lets two goals be first.
 function PrioritiesForm({ plan, onClose, onSaved }) {
-  const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear() + 1)
+  const [fiscalYear, setFiscalYear] = useState(Math.min(plan.endYear, Math.max(plan.startYear, new Date().getFullYear() + 1)))
+  const activeGoals = plan.goals.filter((goal) => goal.status === 'active')
   const [selected, setSelected] = useState(
-    plan.goals.filter((g) => g.isMayorPriority).sort((a, b) => a.priorityRank - b.priorityRank).map((g) => g.id)
+    activeGoals.filter((g) => g.isMayorPriority).sort((a, b) => a.priorityRank - b.priorityRank).map((g) => g.id)
   )
+  const recovery = useFormRecovery(`planning-priorities-${plan.id}`, { fiscalYear, selected }, draft => {
+    setFiscalYear(draft.fiscalYear); setSelected(draft.selected.filter(id => activeGoals.some(goal => goal.id === id)))
+  })
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const toggle = (id) =>
     setSelected((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]))
 
   return (
     <Modal title="Set the Mayor's priorities" onClose={onClose}>
+      <DraftRecoveryNotice draft={recovery} />
       <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto pr-1">
         <label className="text-xs text-text-secondary">
           Fiscal year
@@ -286,7 +313,7 @@ function PrioritiesForm({ plan, onClose, onSaved }) {
         </p>
 
         <div className="flex flex-col gap-1">
-          {plan.goals.map((goal) => {
+          {activeGoals.map((goal) => {
             const rank = selected.indexOf(goal.id)
             return (
               <label
@@ -309,19 +336,24 @@ function PrioritiesForm({ plan, onClose, onSaved }) {
           </Button>
           <Button
             icon={Star}
-            disabled={selected.length === 0}
+            disabled={saving || selected.length === 0}
             onClick={async () => {
+              if (saving) return
+              setSaving(true)
               setError('')
               try {
                 await planningApi.setPriorities({ fiscalYear: Number(fiscalYear), goalIds: selected })
+                recovery.clearDraft()
                 onSaved()
                 onClose()
               } catch (err) {
                 setError(err.response?.data?.message ?? 'Could not set the priorities.')
+              } finally {
+                setSaving(false)
               }
             }}
           >
-            Set priorities
+            {saving ? 'SAVING…' : 'Set priorities'}
           </Button>
         </div>
       </div>
@@ -333,6 +365,7 @@ function ResolutionForm({ title, label, onClose, onConfirm }) {
   const [resolutionNo, setResolutionNo] = useState('')
   const [adoptedAt, setAdoptedAt] = useState('')
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -356,18 +389,22 @@ function ResolutionForm({ title, label, onClose, onConfirm }) {
           <Button
             variant="success"
             icon={Check}
-            disabled={!resolutionNo.trim()}
+            disabled={saving || !resolutionNo.trim()}
             onClick={async () => {
+              if (saving) return
+              setSaving(true)
               setError('')
               try {
                 await onConfirm({ resolutionNo, adoptedAt: adoptedAt || undefined })
                 onClose()
               } catch (err) {
                 setError(err.response?.data?.message ?? 'Could not record it.')
+              } finally {
+                setSaving(false)
               }
             }}
           >
-            Record
+            {saving ? 'SAVING…' : 'Record'}
           </Button>
         </div>
       </div>
@@ -438,20 +475,60 @@ function AipProgramForm({ years, plans, onClose, onSaved }) {
   )
 }
 
-function AipEntryForm({ program, goals, departments, options, onClose, onSaved }) {
-  const [values, setValues] = useState({
-    title: '',
-    developmentGoalId: goals[0]?.id ?? '',
-    implementingUnitId: departments[0]?.id ?? '',
-    expenseClass: 'mooe',
-    fund: 'generalFund',
-    estimatedCost: '',
-    startQuarter: 'Q1',
-    endQuarter: 'Q4',
-    papCode: '',
-    expectedOutput: '',
+function AipHeaderForm({ program, onClose, onSaved }) {
+  const [title, setTitle] = useState(program.title)
+  const [remarks, setRemarks] = useState(program.remarks ?? '')
+  const recovery = useFormRecovery(`planning-aip-${program.id}`, { title, remarks }, draft => {
+    setTitle(draft.title); setRemarks(draft.remarks)
   })
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  return (
+    <Modal title={`Edit AIP ${program.fiscalYear}`} onClose={onClose}>
+      <DraftRecoveryNotice draft={recovery} />
+      <form className="space-y-4" onSubmit={async (event) => {
+        event.preventDefault()
+        if (saving) return
+        setSaving(true)
+        setError('')
+        try {
+          await planningApi.updateProgram(program.id, { title, remarks })
+          recovery.clearDraft()
+          onSaved()
+          onClose()
+        } catch (err) {
+          setError(err.response?.data?.message ?? 'Could not save the investment program.')
+        } finally { setSaving(false) }
+      }}>
+        <p className="text-sm text-text-secondary">Fiscal year and development plan remain linked to this program. Header changes are recorded in the audit history.</p>
+        <label className="block text-xs text-text-secondary">Title<input required value={title} onChange={(event) => setTitle(event.target.value)} className={`mt-1 ${inputClass}`} /></label>
+        <label className="block text-xs text-text-secondary">Remarks<textarea rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} className={`mt-1 ${inputClass}`} /></label>
+        {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+        <div className="flex justify-end gap-2"><Button variant="secondary" disabled={saving} onClick={onClose}>Cancel</Button><Button type="submit" disabled={saving || !title.trim()}>{saving ? 'Saving…' : 'Save AIP'}</Button></div>
+      </form>
+    </Modal>
+  )
+}
+
+function AipEntryForm({ program, existing, goals, departments, options, onClose, onSaved }) {
+  const [values, setValues] = useState({
+    title: existing?.title ?? '',
+    developmentGoalId: existing?.developmentGoalId ?? goals[0]?.id ?? '',
+    implementingUnitId: existing?.implementingUnitId ?? departments[0]?.id ?? '',
+    expenseClass: existing?.expenseClass ?? 'mooe',
+    fund: existing?.fund ?? 'generalFund',
+    estimatedCost: existing?.estimatedCost ?? '',
+    startQuarter: existing?.startQuarter ?? 'Q1',
+    endQuarter: existing?.endQuarter ?? 'Q4',
+    papCode: existing?.papCode ?? '',
+    expectedOutput: existing?.expectedOutput ?? '',
+    description: existing?.description ?? '',
+    status: existing?.status ?? 'planned',
+    remarks: existing?.remarks ?? '',
+  })
+  const recovery = useFormRecovery(`planning-aip-entry-${program.id}-${existing?.id ?? 'new'}`, values, setValues)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   const set = (field, value) => setValues((current) => ({ ...current, [field]: value }))
 
@@ -459,7 +536,7 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
   // coding dimensions — a full page with sections, not a scroll-heavy modal.
   return (
     <LargeFormPage
-      title={`Add a project to AIP ${program.fiscalYear}`}
+      title={`${existing ? 'Edit project in' : 'Add a project to'} AIP ${program.fiscalYear}`}
       purpose="Record one costed project under this year's investment program. It must pursue one of the plan's goals."
       onBack={onClose}
       backLabel="Back to investment program"
@@ -470,19 +547,25 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
             Cancel
           </Button>
           <Button
-            disabled={!values.title.trim()}
+            disabled={saving || !values.title.trim() || !values.developmentGoalId || !values.implementingUnitId}
             onClick={async () => {
+              if (saving) return
+              setSaving(true)
               setError('')
               try {
-                await planningApi.createAipEntry(program.id, values)
+                if (existing) await planningApi.updateAipEntry(existing.id, values)
+                else await planningApi.createAipEntry(program.id, values)
+                recovery.clearDraft()
                 onSaved()
                 onClose()
               } catch (err) {
-                setError(err.response?.data?.message ?? 'Could not add the project.')
+                setError(err.response?.data?.message ?? 'Could not save the project.')
+              } finally {
+                setSaving(false)
               }
             }}
           >
-            Add project
+            {saving ? 'Saving…' : existing ? 'Save project' : 'Add project'}
           </Button>
         </>
       }
@@ -491,11 +574,15 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
         title="Project"
         description="What will be delivered, which goal it pursues, and which office implements it."
       >
+        <DraftRecoveryNotice draft={recovery} />
         <div className="flex flex-col gap-3">
           <label className="text-xs text-text-secondary">
             Project
             <input value={values.title} onChange={(e) => set('title', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
+
+          <label className="text-xs text-text-secondary">Description<textarea rows={2} value={values.description} onChange={(event) => set('description', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
+          <label className="text-xs text-text-secondary">Expected output<textarea rows={2} value={values.expectedOutput} onChange={(event) => set('expectedOutput', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
 
           <label className="text-xs text-text-secondary">
             Development goal it pursues
@@ -590,6 +677,8 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
             PAP code
             <input value={values.papCode} onChange={(e) => set('papCode', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
+          {existing && <label className="text-xs text-text-secondary">Project status<select value={values.status} onChange={(event) => set('status', event.target.value)} className={`mt-1 ${inputClass}`}><option value="planned">Planned</option><option value="dropped">Dropped</option></select></label>}
+          <label className="text-xs text-text-secondary">Remarks{existing && ' / reason for changing status'}<textarea rows={3} value={values.remarks} onChange={(event) => set('remarks', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
         </div>
       </LargeFormPage.Section>
     </LargeFormPage>
@@ -604,7 +693,7 @@ function AipEntryForm({ program, goals, departments, options, onClose, onSaved }
 // The AIP is the longest list on this page — every project the municipality
 // intends to fund that year — and it was previously rendered whole, unsorted
 // and unsearchable, which is a large part of why this screen felt overwhelming.
-function AipEntriesTable({ entries }) {
+function AipEntriesTable({ entries, canEdit, onEdit }) {
   const table = useTableControls(entries, {
     searchKeys: ['title', 'goalTitle', 'implementingUnitCode'],
     filters: [
@@ -656,6 +745,7 @@ function AipEntriesTable({ entries }) {
                   <SortableTh {...table.sortProps('expenseClass')}>Class</SortableTh>
                   <SortableTh {...table.sortProps('estimatedCost')}>Cost</SortableTh>
                   <SortableTh {...table.sortProps('startQuarter')}>Schedule</SortableTh>
+                  {canEdit && <Th>Actions</Th>}
                 </tr>
               </thead>
               <tbody>
@@ -689,6 +779,7 @@ function AipEntriesTable({ entries }) {
                     <td className="px-3 py-2 text-[13px] whitespace-nowrap text-text-secondary">
                       {entry.startQuarter}–{entry.endQuarter}
                     </td>
+                    {canEdit && <td className="px-3 py-2"><Button size="table" variant="secondary" onClick={() => onEdit(entry)}>Edit project</Button></td>}
                   </tr>
                 ))}
               </tbody>
@@ -828,6 +919,12 @@ export default function DevelopmentPlanning() {
   const [error, setError] = useState('')
 
   const [creatingPlan, setCreatingPlan] = useState(false)
+  const [editingPlan, setEditingPlan] = useState(null)
+  const [editingGoal, setEditingGoal] = useState(null)
+  const [editingProgram, setEditingProgram] = useState(null)
+  const [editingEntry, setEditingEntry] = useState(null)
+  const [working, setWorking] = useState(false)
+  const running = useRef(false)
   const [creatingProgram, setCreatingProgram] = useState(false)
   const [addingGoalTo, setAddingGoalTo] = useState(null)
   const [prioritising, setPrioritising] = useState(null)
@@ -835,6 +932,7 @@ export default function DevelopmentPlanning() {
   const [adoptingProgram, setAdoptingProgram] = useState(null)
   const [addingEntryTo, setAddingEntryTo] = useState(null)
   const [returningProgram, setReturningProgram] = useState(null)
+  const [updatingGoal, setUpdatingGoal] = useState(null)
 
   // Which half of the chain is on screen. The two used to be stacked, so a
   // reader scrolled past every development goal to reach the projects — and the
@@ -876,6 +974,9 @@ export default function DevelopmentPlanning() {
   }, [refreshToken])
 
   const run = async (fn) => {
+    if (running.current) return
+    running.current = true
+    setWorking(true)
     setError('')
     try {
       await fn()
@@ -883,6 +984,9 @@ export default function DevelopmentPlanning() {
     } catch (err) {
       setError(err.response?.data?.message ?? 'That action could not be completed.')
       throw err
+    } finally {
+      running.current = false
+      setWorking(false)
     }
   }
 
@@ -896,29 +1000,32 @@ export default function DevelopmentPlanning() {
 
   // Item 12: long workflow forms render as full pages, not as modals over the
   // list. Early returns keep every hook above them unconditional.
-  if (creatingPlan) {
+  if (creatingPlan || editingPlan) {
     return (
       <DashboardPage>
         <PlanForm
           sectors={options.sectors ?? []}
-          onClose={() => setCreatingPlan(false)}
+          existing={editingPlan}
+          onClose={() => { setCreatingPlan(false); setEditingPlan(null) }}
           onSaved={refresh}
         />
       </DashboardPage>
     )
   }
 
-  if (addingEntryTo) {
+  if (addingEntryTo || editingEntry) {
+    const program = addingEntryTo ?? editingEntry.program
     return (
       <DashboardPage>
         <AipEntryForm
-          program={addingEntryTo}
-          goals={(plans.find((p) => p.id === addingEntryTo.developmentPlanId)?.goals ?? []).filter(
-            (g) => g.status === 'active'
+          program={program}
+          existing={editingEntry?.entry}
+          goals={(plans.find((p) => p.id === program.developmentPlanId)?.goals ?? []).filter(
+            (g) => g.status === 'active' || g.id === editingEntry?.entry.developmentGoalId
           )}
           departments={departments}
           options={options}
-          onClose={() => setAddingEntryTo(null)}
+          onClose={() => { setAddingEntryTo(null); setEditingEntry(null) }}
           onSaved={refresh}
         />
       </DashboardPage>
@@ -994,6 +1101,9 @@ export default function DevelopmentPlanning() {
               onAddGoal={setAddingGoalTo}
               onPrioritise={setPrioritising}
               onAdopt={setAdoptingPlan}
+              onGoalProgress={(goal, plan) => setUpdatingGoal({ goal, plan })}
+              onEditPlan={setEditingPlan}
+              onEditGoal={(goal, plan) => setEditingGoal({ goal, plan })}
             />
           )}
 
@@ -1043,6 +1153,7 @@ export default function DevelopmentPlanning() {
                         <span className="text-xs text-text-faint">adopted under {program.resolutionNo}</span>
                       )}
                       <div className="ml-auto flex flex-wrap gap-2">
+                        {program.editable && canManageAip && <Button size="sm" variant="secondary" onClick={() => setEditingProgram(program)}>Edit AIP</Button>}
                         {program.editable && canManageAip && (
                           <Button
                             size="sm"
@@ -1054,6 +1165,7 @@ export default function DevelopmentPlanning() {
                         {canAdvance && (
                           <Button
                             size="sm"
+                            disabled={working}
                             variant={next.opensForm ? 'primary' : 'secondary'}
                             icon={next.opensForm ? Check : undefined}
                             onClick={() =>
@@ -1085,7 +1197,7 @@ export default function DevelopmentPlanning() {
                       <NextStep next={aipNext(program)} tone={AIP_STATUS_TONES[program.status]} />
                     </div>
 
-                    <AipEntriesTable entries={program.entries} />
+                    <AipEntriesTable entries={program.entries} canEdit={program.editable && canManageAip} onEdit={(entry) => setEditingEntry({ program, entry })} />
                   </div>
                 )
               })
@@ -1122,6 +1234,9 @@ export default function DevelopmentPlanning() {
           onConfirm={(payload) => run(() => planningApi.adoptPlan(adoptingPlan.id, payload))}
         />
       )}
+      {editingProgram && <AipHeaderForm program={editingProgram} onClose={() => setEditingProgram(null)} onSaved={refresh} />}
+      {editingGoal && <GoalForm existing={editingGoal.goal} plan={editingGoal.plan} sectors={options.sectors ?? []} onClose={() => setEditingGoal(null)} onSaved={refresh} />}
+      {updatingGoal && <GoalProgressForm goal={updatingGoal.goal} plan={updatingGoal.plan} onClose={() => setUpdatingGoal(null)} onSubmit={(payload) => run(() => planningApi.updateGoal(updatingGoal.goal.id, payload))} />}
       {adoptingProgram && (
         <ResolutionForm
           title={`Record adoption — ${adoptingProgram.title}`}
@@ -1135,7 +1250,7 @@ export default function DevelopmentPlanning() {
       {returningProgram && (
         <ReasonModal
           title={`Return "${returningProgram.title}"`}
-          consequence="The program goes back to draft. The Planning Office will need to correct it and submit it again."
+          consequence="The program is returned to the Planning Office for correction and resubmission. Its previous endorsement remains in the audit history."
           reasonLabel="Why is it being returned?"
           reasonPlaceholder="State what must be corrected"
           confirmLabel="Return program"
@@ -1165,6 +1280,9 @@ function DevelopmentPlansTable({
   onAddGoal,
   onPrioritise,
   onAdopt,
+  onGoalProgress,
+  onEditPlan,
+  onEditGoal,
 }) {
   const [expandedId, setExpandedId] = useState(null)
   const table = useTableControls(plans, {
@@ -1252,10 +1370,10 @@ function DevelopmentPlansTable({
                       {open ? 'Hide details' : 'Details'}
                     </Button>
                     {plan.status === 'draft' && canManageCdp && (
-                      <Button size="table" className="flex-1" icon={Plus} onClick={() => onAddGoal(plan)}>Add goal</Button>
+                      <><Button size="table" className="flex-1" variant="secondary" onClick={() => onEditPlan(plan)}>Edit plan</Button><Button size="table" className="flex-1" icon={Plus} onClick={() => onAddGoal(plan)}>Add goal</Button></>
                     )}
                     {plan.status === 'draft' && canAdopt && (
-                      <Button size="table" className="flex-1" variant="success" icon={Check} onClick={() => onAdopt(plan)}>Adopt</Button>
+                      <Button size="table" className="flex-1" variant="success" icon={Check} disabled={!(plan.goals ?? []).some((goal) => goal.status === 'active')} onClick={() => onAdopt(plan)}>Adopt</Button>
                     )}
                     {plan.status === 'adopted' && canPrioritise && (
                       <Button size="table" className="flex-1" icon={Star} onClick={() => onPrioritise(plan)}>Set priorities</Button>
@@ -1288,6 +1406,11 @@ function DevelopmentPlansTable({
                                   {goal.isMayorPriority && <Badge tone="success">Mayor’s priority FY {goal.priorityFiscalYear}</Badge>}
                                 </div>
                                 {goal.subsector && <p className="mt-1 text-[11.5px] text-text-faint">{goal.subsector}</p>}
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <span className="text-[12px] capitalize text-text-secondary">{goal.status}</span>
+                                  {canManageCdp && plan.status === 'draft' && <Button size="table" variant="secondary" onClick={() => onEditGoal(goal, plan)}>Edit goal</Button>}
+                                  {canManageCdp && plan.status !== 'superseded' && <Button size="table" variant="secondary" onClick={() => onGoalProgress(goal, plan)}>Update progress</Button>}
+                                </div>
                               </li>
                             ))}
                           </ul>
@@ -1357,10 +1480,10 @@ function DevelopmentPlansTable({
                             {open ? 'Hide' : 'Details'}
                           </Button>
                           {plan.status === 'draft' && canManageCdp && (
-                            <Button size="table" icon={Plus} onClick={() => onAddGoal(plan)}>Add goal</Button>
+                            <><Button size="table" variant="secondary" onClick={() => onEditPlan(plan)}>Edit plan</Button><Button size="table" icon={Plus} onClick={() => onAddGoal(plan)}>Add goal</Button></>
                           )}
                           {plan.status === 'draft' && canAdopt && (
-                            <Button size="table" variant="success" icon={Check} onClick={() => onAdopt(plan)}>Adopt</Button>
+                            <Button size="table" variant="success" icon={Check} disabled={!(plan.goals ?? []).some((goal) => goal.status === 'active')} onClick={() => onAdopt(plan)}>Adopt</Button>
                           )}
                           {plan.status === 'adopted' && canPrioritise && (
                             <Button size="table" icon={Star} onClick={() => onPrioritise(plan)}>Set priorities</Button>
@@ -1404,6 +1527,7 @@ function DevelopmentPlansTable({
                                         <Th>Goal</Th>
                                         <Th>Sector</Th>
                                         <Th>Priority</Th>
+                                        <Th>Progress</Th>
                                       </tr>
                                     </thead>
                                     <tbody>
@@ -1412,11 +1536,13 @@ function DevelopmentPlansTable({
                                           <td className="px-4 py-2.5 text-[13px] text-navy break-words">
                                             {goal.title}
                                             {goal.subsector && <p className="mt-0.5 break-words text-[11.5px] text-text-faint">{goal.subsector}</p>}
+                                            {canManageCdp && plan.status === 'draft' && <Button className="mt-2" size="table" variant="secondary" onClick={() => onEditGoal(goal, plan)}>Edit goal</Button>}
                                           </td>
                                           <td className="px-4 py-2.5"><Badge tone="neutral">{goal.sectorLabel ?? goal.sector}</Badge></td>
                                           <td className="px-4 py-2.5 text-[12px] text-text-secondary">
                                             {goal.isMayorPriority ? `Mayor’s priority FY ${goal.priorityFiscalYear}` : '—'}
                                           </td>
+                                          <td className="px-4 py-2.5 text-[12px] text-text-secondary"><span className="mr-2 capitalize">{goal.status}</span>{canManageCdp && plan.status !== 'superseded' && <Button size="table" variant="secondary" onClick={() => onGoalProgress(goal, plan)}>Update progress</Button>}</td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -1440,4 +1566,23 @@ function DevelopmentPlansTable({
       {table.rows.length > 0 && <Pagination {...table.paginationProps} label="development plans" />}
     </Card>
   )
+}
+
+function GoalProgressForm({ goal, plan, onClose, onSubmit }) {
+  const [status, setStatus] = useState(goal.status)
+  const [remarks, setRemarks] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  return <Modal title={`Goal progress — ${goal.title}`} onClose={onClose}>
+    <form className="space-y-4" onSubmit={async (event) => {
+      event.preventDefault(); if (saving) return; setSaving(true); setError('')
+      try { await onSubmit({ status, progressRemarks: remarks }); onClose() } catch (err) { setError(err.response?.data?.message ?? 'Could not record goal progress.') } finally { setSaving(false) }
+    }}>
+      <p className="text-sm text-text-secondary">The previous status, your reason and the updated status will be retained in the audit history.</p>
+      <label className="block text-sm">Goal status<select className="mt-1 w-full rounded border border-border-muted bg-surface p-2" value={status} onChange={(event) => setStatus(event.target.value)}><option value="active">Active</option>{plan.status === 'adopted' && <option value="achieved">Achieved</option>}<option value="dropped">Dropped</option></select></label>
+      <label className="block text-sm">Progress update / reason<textarea required rows={3} className="mt-1 w-full rounded border border-border-muted bg-surface p-2" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button type="submit" disabled={saving || !remarks.trim()}>{saving ? 'Saving…' : 'Record progress'}</Button></div>
+    </form>
+  </Modal>
 }

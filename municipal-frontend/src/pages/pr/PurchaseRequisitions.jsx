@@ -1,3 +1,5 @@
+import { useActionQueue } from '../../context/useActionQueue'
+import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
 import BacAttendance from '../bidding/BacAttendance'
 import { useEffect, useState } from 'react'
 import { Plus, FileText, Trash2, AlertTriangle, Wallet, Gavel, Info, Eye, Check } from 'lucide-react'
@@ -49,6 +51,8 @@ const previewAssetClass = (line, threshold) => {
 }
 
 function PrFormModal({ existing, onClose, onSaved }) {
+  const { fiscalYear } = useActionQueue()
+  const [formYear, setFormYear] = useState(String(existing?.fiscalYear ?? fiscalYear))
   const [appEntries, setAppEntries] = useState([])
   const [appEntryId, setAppEntryId] = useState(existing?.appEntryId ?? '')
   const [purpose, setPurpose] = useState(existing?.purpose ?? '')
@@ -64,8 +68,9 @@ function PrFormModal({ existing, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const draft = useDraftRecovery({
     key: existing ? `purchase-requisition-${existing.id}` : 'purchase-requisition-new',
-    value: { appEntryId, purpose, dateRequired, isEmergency, justification, lines },
+    value: { appEntryId, purpose, dateRequired, isEmergency, justification, lines, formYear },
     onRestore: (saved) => {
+      setFormYear(String(existing?.fiscalYear ?? saved.formYear ?? appEntries.find((entry) => String(entry.id) === String(saved.appEntryId))?.fiscalYear ?? fiscalYear))
       setAppEntryId(saved.appEntryId ?? '')
       setPurpose(saved.purpose ?? '')
       setDateRequired(saved.dateRequired ?? '')
@@ -96,7 +101,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
   // line. An approved indicative APP remains a planning document.
   useEffect(() => {
     let cancelled = false
-    fetchAppEntries()
+    fetchAppEntries({ fiscalYear: 'all' })
       .then((entries) => {
         if (!cancelled) {
           setAppEntries(entries.filter((e) =>
@@ -208,6 +213,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary" title="Annual Procurement Plan (APP): the year's list of what the municipality will procure">
             Linked final Annual Procurement Plan (APP) entry (approved only)
           </label>
+          {!existing && <div className="mb-3"><FiscalYearFilter value={formYear} onChange={(year) => { setFormYear(year); setAppEntryId(''); setBalance(null) }} /></div>}
           <select
             value={appEntryId}
             onChange={(event) => setAppEntryId(event.target.value)}
@@ -215,9 +221,9 @@ function PrFormModal({ existing, onClose, onSaved }) {
             className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy disabled:bg-sidebar focus:border-navy focus:outline-none"
           >
             <option value="">Select an approved final Annual Procurement Plan (APP) entry...</option>
-            {appEntries.map((entry) => (
+            {appEntries.filter((entry) => formYear === 'all' || String(entry.fiscalYear) === formYear).map((entry) => (
               <option key={entry.id} value={entry.id}>
-                {entry.projectTitle} — Approved Budget for the Contract (ABC) {peso(entry.abc)}
+                FY {entry.fiscalYear} · {entry.projectTitle} — Approved Budget for the Contract (ABC) {peso(entry.abc)}
               </option>
             ))}
           </select>
@@ -847,6 +853,7 @@ function RequisitionDetail({ pr, onClose }) {
 }
 
 export default function PurchaseRequisitions() {
+  const { fiscalYear, setFiscalYear } = useActionQueue()
   const permissions = usePermissions()
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -874,6 +881,7 @@ export default function PurchaseRequisitions() {
   // gets asked when something is on fire.
   const table = useServerTable(prApi.fetchPrs, {
     urlKey: 'purchaseRequisitions',
+    baseParams: { fiscalYear },
     filters: [
       {
         key: 'status',
@@ -940,6 +948,7 @@ export default function PurchaseRequisitions() {
           )
         }
       />
+      <FiscalYearFilter value={fiscalYear} onChange={(year) => { paginationProps.onPageChange(1); setFiscalYear(year) }} />
 
       <Card bodyClassName="p-4">
         <TableToolbar {...table.toolbarProps} searchPlaceholder="Search PR number or purpose…" />
@@ -987,7 +996,7 @@ export default function PurchaseRequisitions() {
                   return (
                     <tr key={pr.id} className="border-t border-border-muted">
                       <td className="px-4 py-3 font-mono text-xs text-navy">
-                        {pr.prNumber}
+                        {pr.prNumber}<span className="ml-2 text-[11px] text-text-faint">FY {pr.fiscalYear ?? 'Unassigned'}</span>
                         {pr.isEmergency && (
                           <span className="ml-2">
                             <Badge tone="danger">EMERGENCY</Badge>

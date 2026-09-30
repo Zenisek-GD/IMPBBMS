@@ -1,4 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
+import { useActionQueue } from '../../context/useActionQueue'
+import { currentFiscalYear } from '../../utils/fiscalYear'
 import { useForm } from 'react-hook-form'
 import { Landmark, Plus, ScrollText, Scale } from 'lucide-react'
 import * as financeApi from '../../api/finance'
@@ -40,11 +44,11 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
     formState: { isSubmitting },
   } = useForm({
     defaultValues: {
-      fiscalYear: new Date().getFullYear(),
+      fiscalYear: currentFiscalYear(),
       type: 'annual',
       fund: 'generalFund',
       expenseClass: 'mooe',
-      status: 'enacted',
+      status: 'draft',
     },
   })
 
@@ -65,8 +69,8 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
     // Item 12: eleven fields across ordinance, budget and coding dimensions —
     // a financial form on a full page, not a scroll-heavy modal.
     <LargeFormPage
-      title="Record an appropriation line"
-      purpose="Record what the Sanggunian enacted. A line marked draft authorises nothing and cannot be planned or charged against."
+      title="Record a draft appropriation line"
+      purpose="Draft lines do not authorize spending. Enacted annual appropriations come from Budget Preparation. Corrections and migrations require a documented Budget Control approval."
       onBack={onClose}
       backLabel="Back to appropriations"
       error={serverError}
@@ -83,7 +87,7 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
     >
       <LargeFormPage.Section
         title="Ordinance"
-        description="Which ordinance enacted this line and what it is for."
+        description="Proposed ordinance reference and purpose. Enactment follows the annual budget process."
       >
         <div className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -100,7 +104,7 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
                 Type
               </label>
               <select {...register('type')} className={selectClass}>
-                {(options?.types ?? []).map((type) => (
+                {(options?.types ?? []).filter((type) => type !== 'reenacted').map((type) => (
                   <option key={type} value={type}>
                     {type}
                   </option>
@@ -114,7 +118,6 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
               Status
             </label>
             <select {...register('status')} className={selectClass}>
-              <option value="enacted">Enacted — chargeable</option>
               <option value="draft">Draft — not yet chargeable</option>
             </select>
           </div>
@@ -181,9 +184,14 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
 
 export default function Appropriations() {
   const permissions = usePermissions()
+  const { fiscalYear, setFiscalYear } = useActionQueue()
+  const [error, setError] = useState('')
   const [tab, setTab] = useState('appropriations')
-  const [rows, setRows] = useState([])
-  const [obligations, setObligations] = useState([])
+  const [loadedYear, setLoadedYear] = useState(null)
+  const [lineSnapshot, setRows] = useState([])
+  const rows = String(loadedYear) === String(fiscalYear) ? lineSnapshot : []
+  const [obligationSnapshot, setObligations] = useState([])
+  const obligations = String(loadedYear) === String(fiscalYear) ? obligationSnapshot : []
   const [options, setOptions] = useState(null)
   const [departments, setDepartments] = useState([])
   const [creating, setCreating] = useState(false)
@@ -195,12 +203,14 @@ export default function Appropriations() {
   useEffect(() => {
     let cancelled = false
     Promise.all([
-      financeApi.fetchAppropriations(),
-      financeApi.fetchObligations(),
+      financeApi.fetchAppropriations({ fiscalYear }),
+      financeApi.fetchObligations({ fiscalYear }),
       financeApi.fetchAppropriationOptions(),
     ])
       .then(([lines, obligationRows, optionSet]) => {
         if (cancelled) return
+        setError('')
+        setLoadedYear(fiscalYear)
         setRows(lines)
         setObligations(obligationRows)
         setOptions(optionSet)
@@ -214,20 +224,22 @@ export default function Appropriations() {
         }
         setDepartments([...seen.values()])
       })
-      .catch(() => {})
+      .catch((issue) => { if (!cancelled) setError(issue.response?.data?.message || 'The appropriation register could not be loaded.') })
     return () => {
       cancelled = true
     }
-  }, [refreshToken])
+  }, [refreshToken, fiscalYear])
 
-  const totals = rows.reduce(
+  const totals = rows.filter((row) => row.status === 'enacted').reduce(
     (sum, row) => ({
       amount: sum.amount + Number(row.amount ?? 0),
+      allocated: sum.allocated + Number(row.allocated ?? 0),
+      unallocated: sum.unallocated + Number(row.unallocatedAvailable ?? 0),
       programmed: sum.programmed + Number(row.programmed ?? 0),
       obligated: sum.obligated + Number(row.obligated ?? 0),
       available: sum.available + Number(row.available ?? 0),
     }),
-    { amount: 0, programmed: 0, obligated: 0, available: 0 }
+    { amount: 0, allocated: 0, unallocated: 0, programmed: 0, obligated: 0, available: 0 }
   )
 
   // Two independent tables on one page, so each keeps its own controls and its
@@ -294,12 +306,17 @@ export default function Appropriations() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="flex flex-wrap items-center justify-between gap-3"><FiscalYearFilter value={fiscalYear} onChange={setFiscalYear} /><Link className="text-sm text-navy underline" to="/budget/controls">Allocations, closeouts and budget transfers</Link></div>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <p className="text-xs text-text-secondary">Totals below include enacted lines only. Draft amounts are proposals. Closed lines retain their historical records.</p>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {[
           ['Total appropriated', totals.amount, 'Authorised by ordinance'],
           ['Programmed in the APP', totals.programmed, 'Planned, not committed'],
           ['Obligated', totals.obligated, 'Committed by ORS'],
-          ['Available to commit', totals.available, 'Uncommitted balance'],
+          ['Unobligated', totals.available, 'Appropriation less live obligations'],
+          ['Approved allocations', totals.allocated, 'Reserved for projects'],
+          ['Available for allocation', totals.unallocated, 'After project reservations'],
         ].map(([label, value, hint]) => (
           <div key={label} className="rounded-lg border border-border-muted bg-surface p-4">
             <p className="text-[11px] font-medium tracking-[0.03em] text-text-secondary uppercase">{label}</p>
@@ -353,7 +370,7 @@ export default function Appropriations() {
                     <SortableTh {...lineTable.sortProps('amount')}>Appropriated</SortableTh>
                     <SortableTh {...lineTable.sortProps('programmed')}>Programmed</SortableTh>
                     <SortableTh {...lineTable.sortProps('obligated')}>Obligated</SortableTh>
-                    <SortableTh {...lineTable.sortProps('available')}>Available</SortableTh>
+                    <SortableTh {...lineTable.sortProps('available')}>Unobligated</SortableTh>
                     <SortableTh {...lineTable.sortProps('status')}>Status</SortableTh>
                   </tr>
                 </thead>
@@ -361,7 +378,7 @@ export default function Appropriations() {
                   {linePage.map((row) => (
                     <tr key={row.id} className="border-t border-border-muted">
                       <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-navy">{row.ordinanceNo}</span>
+                        <span className="font-mono text-xs text-navy">{row.ordinanceNo}</span><p className="text-[11px] text-text-faint">FY {row.fiscalYear}</p>
                         <p className="mt-0.5 max-w-xs text-[13px] text-navy">{row.title}</p>
                         {row.papCode && <p className="mt-0.5 text-[11px] text-text-faint">{row.papCode}</p>}
                       </td>

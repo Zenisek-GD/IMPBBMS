@@ -143,7 +143,7 @@ let writeQueue = Promise.resolve();
 // Normalizing before hashing keeps new entries verifiable after a round trip.
 const storedState = (value) => value ? JSON.parse(JSON.stringify(redactSecrets(value))) : null;
 
-const appendAudit = async (payload, transaction) => {
+const appendAuditEntry = async (payload, transaction) => {
   const last = await AuditLog.findOne({
     order: [["sequence", "DESC"]],
     transaction,
@@ -182,17 +182,39 @@ return AuditLog.create(
 );
 };
 
+// Parallel model hooks share a transaction connection. A database row lock does
+// not serialize reads made by that same transaction: each hook can otherwise
+// read the same predecessor before either writes its entry. Keep an append
+// queue per transaction, including transactions supplied by older controllers.
+// A failed append poisons that queue so the remaining hooks cannot continue
+// writing while their caller is rolling the transaction back.
+const transactionQueues = new WeakMap();
+const appendAudit = (payload, transaction) => {
+  const prior = transactionQueues.get(transaction) ?? Promise.resolve();
+  const result = prior.then(() => appendAuditEntry(payload, transaction));
+  transactionQueues.set(transaction, result);
+  // Callers still receive the rejection. This handler also covers the interval
+  // before a concurrently scheduled hook's caller starts awaiting its result.
+  result.catch(() => {});
+  return result;
+};
+
 // Reserve the audit queue until policy and audit records commit together.
 // A failed audit write rolls back the security change.
 export const withAuditTransaction = (work) => {
-  const run = () => sequelize.transaction((transaction) =>
-    work(transaction, (payload) => appendAudit(payload, transaction)));
+  const run = () => sequelize.transaction(async (transaction) => {
+    const result = await work(transaction, (payload) => appendAudit(payload, transaction));
+    await transactionQueues.get(transaction);
+    return result;
+  });
   const result = writeQueue.then(run, run);
   writeQueue = result.catch(() => {});
   return result;
 };
 
-export const recordAudit = (payload) => {
+export const recordAudit = (payload, { transaction, strict = false } = {}) => {
+  if (transaction) return appendAudit(payload, transaction);
+  if (strict) return withAuditTransaction((_transaction, audit) => audit(payload));
   const run = async () => {
     try {
       return await sequelize.transaction(async (transaction) => {
@@ -211,14 +233,14 @@ export const recordAudit = (payload) => {
 };
 
 // Convenience for controllers: pulls actor and IP off the request.
-export const auditFromRequest = (req, payload) =>
+export const auditFromRequest = (req, payload, options) =>
   recordAudit({
     ...payload,
     actorId: req.currentUser?.id ?? null,
     actorName: req.currentUser?.name ?? null,
     actorRole: req.currentUser?.Role?.key ?? null,
     ipAddress: req.ip ?? null,
-  });
+  }, options);
 
 // Walks the whole chain and reports the first point at which it breaks.
 // Returns every anomaly rather than stopping at the first, so a reviewer can

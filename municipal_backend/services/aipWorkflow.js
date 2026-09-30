@@ -62,7 +62,7 @@ export const evaluateTransition = ({ action, currentStatus, remarks }) => {
     };
   }
 
-  if (transition.requiresRemarks && !remarks?.trim()) {
+  if (transition.requiresRemarks && (typeof remarks !== "string" || !remarks.trim())) {
     return { ok: false, message: "Remarks are required when returning an investment program." };
   }
 

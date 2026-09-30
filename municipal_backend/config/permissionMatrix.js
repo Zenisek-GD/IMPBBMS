@@ -216,6 +216,8 @@ export const PERMISSIONS = [
   { key: "payment.release", module: "delivery", description: "Release disbursements from the treasury" },
 
   // Budget
+  { key: "budget.requestControl", module: "budget", description: "Request documented allocations, closeouts, transfers and appropriation corrections" },
+  { key: "budget.approveControl", module: "budget", description: "Independently approve documented budget controls within ordinance authority" },
   { key: "budget.view", module: "budget", description: "View budget and certification status" },
   { key: "budget.certify", module: "budget", description: "Certify availability of funds" },
   {
@@ -371,6 +373,7 @@ export const ROLE_PERMISSIONS = {
   ],
 
   hope: [
+    "budget.approveControl",
     "template.view", "document.approve",
     // The Mayor's own acts in the planning and budgeting chain: naming the
     // year's priorities against the development plan, endorsing the investment
@@ -568,6 +571,7 @@ export const ROLE_PERMISSIONS = {
   // ordinance is a clerical act over a decision already made elsewhere — the
   // system cannot create budget, only reflect it.
   budgetOfficer: [
+    "budget.requestControl",
     "planning.view",
     "app.view", "app.certify",
     "pr.view", "pr.certify",

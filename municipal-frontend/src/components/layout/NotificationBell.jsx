@@ -1,160 +1,68 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, CheckCheck } from 'lucide-react'
-import * as notificationsApi from '../../api/notifications'
+import { useActionQueue } from '../../context/useActionQueue'
+import WorkspaceFiscalYear from '../ui/WorkspaceFiscalYear'
 import Button from '../ui/Button'
-
-const SEVERITY_DOT = {
-  info: 'bg-accent',
-  success: 'bg-success',
-  warning: 'bg-warning',
-  danger: 'bg-danger',
-}
-
-// How often the inbox re-checks. Design doc Section 7.4 asks for in-system
-// delivery; polling keeps that simple and dependency-free. Swap for websockets
-// or SSE if the refresh ever needs to be instant.
-const POLL_INTERVAL_MS = 30000
-
-const relativeTime = (iso) => {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-  return `${Math.floor(seconds / 86400)}d ago`
-}
 
 export default function NotificationBell() {
   const navigate = useNavigate()
+  const queue = useActionQueue()
   const [open, setOpen] = useState(false)
-  const [data, setData] = useState({ unreadCount: 0, notifications: [] })
-  const [refreshToken, setRefreshToken] = useState(0)
+  const [tab, setTab] = useState('actions')
+  const [noticeError, setNoticeError] = useState('')
   const containerRef = useRef(null)
-
-  const refresh = useCallback(() => setRefreshToken((token) => token + 1), [])
-
   useEffect(() => {
-    let cancelled = false
-    notificationsApi
-      .fetchNotifications({ limit: 20 })
-      .then((result) => {
-        if (!cancelled) setData(result)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [refreshToken])
-
-  useEffect(() => {
-    const timer = setInterval(refresh, POLL_INTERVAL_MS)
-    return () => clearInterval(timer)
-  }, [refresh])
-
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event) => {
-      if (!containerRef.current?.contains(event.target)) setOpen(false)
-    }
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
+    if (!open) return undefined
+    const outside = (event) => { if (!containerRef.current?.contains(event.target)) setOpen(false) }
+    const escape = (event) => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', escape) }
   }, [open])
-
-  const openNotification = async (notification) => {
-    setOpen(false)
-    if (!notification.readAt) {
-      await notificationsApi.markRead(notification.id).catch(() => {})
-      refresh()
-    }
-    if (notification.link) navigate(notification.link)
+  const go = (href) => { setOpen(false); if (href) navigate(href) }
+  const read = async (id) => {
+    try { setNoticeError(''); await (id ? queue.markRead(id) : queue.markAllRead()) }
+    catch { setNoticeError('The update could not be marked as read. Please retry.') }
   }
-
-  return (
-    <div className="relative" ref={containerRef}>
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((value) => !value)
-          if (!open) refresh()
-        }}
-        aria-label={`Notifications${data.unreadCount ? ` (${data.unreadCount} unread)` : ''}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        // Same box and same icon size as the theme toggle beside it, so the two
-        // read as one pair of controls rather than a primary and a lesser one.
-        className="relative flex h-11 w-11 items-center justify-center rounded-md text-topnav-link transition-colors hover:bg-white/10 hover:text-topnav-link-alt md:h-9 md:w-9"
-      >
-        <Bell size={19} />
-        {data.unreadCount > 0 && (
-          <span className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
-            {data.unreadCount > 9 ? '9+' : data.unreadCount}
-          </span>
-        )}
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border-muted bg-surface shadow-xl"
-        >
-          <header className="flex items-center justify-between border-b border-border-muted bg-sidebar px-4 py-3">
-            <span className="text-[13px] font-semibold text-navy">
-              Notifications {data.unreadCount > 0 && `(${data.unreadCount})`}
-            </span>
-            {data.unreadCount > 0 && (
-              <Button
-                variant="ghost"
-                size="table"
-                icon={CheckCheck}
-                onClick={async () => {
-                  await notificationsApi.markAllRead().catch(() => {})
-                  refresh()
-                }}
-              >
-                Mark all read
-              </Button>
-            )}
-          </header>
-
-          <div className="max-h-[min(24rem,calc(100dvh-8rem))] overflow-y-auto overscroll-contain">
-            {data.notifications.length === 0 ? (
-              <p className="px-4 py-8 text-center text-[13px] text-text-faint">Nothing yet.</p>
-            ) : (
-              data.notifications.map((notification) => (
-                <button
-                  key={notification.id}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => openNotification(notification)}
-                  className={`flex w-full items-start gap-3 border-b border-border-muted px-4 py-3 text-left last:border-0 hover:bg-sidebar ${
-                    notification.readAt ? 'opacity-60' : ''
-                  }`}
-                >
-                  <span
-                    className={`mt-1.5 size-2 shrink-0 rounded-full ${SEVERITY_DOT[notification.severity]}`}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] font-semibold text-navy">{notification.title}</span>
-                    {notification.body && (
-                      <span className="mt-0.5 block text-xs text-text-secondary">{notification.body}</span>
-                    )}
-                    <span className="mt-0.5 block text-[11px] text-text-faint">
-                      {relativeTime(notification.createdAt)}
-                    </span>
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
+  return <div className="relative" ref={containerRef}>
+    <button type="button" onClick={() => { setOpen((value) => !value); if (!open) queue.refresh() }}
+      aria-label={`Notifications (${queue.total} items waiting for your action${queue.unreadCount ? `, ${queue.unreadCount} unread updates` : ''})`}
+      aria-expanded={open} aria-controls="workspace-notifications"
+      className="relative flex h-11 w-11 items-center justify-center rounded-md text-topnav-link transition-colors hover:bg-white/10 hover:text-topnav-link-alt md:h-9 md:w-9">
+      <Bell size={19} />
+      {queue.total > 0 && <span className="absolute top-1 right-1 flex min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{queue.total > 99 ? '99+' : queue.total}</span>}
+      {queue.total === 0 && queue.unreadCount > 0 && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-accent" />}
+    </button>
+    {open && <div id="workspace-notifications" className="absolute right-0 z-50 mt-2 w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border-muted bg-surface shadow-xl">
+      <header className="border-b border-border-muted bg-sidebar px-4 py-3">
+        <div className="mb-3 flex gap-3 text-[13px] font-semibold">
+          <button type="button" className={tab === 'actions' ? 'text-navy underline' : 'text-text-secondary'} onClick={() => setTab('actions')}>Waiting for your action ({queue.total})</button>
+          <button type="button" className={tab === 'updates' ? 'text-navy underline' : 'text-text-secondary'} onClick={() => setTab('updates')}>Updates ({queue.unreadCount})</button>
         </div>
-      )}
-    </div>
-  )
+        {tab === 'actions' ? <WorkspaceFiscalYear /> : <p className="text-xs text-text-faint">Recent updates across all years. Reading an update does not complete its task.</p>}
+      </header>
+      <div className="max-h-[min(26rem,calc(100dvh-12rem))] overflow-y-auto overscroll-contain">
+        {tab === 'actions' ? <>
+          {queue.error && <p role="alert" className="p-4 text-sm text-danger">{queue.error}</p>}
+          {queue.loading ? <p className="p-4 text-sm text-text-faint">Loading your actions...</p> : !queue.error && queue.total === 0 ? <p className="p-4 text-sm text-text-faint">No items waiting for your action in this year scope.</p> : null}
+          {queue.items.map((item) => <button key={item.id} type="button" onClick={() => go(item.href)} className="block w-full border-b border-border-muted px-4 py-3 text-left last:border-0 hover:bg-sidebar">
+            <span className="block text-[13px] font-semibold text-navy">{item.title}</span>
+            <span className="block text-xs text-text-secondary">{item.action}</span>
+            <span className="mt-1 block text-[11px] text-text-faint">{item.responsibleRole}{item.fiscalYear ? ` · FY ${item.fiscalYear}` : ' · Not year-specific'}</span>
+            {item.urgency !== 'normal' && <span className={`mt-1 block text-xs font-semibold ${item.urgency === 'overdue' ? 'text-danger' : 'text-warning'}`}>{item.urgency === 'overdue' ? 'Overdue' : 'Due soon'}</span>}
+          </button>)}
+          {queue.total > queue.items.length && <p className="p-3 text-xs text-text-faint">Showing the first {queue.items.length} items. Open the related sections for the remaining work.</p>}
+        </> : <>
+          {noticeError && <p role="alert" className="p-3 text-xs text-danger">{noticeError}</p>}
+          {queue.unreadCount > 0 && <div className="p-2"><Button variant="ghost" size="table" icon={CheckCheck} onClick={() => read()}>Mark updates read</Button></div>}
+          {!queue.notifications.length && <p className="p-4 text-sm text-text-faint">No updates yet.</p>}
+          {queue.notifications.map((notice) => <button type="button" key={notice.id} onClick={() => { if (!notice.readAt) read(notice.id); go(notice.link) }} className={`block w-full border-b border-border-muted px-4 py-3 text-left hover:bg-sidebar ${notice.readAt ? 'opacity-60' : ''}`}>
+            <span className="block text-[13px] font-semibold text-navy">{notice.title}</span>
+            <span className="block text-xs text-text-secondary">{notice.body}</span>
+          </button>)}
+        </>}
+      </div>
+    </div>}
+  </div>
 }

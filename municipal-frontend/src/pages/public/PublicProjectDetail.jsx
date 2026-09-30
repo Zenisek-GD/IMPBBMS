@@ -382,24 +382,35 @@ export default function PublicProjectDetail() {
           <div className="mt-4 flex flex-col gap-4">
             <Section title="Budget and Financial Information" icon={FileText}>
               <div className="grid gap-5 px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Approved Budget (ABC)" value={peso(financials.budget)} />
+                <Field label="Planned procurement (ABC)" value={peso(financials.budget)} />
                 <Field label="Awarded Amount" value={peso(financials.awardedAmount)} />
                 <Field label="Contract Amount" value={peso(financials.contractAmount)} />
-                <Field label="Amount Disbursed" value={peso(financials.disbursedAmount)} />
+                <Field label="Gross expenses" value={peso(financials.grossExpenses)} />
               </div>
 
+              <div className="grid gap-5 border-t border-border-muted px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Approved allocation" value={peso(financials.allocated)} />
+                <Field label="Obligations" value={peso(financials.obligated)} />
+                <Field label="Supplier net paid" value={peso(financials.supplierPaid)} />
+                <Field label="Taxes withheld" value={peso(financials.taxesWithheld)} />
+                <Field label="Outstanding retention" value={peso(financials.outstandingRetention)} />
+                <Field label="Unpaid obligations" value={peso(financials.unpaid)} />
+                <Field label="Remaining project funds" value={peso(financials.remainingFunds)} />
+                <Field label="Available within allocation" value={peso(financials.available)} />
+              </div>
+              <p className="px-4 pb-4 text-xs text-text-secondary">Remaining funds are allocation less gross expenses. Withheld taxes and retention remain liabilities; unused balances require approved financial closeout before reuse.</p>
               {financials.savings !== null && (
                 <div className="grid gap-5 border-t border-border-muted px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
                   <Field
-                    label="Savings against budget"
+                    label="Approved contract savings"
                     value={`${peso(financials.savings)}${
                       financials.savingsPercent !== null ? ` (${financials.savingsPercent}%)` : ''
                     }`}
                   />
                   <Field label="Fund source" value={project.fundSource} />
                   <Field
-                    label="Payment progress"
-                    value={`${financials.utilisationPercent}% of contract released`}
+                    label="Allocation utilisation"
+                    value={`${financials.utilisationPercent}% of allocation spent`}
                   />
                   <Field label="Awarded to" value={project.awardedTo} />
                 </div>

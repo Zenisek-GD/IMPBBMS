@@ -14,7 +14,6 @@ export const validateProductionConfig = (env = process.env) => {
   for (const key of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) {
     if (!env[key]?.trim()) throw new Error(`${key} is required; console mail is prohibited in production.`);
   }
-  if (env.CLOUDFLARE_WORKER !== "true") {
-    throw new Error("Production requires the durable Cloudflare session and rate-limit stores. Configure a durable store before using standalone Node in production.");
-  }
+  // Standalone Node uses MySQL for both sessions and shared rate limits;
+  // Workers use D1. Both paths fail closed when their store is unavailable.
 };

@@ -1,3 +1,4 @@
+import { currentFiscalYear } from '../../utils/fiscalYear'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
@@ -255,14 +256,14 @@ function LedgerStrip({ overview, savings, releaseRate }) {
 
   const cells = [
     {
-      label: 'Approved budget',
+      label: 'Planned procurement (APP)',
       value: overview ? compactPeso(overview.totalBudget) : '—',
-      note: 'Authorised by appropriation ordinance',
+      note: `${compactPeso(overview?.totalAllocated ?? 0)} in approved project allocations`,
     },
     {
       label: 'Total contracted',
       value: overview ? compactPeso(overview.totalContracted) : '—',
-      delta: savings ? `${compactPeso(savings)} below budget` : null,
+      delta: savings ? `${compactPeso(savings)} approved contract savings` : null,
       note: overview?.contractedProjects
         ? `Across ${overview.contractedProjects} awarded ${
             overview.contractedProjects === 1 ? 'project' : 'projects'
@@ -270,12 +271,12 @@ function LedgerStrip({ overview, savings, releaseRate }) {
         : 'No awards published yet',
     },
     {
-      label: 'Total disbursed',
-      value: overview ? compactPeso(overview.totalDisbursed) : '—',
+      label: 'Gross expenses',
+      value: overview ? compactPeso(overview.totalGrossExpenses) : '—',
       note:
         releaseRate !== null
-          ? `${releaseRate}% of contracted value released`
-          : 'Released from the treasury',
+          ? `${releaseRate}% of contracted value; ${compactPeso(overview?.totalSupplierPaid ?? 0)} net paid`
+          : 'Includes supplier payments and deductions',
     },
   ]
 
@@ -375,7 +376,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
           </summary>
           <p className="mt-1 max-w-xl leading-relaxed">
             Savings compare contracted value against the budget of awarded projects only.
-            Release rate is disbursed over contracted. Only approved and published records are counted.
+            Expense rate is gross spending over contracted value. Net supplier payments and withheld amounts are recorded separately.
           </p>
         </details>
       </div>
@@ -959,7 +960,7 @@ function ProjectRecordsTable({ projects, query }) {
 }
 
 export default function PublicTransparency() {
-  const [overview, setOverview] = useState(null)
+  const [overviewSnapshot, setOverview] = useState(null)
   const [filters, setFilters] = useState(null)
   const [branding, setBranding] = useState(null)
   const [officials, setOfficials] = useState(null)
@@ -1002,8 +1003,9 @@ export default function PublicTransparency() {
   const [refineOpen, setRefineOpen] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [fiscalYear, setFiscalYear] = useState('')
+  const [fiscalYear, setFiscalYear] = useState(String(currentFiscalYear()))
   const [department, setDepartment] = useState('')
+  const overview = overviewSnapshot && String(overviewSnapshot.fiscalYear) === String(fiscalYear) && overviewSnapshot.selectedDepartment === department ? overviewSnapshot : null
   const [procMode, setProcMode] = useState('')
   const [sort, setSort] = useState('newest')
   const [recordView, setRecordView] = useState('grid')
@@ -1068,17 +1070,17 @@ export default function PublicTransparency() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([publicApi.fetchPublicOverview(), publicApi.fetchPublicFilters()])
+    Promise.all([publicApi.fetchPublicOverview({ fiscalYear, department }), publicApi.fetchPublicFilters()])
       .then(([overviewResult, filtersResult]) => {
         if (cancelled) return
-        setOverview(overviewResult)
+        setOverview({ ...overviewResult, selectedDepartment: department })
         setFilters(filtersResult)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [fiscalYear, department])
 
   // Fetched only when the section is opened: it is one of five, and most
   // visitors never ask for it.
@@ -1202,18 +1204,10 @@ export default function PublicTransparency() {
     [overview]
   )
 
-  // Both derived from figures the API already publishes, so neither invents a
-  // trend. Savings is budget-of-contracted minus contracted; the release rate is
-  // disbursed over contracted.
-  const savings =
-    overview?.contractedProjects && overview.budgetOfContracted > overview.totalContracted
-      ? overview.budgetOfContracted - overview.totalContracted
-      : null
-
-  const releaseRate =
-    overview?.totalContracted > 0
-      ? Math.round((overview.totalDisbursed / overview.totalContracted) * 100)
-      : null
+  const savings = overview?.recognizedSavings || null
+  const releaseRate = overview?.totalContracted > 0
+    ? Math.round((overview.totalGrossExpenses / overview.totalContracted) * 100)
+    : null
   const lastUpdatedLabel = formatPublicUpdate(overview?.lastUpdatedAt)
 
   // `showSection` and `pillClass` went with the masthead's two CTA buttons and
@@ -1319,7 +1313,7 @@ export default function PublicTransparency() {
           {/* ── FIGURES ───────────────────────────────────────────────────── */}
           {showsIntro && (
             <div className="mt-4">
-              <LedgerStrip overview={overview} savings={savings} releaseRate={releaseRate} />
+              <p className="mb-2 text-xs text-text-secondary">{fiscalYear === 'all' ? 'All fiscal years combined' : `Fiscal year ${fiscalYear}`}</p><LedgerStrip overview={overview} savings={savings} releaseRate={releaseRate} />
               <HomeSpotlight projects={projects} announcements={spotlight} />
             </div>
           )}
@@ -1445,8 +1439,9 @@ export default function PublicTransparency() {
                       value={fiscalYear}
                       onChange={setFiscalYear}
                       options={[
-                        { value: '', label: 'All fiscal years' },
-                        ...(filters?.fiscalYears ?? []).map((year) => ({ value: String(year), label: `FY ${year}` })),
+                        { value: 'all', label: 'All fiscal years (combined)' },
+                        { value: String(currentFiscalYear()), label: `FY ${currentFiscalYear()} (current)` },
+                        ...(filters?.fiscalYears ?? []).filter((year) => Number(year) !== currentFiscalYear()).map((year) => ({ value: String(year), label: `FY ${year}` })),
                       ]}
                       mobileClassName="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 hover:border-border-strong"
                       desktopClassName="rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
@@ -1488,7 +1483,7 @@ export default function PublicTransparency() {
                       <button
                         type="button"
                         onClick={() => {
-                          setFiscalYear('')
+                          setFiscalYear(String(currentFiscalYear()))
                           setDepartment('')
                           setProcMode('')
                         }}
@@ -1554,7 +1549,7 @@ export default function PublicTransparency() {
                           type="button"
                           onClick={() => {
                             setSearchInput('')
-                            setFiscalYear('')
+                            setFiscalYear(String(currentFiscalYear()))
                             setDepartment('')
                             setProcMode('')
                             setTab('all')

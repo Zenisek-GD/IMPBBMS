@@ -23,6 +23,9 @@ export const transitionBudget = (id, action, payload = {}) =>
 export const recordProceeding = (budgetId, payload) =>
   apiClient.post(`/budget-preparation/budgets/${budgetId}/proceedings`, payload).then((res) => res.data)
 
+export const updateProceeding = (id, payload) =>
+  apiClient.patch(`/budget-preparation/proceedings/${id}`, payload).then((res) => res.data)
+
 export const fetchProposals = (params = {}) =>
   apiClient.get('/budget-preparation/proposals', { params }).then((res) => res.data)
 

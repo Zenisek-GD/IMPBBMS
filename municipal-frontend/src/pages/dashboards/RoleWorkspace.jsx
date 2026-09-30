@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import WorkspaceFiscalYear from '../../components/ui/WorkspaceFiscalYear'
+import { useActionQueue } from '../../context/useActionQueue'
 import { Link } from 'react-router-dom'
 import { Activity, ArrowRight, Inbox, Landmark, Compass, Bell, CalendarClock, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { useAuth } from '../../context/useAuth'
@@ -38,14 +41,11 @@ const dateTime = (value) =>
     minute: '2-digit',
   })
 
-const dueState = (value) => {
-  if (!value) return null
-  const date = new Date(value)
+const dueState = (item) => {
+  if (!item.dueAt) return null
+  const date = new Date(item.dueAt)
   if (Number.isNaN(date.getTime())) return null
-  const remaining = date.getTime() - Date.now()
-  if (remaining < 0) return { label: `Overdue since ${date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`, tone: 'text-danger' }
-  if (remaining <= 3 * 24 * 60 * 60 * 1000) return { label: `Due ${date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`, tone: 'text-warning' }
-  return { label: `Due ${date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}`, tone: 'text-text-faint' }
+  return { label: `${item.urgency === 'overdue' ? 'Overdue since' : 'Due'} ${date.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' })}`, tone: item.urgency === 'overdue' ? 'text-danger' : item.urgency === 'urgent' ? 'text-warning' : 'text-text-faint' }
 }
 
 const TONE_TEXT = {
@@ -54,13 +54,8 @@ const TONE_TEXT = {
   success: 'text-success',
 }
 
-// Module scope (like dueState above): urgency is read at render time, and the
-// compiler purity rule forbids inline Date.now() in the component body.
-const isQueueOverdue = (item) => item.dueAt != null && new Date(item.dueAt).getTime() < Date.now()
-const isQueueDueSoon = (item) =>
-  item.dueAt != null &&
-  !isQueueOverdue(item) &&
-  new Date(item.dueAt).getTime() - Date.now() <= 3 * 24 * 60 * 60 * 1000
+const isQueueOverdue = (item) => item.urgency === 'overdue'
+const isQueueDueSoon = (item) => item.urgency === 'urgent'
 
 function StatCard({ label, value, hint, tone }) {
   return (
@@ -76,6 +71,8 @@ function StatCard({ label, value, hint, tone }) {
 
 export default function RoleWorkspace() {
   const { user } = useAuth()
+  const actions = useActionQueue()
+  const [expandedActions, setExpandedActions] = useState(false)
   const config = dashboardFor(user?.role)
   const { loading, data, queue, failedSources, retry } = useDashboardData(config.needs)
 
@@ -95,7 +92,7 @@ export default function RoleWorkspace() {
   // dashboard led with the whole municipality's activity instead of their own
   // work. The Auditor keeps it because reading this trail is the job.
   const showActivity = config.showActivity && Array.isArray(data.audit)
-  const unreadNotifications = data.notifications?.notifications ?? []
+  const unreadNotifications = actions.notifications.filter((notice) => !notice.readAt)
 
   return (
     <DashboardPage>
@@ -103,6 +100,9 @@ export default function RoleWorkspace() {
         title={`${user?.roleName ?? 'Dashboard'}`}
         subtitle={`Signed in as ${user?.name}${user?.departmentName ? ` · ${user.departmentName}` : ''}`}
       />
+
+      <WorkspaceFiscalYear />
+      <p className="text-xs text-text-faint">Action counts on this screen, the notification bell and the sidebar use the same fiscal year. General tasks and recent updates are not year-specific.</p>
 
       {!loading && failedSources.length > 0 && (
         <div role="alert" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-text-secondary">
@@ -141,10 +141,10 @@ export default function RoleWorkspace() {
 
           <div className={`grid gap-4 ${showActivity ? 'lg:grid-cols-2' : ''}`}>
             <Card
-              title="Waiting on you"
+              title="Items Waiting for Your Action"
               icon={Inbox}
               bodyClassName=""
-              action={queue.length > 0 && <Badge tone="warning">{queue.length}</Badge>}
+              action={actions.total > 0 && <Badge tone="warning">{actions.total}</Badge>}
             >
               {queue.length === 0 ? (
                 <EmptyState
@@ -165,7 +165,7 @@ export default function RoleWorkspace() {
                         </p>
                       )}
                       <ul className="divide-y divide-border-muted">
-                        {group.rows.slice(0, group.heading ? 5 : 8).map((item) => (
+                        {(expandedActions ? group.rows : group.rows.slice(0, group.heading ? 5 : 8)).map((item) => (
                           <li key={item.id}>
                             <Link
                               to={item.href}
@@ -178,9 +178,10 @@ export default function RoleWorkspace() {
                                 <p className="mt-0.5 text-[12px] text-navy">
                                   Your action: <span className="font-medium">{item.action}</span>
                                 </p>
-                                {dueState(item.dueAt) && (
-                                  <p className={`mt-1 flex items-center gap-1 text-[11px] font-medium ${dueState(item.dueAt).tone}`}>
-                                    <CalendarClock size={12} /> {dueState(item.dueAt).label}
+                                <p className="mt-1 text-[11px] text-text-faint">Responsible: {item.responsibleRole}{item.fiscalYear ? ` ? FY ${item.fiscalYear}` : ' ? General task'}</p>
+                                {dueState(item) && (
+                                  <p className={`mt-1 flex items-center gap-1 text-[11px] font-medium ${dueState(item).tone}`}>
+                                    <CalendarClock size={12} /> {dueState(item).label}
                                   </p>
                                 )}
                                 {isQueueOverdue(item) && (
@@ -211,7 +212,7 @@ export default function RoleWorkspace() {
                   ))}
                   {queue.length > overdue.slice(0, 5).length + dueSoon.slice(0, 5).length + waiting.slice(0, 8).length && (
                     <p className="px-4 py-2 text-[11px] text-text-faint">
-                      Open the relevant page to see the rest of your queue.
+                      <button type="button" onClick={() => setExpandedActions((value) => !value)} className="text-navy underline">{expandedActions ? 'Show fewer actions' : 'Show all loaded actions'}</button>
                     </p>
                   )}
                 </>
@@ -219,7 +220,7 @@ export default function RoleWorkspace() {
             </Card>
 
             {showActivity && (
-              <Card title="Recent system activity" icon={Activity} bodyClassName="">
+              <Card title="Recent system activity (all years)" icon={Activity} bodyClassName="">
                 {data.audit.length === 0 ? (
                   <EmptyState title="No recorded activity yet" description="System activity will appear here as work is completed." />
                 ) : (
@@ -275,7 +276,7 @@ export default function RoleWorkspace() {
           )}
 
           <Card
-            title="Messages and updates"
+            title="Messages and updates (all years)"
             icon={Bell}
             action={unreadNotifications.length > 0 && <Badge tone="warning">{unreadNotifications.length} unread</Badge>}
             bodyClassName=""

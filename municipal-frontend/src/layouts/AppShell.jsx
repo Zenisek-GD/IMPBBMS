@@ -5,17 +5,22 @@ import Sidebar from '../components/layout/Sidebar'
 import TopNavBar from '../components/layout/TopNavBar'
 import Modal from '../components/ui/Modal'
 import Button from '../components/ui/Button'
-import { ROLE_NAV, applyShortcutOverrides } from '../config/navigation'
+import { ROLE_NAV, applyShortcutOverrides, applyRecordPermissions } from '../config/navigation'
 import { useAuth } from '../context/useAuth'
 import { fetchSettings, fetchNavShortcuts } from '../api/settings'
 import { updatePreferences } from '../api/auth'
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts'
-import { fetchPendingCounts } from '../api/reports'
+import { ActionQueueProvider } from '../context/ActionQueueContext'
+import { useActionQueue } from '../context/useActionQueue'
 
 // Wraps every authenticated page whose role has a real nav config. Roles
 // without one are routed to /coming-soon instead (see roleLanding.js), so
 // `nav` should always resolve here — but fall back defensively just in case.
 export default function AppShell() {
+  return <ActionQueueProvider><WorkspaceShell /></ActionQueueProvider>
+}
+
+function WorkspaceShell() {
   const { user, logout, sessionWarning, continueSession, dismissSessionWarning } = useAuth()
   const location = useLocation()
   const [mobileNavLocation, setMobileNavLocation] = useState(null)
@@ -30,7 +35,7 @@ export default function AppShell() {
   const [confirmingLogout, setConfirmingLogout] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const [checkingSession, setCheckingSession] = useState(false)
-  const [pending, setPending] = useState({ userId: null, counts: {} })
+  const { counts } = useActionQueue()
   const canViewReports = user?.permissions?.some((permission) => ['app.view', 'app.viewPublished', 'bidding.view', 'bidding.evaluate', 'bidding.technicalInput', 'contract.view', 'contract.viewPublished', 'delivery.submitInvoice', 'audit.viewAll', 'audit.viewLogs'].includes(permission))
 
   // A mobile navigation drawer cannot stay open after its desktop rail becomes
@@ -96,44 +101,14 @@ export default function AppShell() {
   const effectiveSections = useMemo(() => {
     const roleKey = user?.role ?? 'departmentRequester'
     const overrides = shortcutOverrides?.[roleKey]
-    let sections = applyShortcutOverrides(nav.sections, overrides)
+    let sections = applyShortcutOverrides(applyRecordPermissions(nav.sections, user?.permissions), overrides)
     if (canViewReports) sections = [...sections, { heading: 'Reports', items: [{ label: 'Reports', href: '/reports', icon: FileText }] }]
-    // A failed or incomplete queue response must not take down every protected
-    // screen. The request effect treats it as an empty count set as well.
-    const counts = pending.userId === user?.id && pending.counts && typeof pending.counts === 'object'
-      ? pending.counts : {}
     sections = sections.map((section) => ({ ...section, items: section.items.map((item) => ({ ...item, pendingCount: counts[item.href] || 0 })) }))
     if (!canManageTwoFactor || sections.some((section) => section.items.some((item) => item.href === '/admin/security-settings'))) return sections
     return [...sections, { heading: 'Security', items: [
       { label: 'Security Settings', href: '/admin/security-settings', icon: ShieldCheck },
     ] }]
-  }, [nav.sections, shortcutOverrides, user?.role, user?.id, canManageTwoFactor, canViewReports, pending])
-
-  // Successful writes refresh queues across all workflow screens. Polling and
-  // focus refresh also pick up work completed by other municipal officers.
-  useEffect(() => {
-    let disposed = false
-    let request
-    let debounce
-    const refresh = async () => {
-      request?.abort()
-      request = new AbortController()
-      const active = request
-      try {
-        const result = await fetchPendingCounts(active.signal)
-        if (!disposed && !active.signal.aborted) setPending({ userId: user?.id, counts: result.counts })
-      } catch {
-        if (!disposed && !active.signal.aborted) setPending({ userId: user?.id, counts: {} })
-      }
-    }
-    const schedule = () => { clearTimeout(debounce); debounce = setTimeout(refresh, 200) }
-    const focus = () => { if (document.visibilityState === 'visible') schedule() }
-    refresh()
-    const timer = setInterval(focus, 30000)
-    window.addEventListener('procurement:changed', schedule)
-    window.addEventListener('focus', focus)
-    return () => { disposed = true; request?.abort(); clearTimeout(debounce); clearInterval(timer); window.removeEventListener('procurement:changed', schedule); window.removeEventListener('focus', focus) }
-  }, [user?.id, user?.role, location.pathname])
+  }, [nav.sections, shortcutOverrides, user?.role, user?.permissions, canManageTwoFactor, canViewReports, counts])
 
   // Bind Alt+<key> shortcuts for every sidebar destination in this role.
   useKeyboardShortcuts(effectiveSections)
@@ -280,8 +255,7 @@ export default function AppShell() {
         >
           <div className="flex flex-col gap-4">
             <p className="text-[13px] leading-relaxed text-text-secondary">
-              You will be signed out of this session. Anything you have typed but not saved will be
-              lost.
+              You will be signed out of this session. Save your work first. Forms with draft recovery can be restored after you sign in on this browser; files must be selected again.
             </p>
             <div className="flex justify-end gap-2">
               <Button
@@ -308,7 +282,7 @@ export default function AppShell() {
           <div className="flex flex-col gap-4">
             <p className="text-sm leading-relaxed text-text-secondary">
               For your security, this session ends after {user?.sessionDurationMinutes ?? 30} minutes. Save any unfinished work now.
-              Continuing checks the server session but cannot extend its issued deadline.
+              Draft recovery keeps supported forms on this browser for your next sign-in. Files must be selected again. Continuing does not extend the session deadline.
             </p>
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="secondary" disabled={checkingSession} onClick={() => setConfirmingLogout(true)}>

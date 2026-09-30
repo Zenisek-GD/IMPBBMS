@@ -49,9 +49,11 @@ import { sequelize } from "./models/db.js";
 import "./models/index.js";
 import { migrateRoleSecurity } from "./services/migrateRoleSecurity.js";
 import { migrateUserTextSize } from "./services/migrateUserTextSize.js";
+import { migratePlanningGoalSector } from "./services/migratePlanningGoalSector.js";
 import { migrateProcurementWorkflow } from "./services/migrateProcurementWorkflow.js";
 import { migrateAuditVisibility } from "./services/migrateAuditVisibility.js";
 import { migratePublicMessageProjectContext } from "./services/migratePublicMessageProjectContext.js";
+import { migrateBudgetControls } from "./services/migrateBudgetControls.js";
 
 const args = new Set(process.argv.slice(2));
 const mode = args.has("--force")
@@ -188,6 +190,10 @@ const run = async () => {
     console.log("✅ user text-size preference column added");
   }
 
+  if (await migratePlanningGoalSector(sequelize)) {
+    console.log("Planning goal General / cross-sectoral choice added; existing sectors preserved.");
+  }
+
   const procurement = await migrateProcurementWorkflow();
   console.log(`Procurement workflow migration complete: ${procurement.added.length} columns added; existing history preserved.`);
   const auditVisibility = await migrateAuditVisibility();
@@ -199,6 +205,9 @@ const run = async () => {
   if (projectContext.added) {
     console.log("✅ public-message project context column added");
   }
+
+  const budgetControls = await migrateBudgetControls();
+  console.log(`Budget controls ready: ${budgetControls.granted} new role permissions granted.`);
 
   await sequelize.close();
   process.exit(0);

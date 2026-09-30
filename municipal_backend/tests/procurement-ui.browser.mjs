@@ -49,7 +49,7 @@ test("procurement screens support dynamic evaluation, schedule approval, BAC fai
     else if(key==="/bidding/bac-committee") data={policy,committee};
     else if(key==="/bidding/awards"||key==="/documents") data=[];
     else if(key==="/reports/catalog") data=REPORTS;
-    else if(key.startsWith("/reports/")) data=reportData(REPORTS.find(report=>key.endsWith(report.key))??REPORTS[0]);
+    else if(key.startsWith("/reports/")) data={...reportData(REPORTS.find(report=>key.endsWith(report.key))??REPORTS[0]),fiscalYear:url.searchParams.get("year") === "all" ? "all" : Number(url.searchParams.get("year"))};
     await request.respond({status:200,contentType:"application/json",body:JSON.stringify(data)});
   });
   const text=()=>page.evaluate(()=>document.body.innerText);

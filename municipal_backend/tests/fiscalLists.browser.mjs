@@ -1,0 +1,95 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import express from "express";
+import puppeteer from "puppeteer-core";
+
+test("APP and requisition lists share fiscal scope while forms retain future-year funding choices", { timeout: 180000 }, async t => {
+  const executablePath = [process.env.CHROME_PATH, "C:/Program Files/Google/Chrome/Application/chrome.exe", "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"].find(file => file && fs.existsSync(file));
+  assert.ok(executablePath, "Set CHROME_PATH to an installed browser.");
+  const app = express(), dist = path.resolve("../municipal-frontend/dist");
+  app.use(express.static(dist));
+  app.get("*", (_req, res) => res.sendFile(path.join(dist, "index.html")));
+  const server = await new Promise(resolve => { const listener = app.listen(0, "127.0.0.1", () => resolve(listener)); });
+  let browser;
+  t.after(async () => { await browser?.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  browser = await puppeteer.launch({ executablePath, headless: true });
+  const origin = `http://127.0.0.1:${server.address().port}`, page = await browser.newPage(), errors = [], reads = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const year = Number(new Intl.DateTimeFormat("en", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
+  const years = [year, year + 1, year + 2];
+  const entries = years.map((fiscalYear, index) => ({ id: 101 + index, projectTitle: `Procurement ${fiscalYear}`, fiscalYear, abc: 1000, status: "approved", planCycle: "final", planStage: "finalApp", appropriationId: 201 + index, aipEntryId: 301 + index, implementingUnitId: 1, implementingUnitCode: "HEALTH", procurementMode: "competitiveBidding", targetStartQuarter: "Q1", targetCompletionQuarter: "Q4" }));
+  const appropriations = entries.map(entry => ({ id: entry.appropriationId, fiscalYear: entry.fiscalYear, title: `Budget ${entry.fiscalYear}`, ordinanceNo: `ORD-${entry.fiscalYear}`, status: "enacted", amount: 2000, unprogrammed: 1000 }));
+  const aipEntries = entries.map(entry => ({ id: entry.aipEntryId, fiscalYear: entry.fiscalYear, title: `Investment ${entry.fiscalYear}`, estimatedCost: 1000 }));
+  const requisitions = entries.map((entry, index) => ({ id: 401 + index, prNumber: `PR-${entry.fiscalYear}-001`, fiscalYear: entry.fiscalYear, appEntryId: entry.id, appEntryTitle: entry.projectTitle, totalAmount: 500, purpose: "Equipment", status: "draft", editable: true, assetSummary: {} }));
+  const scoped = (rows, url) => rows.filter(row => url.searchParams.get("fiscalYear") === "all" || String(row.fiscalYear) === url.searchParams.get("fiscalYear"));
+  const envelope = (rows, url) => ({ rows, total: rows.length, page: Number(url.searchParams.get("page") ?? 1), pageSize: 10, totalPages: 1 });
+  await page.setRequestInterception(true);
+  page.on("request", async request => {
+    const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) return url.origin === origin || url.protocol === "data:" ? request.continue() : request.abort();
+    const key = url.pathname.slice(4);
+    reads.push({ key, year: url.searchParams.get("fiscalYear"), page: url.searchParams.get("page") });
+    let data = {};
+    if (key === "/auth/me") data = { id: 9, name: "Fiscal QA", role: "budgetOfficer", roleName: "Budget Officer", departmentId: 1, permissions: ["app.view", "app.create", "pr.view", "pr.create"], themePreference: "light", loginSessionExpiresAt: Date.now() + 600000, serverTime: Date.now(), mfaVerified: true, mfaEnrollmentRequired: false };
+    else if (key === "/settings") data = { lgu: { name: "QA Municipality", lguType: "municipality", incomeClass: "1st" }, branding: { systemName: "ProcureNance" }, thresholds: {}, options: {} };
+    else if (key === "/my-work") data = { items: [], total: 0, counts: {}, queues: {} };
+    else if (key === "/notifications") data = { notifications: [], unreadCount: 0 };
+    else if (key === "/app-entries") data = url.searchParams.has("page") ? envelope(scoped(entries, url), url) : scoped(entries, url);
+    else if (key === "/finance/appropriations") data = scoped(appropriations, url);
+    else if (key === "/planning/aip-entries") data = scoped(aipEntries, url);
+    else if (key === "/purchase-requisitions") data = envelope(scoped(requisitions, url), url);
+    else if (key.startsWith("/purchase-requisitions/app-balance/")) data = { abc: 1000, remaining: 1000, committed: 0 };
+    await request.respond({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
+  });
+  const click = label => page.evaluate(label => {
+    const button = [...document.querySelectorAll("button")].find(row => row.getClientRects().length && row.textContent.trim().toLowerCase() === label.toLowerCase());
+    if (!button) throw new Error(`Missing button: ${label}`);
+    button.click();
+  }, label);
+  const waitText = text => page.waitForFunction(text => document.body.innerText.includes(text), {}, text);
+  const options = selector => page.$eval(selector, select => [...select.options].map(option => ({ value: option.value, label: option.textContent })));
+
+  await page.setViewport({ width: 1280, height: 950 });
+  // A URL filter left by an earlier view must not override the shared selector.
+  await page.goto(`${origin}/app-entries?appEntries_f_fiscalYear=${year - 1}&appEntries_page=2`, { waitUntil: "networkidle0" });
+  await waitText(`Procurement ${year}`);
+  assert.equal(await page.$eval('select[aria-label="Fiscal year"]', select => select.value), String(year));
+  assert.ok(reads.some(row => row.key === "/app-entries" && row.year === String(year)));
+  assert.equal(reads.some(row => row.key === "/app-entries" && row.year === String(year - 1)), false);
+  await page.select('select[aria-label="Fiscal year"]', String(year + 1));
+  await waitText(`Procurement ${year + 1}`);
+  assert.ok(reads.some(row => row.key === "/app-entries" && row.year === String(year + 1) && row.page === "1"));
+  await click("NEW PLAN LINE");
+  await page.waitForFunction(() => document.querySelector('select[name="appropriationId"]')?.options.length > 1);
+  assert.equal(await page.$eval("#app-fiscal-year", select => select.value), String(year + 1), "The selected workspace year remains chosen after all-year lookups complete");
+  assert.deepEqual((await options('select[name="appropriationId"]')).map(option => option.value), ["", "202"]);
+  assert.ok((await options("#app-fiscal-year")).some(option => option.value === String(year + 2)), "Future-year funding remains selectable");
+  await page.select("#app-fiscal-year", String(year + 2));
+  assert.deepEqual((await options('select[name="appropriationId"]')).map(option => option.value), ["", "203"]);
+  assert.deepEqual((await options('select[name="aipEntryId"]')).map(option => option.value), ["", "303"]);
+  assert.ok(reads.some(row => row.key === "/finance/appropriations" && row.year === "all"));
+  assert.ok(reads.some(row => row.key === "/planning/aip-entries" && row.year === "all"));
+
+  await page.goto(`${origin}/purchase-requisitions?purchaseRequisitions_f_fiscalYear=${year - 1}`, { waitUntil: "networkidle0" });
+  await waitText(`PR-${year + 1}-001`);
+  assert.equal(await page.$eval('select[aria-label="Fiscal year"]', select => select.value), String(year + 1));
+  assert.equal(reads.some(row => row.key === "/purchase-requisitions" && row.year === String(year - 1)), false);
+  assert.match(await page.$eval("tbody", tbody => tbody.innerText), new RegExp(`FY ${year + 1}`));
+  await click("NEW REQUISITION");
+  await page.waitForFunction(year => [...document.querySelectorAll("option")].some(option => option.textContent.includes(`FY ${year}`) && option.textContent.includes("Procurement")), {}, year + 1);
+  const linkedOptions = () => page.evaluate(() => {
+    const select = [...document.querySelectorAll("select")].find(element => [...element.options].some(option => option.textContent.includes("Procurement")));
+    return [...select.options].filter(option => option.value).map(option => ({ value: option.value, label: option.textContent }));
+  });
+  assert.deepEqual((await linkedOptions()).map(option => option.value), ["102"]);
+  await page.select('select[aria-label="Fiscal year"]', "all");
+  assert.deepEqual((await linkedOptions()).map(option => option.value), ["101", "102", "103"]);
+  assert.ok((await linkedOptions()).every(option => /FY \d{4}/.test(option.label)));
+  await click("Cancel");
+  await page.select('select[aria-label="Fiscal year"]', "all");
+  await waitText(`PR-${year}-001`); await waitText(`PR-${year + 2}-001`);
+  assert.ok(reads.some(row => row.key === "/purchase-requisitions" && row.year === "all"));
+  assert.deepEqual(errors, []);
+});

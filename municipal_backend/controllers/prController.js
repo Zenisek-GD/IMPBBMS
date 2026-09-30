@@ -3,7 +3,6 @@ import { actorAudit, workflowError } from "../services/workflowSupport.js";
 import { withAuditTransaction } from "../services/auditLog.js";
 import { procurementAmountError } from "../services/procurementThresholds.js";
 import { Op } from "sequelize";
-import { sequelize } from "../models/db.js";
 import {
   PrHeader,
   PrLineItem,
@@ -17,6 +16,9 @@ import { Appropriation, Obligation, FUND_LABELS } from "../models/appropriationM
 import { ProcurementMode } from "../models/procurementModeModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
 import { availableFor, nextObligationNo } from "../services/budgetLedger.js";
+import { ProjectAllocation } from "../models/budgetControlModel.js";
+import { projectFinancialPosition } from "../services/projectFinancials.js";
+import { cents, fiscalYearFilter } from "../services/financialCalculations.js";
 import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 import { suggestProcurementMode } from "../services/procurementThresholds.js";
 import {
@@ -26,8 +28,9 @@ import {
   LIVE_PR_STATUSES,
 } from "../services/prWorkflow.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { AUDIT_ACTIONS } from "../services/auditLog.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
+import { PR_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, hasCentralAccess, recordState } from "../services/requisitionRecords.js";
 
 // ── What a requester may actually write ──────────────────────────────────────
 // Everything else on the model — status, the four certification stamps, the
@@ -57,7 +60,7 @@ const EMERGENCY_JUSTIFICATION_MIN_LENGTH = 30;
 const withIncludes = {
   include: [
     { model: PrLineItem, as: "lineItems" },
-    { model: AppEntry, as: "appEntry" },
+    { model: AppEntry, as: "appEntry", include: [{ model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }] },
     { model: Department, as: "department" },
     { model: User, as: "requester", attributes: ["id", "name"] },
     { model: User, as: "cashCertifiedBy", attributes: ["id", "name"] },
@@ -72,6 +75,7 @@ const withIncludes = {
 const serialize = (pr) => ({
   id: pr.id,
   prNumber: pr.prNumber,
+  fiscalYear: pr.appEntry?.appropriation?.fiscalYear ?? pr.appEntry?.fiscalYear ?? null,
   purpose: pr.purpose,
   dateRequired: pr.dateRequired,
   isEmergency: pr.isEmergency,
@@ -147,14 +151,14 @@ const serialize = (pr) => ({
 // retyped once, and when a new stage was added to the chain it was not updated
 // — a requisition sitting at that stage stopped counting against the balance,
 // so two requisitions could each pass this check for the same money.
-export const remainingBalanceFor = async (appEntryId, { excludePrId } = {}) => {
-  const appEntry = await AppEntry.findByPk(appEntryId);
+export const remainingBalanceFor = async (appEntryId, { excludePrId, transaction } = {}) => {
+  const appEntry = await AppEntry.findByPk(appEntryId, { transaction });
   if (!appEntry) return null;
 
   const where = { appEntryId, status: { [Op.in]: LIVE_PR_STATUSES } };
   if (excludePrId) where.id = { [Op.ne]: excludePrId };
 
-  const committed = (await PrHeader.sum("totalAmount", { where })) ?? 0;
+  const committed = (await PrHeader.sum("totalAmount", { where, transaction })) ?? 0;
 
   return {
     abc: Number(appEntry.abc),
@@ -192,6 +196,9 @@ export const getModeSuggestion = async (req, res) => {
 };
 
 export const getAppBalance = async (req, res) => {
+  const appEntry = await AppEntry.findByPk(Number(req.params.appEntryId));
+  if (!appEntry) throw workflowError("APP entry not found.", 404);
+  if (!req.permissions.has("audit.viewAll")) assertDepartmentScope(req, appEntry.implementingUnitId, PR_CENTRAL_PERMISSIONS, "requisitions");
   const balance = await remainingBalanceFor(Number(req.params.appEntryId), {
     excludePrId: req.query.excludePrId ? Number(req.query.excludePrId) : undefined,
   });
@@ -294,6 +301,16 @@ const nextPrNumber = (transaction) =>
 export const listPrs = async (req, res) => {
   const { status, search } = req.query;
   const where = {};
+  const year = fiscalYearFilter(req.query.fiscalYear);
+  if (year !== null) {
+    const fundedEntries = await AppEntry.findAll({
+      attributes: ["id"],
+      include: [{ model: Appropriation, as: "appropriation", attributes: [] }],
+      where: { [Op.or]: [{ "$appropriation.fiscalYear$": year }, { appropriationId: null, fiscalYear: year }] },
+      raw: true,
+    });
+    where.appEntryId = { [Op.in]: fundedEntries.map((entry) => entry.id) };
+  }
   if (status) where.status = status;
   if (req.query.isEmergency === "true" || req.query.isEmergency === "false") {
     where.isEmergency = req.query.isEmergency === "true";
@@ -306,7 +323,6 @@ export const listPrs = async (req, res) => {
   // outside the requesting department, so the fallback filter below would
   // otherwise hand them nothing.
   const canSeeAll = [
-    "pr.endorse",
     "pr.certify",
     "pr.obligate",
     "pr.certifyCash",
@@ -315,8 +331,9 @@ export const listPrs = async (req, res) => {
     "pr.approve",
     "audit.viewAll",
   ].some((permission) => req.permissions.has(permission));
-  if (!canSeeAll && req.currentUser.departmentId) {
-    where.departmentId = req.currentUser.departmentId;
+  if (!canSeeAll) {
+    const departments = await Department.findAll({ where: { headUserId: req.currentUser.id }, attributes: ["id"] });
+    where.departmentId = { [Op.in]: [...new Set([req.currentUser.departmentId, ...departments.map((row) => row.id)].filter(Boolean))] };
   }
 
   const paged = ["page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
@@ -332,441 +349,179 @@ export const listPrs = async (req, res) => {
   res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: page.page, pageSize: page.pageSize }));
 };
 
+const prState = (pr) => ({ ...recordState(pr), lineItems: (pr.lineItems ?? []).map(recordState) });
+const approvedApp = (app) => {
+  if (!app || !["approved", "locked"].includes(app.status)) throw workflowError("The linked APP entry must be approved first.", 400);
+  if (app.planCycle === "indicative") throw workflowError("Finalise the indicative APP against the enacted appropriation before raising or submitting a requisition. Use the EPA workflow for authorized early procurement.");
+};
+
+const lockedApp = async (observed, transaction) => {
+  if (!observed) return null;
+  if (observed.appropriationId) await Appropriation.findByPk(observed.appropriationId, { transaction, lock: transaction.LOCK.UPDATE });
+  const app = await AppEntry.findByPk(observed.id, { transaction, lock: transaction.LOCK.UPDATE });
+  if (!app || app.appropriationId !== observed.appropriationId) throw workflowError("The linked plan's funding changed. Reload before continuing.");
+  return app;
+};
+
+const validateRequisition = async (header, app, items, total, { transaction, excludePrId, submitting = false } = {}) => {
+  approvedApp(app);
+  const error = validateHeader(header, { submitting });
+  if (error) throw workflowError(error, 400);
+  if (!items.length || !Number.isFinite(Number(total)) || Number(total) <= 0) throw workflowError("At least one valid requisition line item is required.", 400);
+  const appropriation = app.appropriationId ? await Appropriation.findByPk(app.appropriationId, { transaction }) : null;
+  const classError = expenseClassMismatch(items, appropriation?.expenseClass);
+  if (classError) throw workflowError(classError, 400);
+  if (appropriation?.departmentId && Number(appropriation.departmentId) !== Number(app.implementingUnitId)) throw workflowError("The appropriation belongs to another department.", 400);
+  const balance = await remainingBalanceFor(app.id, { excludePrId, transaction });
+  if (Number(total) > balance.remaining) throw workflowError(`The requisition total exceeds the APP entry's remaining balance of ${balance.remaining.toLocaleString()}.`, 409, { balance });
+};
+
 export const createPr = async (req, res) => {
-  const { appEntryId, lineItems } = req.body;
+  const observed = await AppEntry.findByPk(req.body?.appEntryId);
+  if (!observed) throw workflowError("A linked approved APP entry is required.", 400);
+  assertDepartmentScope(req, observed.implementingUnitId, PR_CENTRAL_PERMISSIONS, "requisitions");
   const header = pickEditable(req.body, EDITABLE_PR_FIELDS);
-
-  // Section 5.3: a PR must link to an approved APP entry.
-  if (!appEntryId) return res.status(400).json({ message: "A linked APP entry is required." });
-
-  const appEntry = await AppEntry.findByPk(appEntryId);
-  if (!appEntry) return res.status(400).json({ message: "That APP entry does not exist." });
-  if (!["approved", "locked"].includes(appEntry.status)) {
-    return res.status(400).json({ message: "The linked APP entry must be approved first." });
-  }
-
-  // An indicative plan line has no enacted appropriation behind it, so there is
-  // nothing for the Budget Officer to obligate and the requisition would stall
-  // at step 18. Where the project is flagged for Early Procurement, the lawful
-  // route is an EPA solicitation raised directly against the indicative APP —
-  // procurement short of award — not a requisition.
-  if (appEntry.planCycle === "indicative") {
-    return res.status(409).json({
-      message: appEntry.earlyProcurement
-        ? "This is an indicative APP line flagged for Early Procurement. Raise the EPA solicitation " +
-          "against the plan line directly; a requisition can only be raised once the appropriation " +
-          "ordinance is enacted and the line is finalised."
-        : "This is an indicative APP line supporting the budget proposal. Finalise it against the " +
-          "enacted appropriation (IRR Sec. 7.7.5) before raising a requisition against it.",
-      planCycle: appEntry.planCycle,
-      earlyProcurement: appEntry.earlyProcurement,
-    });
-  }
-
-  const headerError = validateHeader(header, { submitting: false });
-  if (headerError) return res.status(400).json({ message: headerError });
-
-  const { capitalizationThreshold } = await getLguProfile();
-  const computed = computeLineItems(lineItems, { capitalizationThreshold });
-  if (computed.error) return res.status(400).json({ message: computed.error });
-
-  // Checked at creation rather than at certification so the requester finds out
-  // while they can still change the requisition, not three signatures later.
-  const appropriation = appEntry.appropriationId
-    ? await Appropriation.findByPk(appEntry.appropriationId)
-    : null;
-  const classError = expenseClassMismatch(computed.items, appropriation?.expenseClass);
-  if (classError) return res.status(400).json({ message: classError });
-
-  const balance = await remainingBalanceFor(appEntryId);
-  if (computed.total > balance.remaining) {
-    return res.status(400).json({
-      message: `Total ₱${computed.total.toLocaleString()} exceeds the APP entry's remaining balance of ₱${balance.remaining.toLocaleString()}.`,
-      balance,
-    });
-  }
-
-  const created = await withSequenceRetry(() =>
-    sequelize.transaction(async (transaction) => {
-      const pr = await PrHeader.create(
-        {
-          ...header,
-          prNumber: await nextPrNumber(transaction),
-          appEntryId,
-          requesterId: req.currentUser.id,
-          departmentId: req.currentUser.departmentId ?? appEntry.implementingUnitId,
-          totalAmount: computed.total,
-          status: "draft",
-        },
-        { transaction }
-      );
-
-      await PrLineItem.bulkCreate(
-        computed.items.map((item) => ({ ...item, prHeaderId: pr.id })),
-        { transaction }
-      );
-
-      return pr;
-    })
-  );
-
+  const computed = computeLineItems(req.body.lineItems, await getLguProfile());
+  if (computed.error) throw workflowError(computed.error, 400);
+  const created = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
+    const app = await lockedApp(observed, transaction);
+    assertDepartmentScope(req, app.implementingUnitId, PR_CENTRAL_PERMISSIONS, "requisitions");
+    await activeDepartment(app.implementingUnitId, { transaction });
+    await validateRequisition(header, app, computed.items, computed.total, { transaction });
+    const pr = await PrHeader.create({ ...header, prNumber: await nextPrNumber(transaction), appEntryId: app.id, requesterId: req.currentUser.id,
+      departmentId: app.implementingUnitId, totalAmount: computed.total, status: "draft" }, { transaction });
+    pr.lineItems = await PrLineItem.bulkCreate(computed.items.map((item) => ({ ...item, prHeaderId: pr.id })), { transaction });
+    await audit(actorAudit(req, { actionType: "pr.created", entityRef: "pr", entityId: pr.id, summary: `${pr.prNumber}: requisition created`, beforeState: null, afterState: prState(pr) }));
+    return pr;
+  }));
   res.status(201).json(serialize(await PrHeader.findByPk(created.id, withIncludes)));
 };
 
 export const updatePr = async (req, res) => {
-  const pr = await PrHeader.findByPk(req.params.id, withIncludes);
-  if (!pr) return res.status(404).json({ message: "Requisition not found." });
-
-  if (!isEditable(pr.status)) {
-    return res.status(409).json({ message: `This requisition is in "${pr.status}" and can no longer be edited.` });
-  }
-
-  // `pr.create` says an officer may raise requisitions for their own office —
-  // not that they may edit anybody's. Without this, one department could revise
-  // another department's draft, including its amounts, before it was signed.
-  if (pr.departmentId && pr.departmentId !== req.currentUser.departmentId) {
-    return res.status(403).json({ message: "This requisition belongs to another office." });
-  }
-
-  const { lineItems } = req.body;
+  const observed = await PrHeader.findByPk(req.params.id, withIncludes);
+  if (!observed) throw workflowError("Requisition not found.", 404);
   const header = pickEditable(req.body, EDITABLE_PR_FIELDS);
-  const merged = { ...serialize(pr), ...header };
-
-  const headerError = validateHeader(merged, { submitting: false });
-  if (headerError) return res.status(400).json({ message: headerError });
-
-  let computed = null;
-  if (lineItems) {
-    const { capitalizationThreshold } = await getLguProfile();
-    computed = computeLineItems(lineItems, { capitalizationThreshold });
-    if (computed.error) return res.status(400).json({ message: computed.error });
-
-    const appropriation = pr.appEntry?.appropriationId
-      ? await Appropriation.findByPk(pr.appEntry.appropriationId)
-      : null;
-    const classError = expenseClassMismatch(computed.items, appropriation?.expenseClass);
-    if (classError) return res.status(400).json({ message: classError });
-
-    const balance = await remainingBalanceFor(pr.appEntryId, { excludePrId: pr.id });
-    if (computed.total > balance.remaining) {
-      return res.status(400).json({
-        message: `Total ₱${computed.total.toLocaleString()} exceeds the APP entry's remaining balance of ₱${balance.remaining.toLocaleString()}.`,
-        balance,
-      });
-    }
+  let computed;
+  if (Object.hasOwn(req.body, "lineItems")) {
+    computed = computeLineItems(req.body.lineItems, await getLguProfile());
+    if (computed.error) throw workflowError(computed.error, 400);
   }
-
-  await sequelize.transaction(async (transaction) => {
-    await pr.update(
-      { ...header, ...(computed ? { totalAmount: computed.total } : {}) },
-      { transaction }
-    );
-
+  await withAuditTransaction(async (transaction, audit) => {
+    const app = await lockedApp(observed.appEntry, transaction);
+    const pr = await PrHeader.findByPk(observed.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (pr.appEntryId !== observed.appEntryId) throw workflowError("The linked plan changed. Reload the requisition.");
+    if (!isEditable(pr.status)) throw workflowError(`This requisition is in "${pr.status}" and can no longer be edited.`);
+    assertDepartmentScope(req, pr.departmentId, PR_CENTRAL_PERMISSIONS, "requisitions");
+    if (app) assertDepartmentScope(req, app.implementingUnitId, PR_CENTRAL_PERMISSIONS, "requisitions");
+    pr.lineItems = await PrLineItem.findAll({ where: { prHeaderId: pr.id }, transaction });
+    const beforeState = prState(pr), merged = { ...beforeState, ...header };
+    await validateRequisition(merged, app, computed?.items ?? pr.lineItems, computed?.total ?? pr.totalAmount, { transaction, excludePrId: pr.id });
+    await pr.update({ ...header, departmentId: app.implementingUnitId, ...(computed ? { totalAmount: computed.total } : {}) }, { transaction });
     if (computed) {
       await PrLineItem.destroy({ where: { prHeaderId: pr.id }, transaction });
-      await PrLineItem.bulkCreate(
-        computed.items.map((item) => ({ ...item, prHeaderId: pr.id })),
-        { transaction }
-      );
+      pr.lineItems = await PrLineItem.bulkCreate(computed.items.map((item) => ({ ...item, prHeaderId: pr.id })), { transaction });
     }
+    await audit(actorAudit(req, { actionType: "pr.updated", entityRef: "pr", entityId: pr.id, summary: `${pr.prNumber}: requisition updated`, beforeState, afterState: prState(pr) }));
   });
-
-  res.json(serialize(await PrHeader.findByPk(pr.id, withIncludes)));
+  res.json(serialize(await PrHeader.findByPk(observed.id, withIncludes)));
 };
 
 export const transitionPr = async (req, res) => {
   const { action, remarks } = req.body;
-  const pr = await PrHeader.findByPk(req.params.id, withIncludes);
-  if (!pr) return res.status(404).json({ message: "Requisition not found." });
-
-  // Endorsement is the one step not gated purely by permission: Section 5.2
-  // says the *Department Head* endorses, and headship is a property of the
-  // office rather than a role. Anyone explicitly granted pr.endorse may also
-  // act, which keeps the permission matrix meaningful.
-  if (action === "endorse") {
-    const department = await Department.findByPk(pr.departmentId);
+  const observed = await PrHeader.findByPk(req.params.id, withIncludes);
+  if (!observed) throw workflowError("Requisition not found.", 404);
+  const { pr, result, modeRecord } = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
+    const app = await lockedApp(observed.appEntry, transaction);
+    const current = await PrHeader.findByPk(observed.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (current.appEntryId !== observed.appEntryId) throw workflowError("The linked plan changed. Reload the requisition.");
+    current.appEntry = app;
+    current.lineItems = await PrLineItem.findAll({ where: { prHeaderId: current.id }, transaction });
+    const department = current.departmentId ? await Department.findByPk(current.departmentId, { transaction }) : null;
+    const isDepartmentAction = action === "endorse" || (action === "return" && current.status === "pendingDepartmentHeadEndorsement");
     const isHead = department?.headUserId === req.currentUser.id;
-
-    if (!isHead && !req.permissions.has("pr.endorse")) {
-      return res.status(403).json({
-        message: department?.headUserId
-          ? "Only the head of this department may endorse its requisitions."
-          : "This department has no head assigned. Ask the System Administrator to designate one.",
-      });
-    }
-
-    // A requester must not endorse their own requisition.
-    if (pr.requesterId === req.currentUser.id) {
-      return res.status(403).json({ message: "You cannot endorse your own requisition." });
-    }
-  } else {
-    const requiredPermission = permissionForTransition(action, pr.status);
-    if (!requiredPermission || !req.permissions.has(requiredPermission)) {
-      return res.status(403).json({ message: "You do not have permission to perform this action." });
-    }
-  }
-
-  // Captured before the update so the audit entry can show the transition.
-  const previousStatus = pr.status;
-
-  const result = evaluateTransition({ action, currentStatus: pr.status, remarks });
-  if (!result.ok) return res.status(409).json({ message: result.message });
-
-  // Re-check the two rules that can go stale between drafting and submitting:
-  // the 15-day lead time, and the APP balance other requisitions may have eaten.
-  if (action === "submit") {
-    const headerError = validateHeader(pr, { submitting: true });
-    if (headerError) return res.status(400).json({ message: headerError });
-
-    const balance = await remainingBalanceFor(pr.appEntryId, { excludePrId: pr.id });
-    if (Number(pr.totalAmount) > balance.remaining) {
-      return res.status(409).json({
-        message: `Total ₱${Number(pr.totalAmount).toLocaleString()} now exceeds the APP entry's remaining balance of ₱${balance.remaining.toLocaleString()}. Another requisition may have consumed it.`,
-        balance,
-      });
-    }
-  }
-
-  // ── Certification (step 18) and obligation (step 18b) ──────────────────────
-  // LGC Sec. 344 names three officers. The Budget Officer certifies that an
-  // appropriation exists and that there is room under it, and identifies the
-  // fund; the Accountant then obligates it, which is the entry that actually
-  // encumbers the money. Those were previously one act by one officer.
-  //
-  // Both stages check the same balance, because it can move between them: a
-  // certification made on Monday against an appropriation another requisition
-  // consumes on Tuesday must not obligate on Wednesday regardless.
-  //
-  // This happens after the Mayor has approved the request, so an appropriation
-  // is only ever encumbered for requests the executive has agreed to — see the
-  // note at the top of services/prWorkflow.js.
-  //
-  // Checked before the transaction opens so a failure here returns a clean 409
-  // rather than rolling back a partially applied transition.
-  let obligationNumber = null;
-  let fundSource = null;
-  if (action === "certify" || action === "obligate") {
-    const appropriationId = pr.appEntry?.appropriationId ?? null;
-    if (!appropriationId) {
-      return res.status(409).json({
-        message:
-          "This requisition's APP entry is not charged against any appropriation, so there is nothing to obligate against.",
-      });
-    }
-
-    const balance = await availableFor(appropriationId);
-    if (balance.status !== "enacted") {
-      return res.status(409).json({
-        message: `Ordinance ${balance.ordinanceNo} is "${balance.status}". Funds cannot be certified against it.`,
-      });
-    }
-
-    if (Number(pr.totalAmount) > balance.available) {
-      return res.status(409).json({
-        message:
-          `₱${Number(pr.totalAmount).toLocaleString()} exceeds the ₱${balance.available.toLocaleString()} ` +
-          `still uncommitted under ${balance.ordinanceNo}. ` +
-          `₱${balance.obligated.toLocaleString()} of ₱${balance.amount.toLocaleString()} is already obligated.`,
-        balance,
-      });
-    }
-
-    // "Identifies the funding source" — the second half of step 18. Read from
-    // the appropriation rather than asked for, so the requisition can never
-    // name a fund different from the one it is charged against.
-    const appropriation = await Appropriation.findByPk(appropriationId);
-    fundSource = appropriation?.fund ?? null;
-
-    // Only the Accountant's act raises the ORS number.
-    if (action === "obligate") {
-      obligationNumber = await nextObligationNo(new Date().getFullYear());
-    }
-  }
-
-  // ── Mode determination (step 19) ───────────────────────────────────────────
-  // The committee's decision on how this requisition will be procured, checked
-  // against the IRR ceilings for this LGU. Resolved before the transaction for
-  // the same reason as the obligation.
-  let modeRecord = null;
-  let suggestion = null;
-  if (action === "determineMode") {
-    const lgu = await getLguProfile();
-    suggestion = suggestProcurementMode(Number(pr.totalAmount), lgu, pr.appEntry?.category ?? "all");
-
-    const chosenKey = req.body.procurementModeKey ?? suggestion.suggested;
-    if (/negotiated/i.test(chosenKey)) throw workflowError("Negotiated Procurement requires complete failed-attempt history, eligibility review, and separate BAC approval. Start it from procurement attempt history.");
-    const amountIssue = procurementAmountError(Number(pr.totalAmount), chosenKey, lgu, pr.appEntry?.category ?? "all");
-    if (amountIssue) throw workflowError(amountIssue, 400);
-    modeRecord = await ProcurementMode.findOne({ where: { key: chosenKey } });
-    if (!modeRecord) {
-      return res.status(400).json({ message: `Unknown procurement mode: ${chosenKey}.` });
-    }
-
-    // Departing from what the thresholds indicate is allowed — the committee
-    // may always fall back to Competitive Bidding, and an alternative mode may
-    // be justified on grounds the ABC alone cannot express. What is not allowed
-    // is departing silently.
-    if (chosenKey !== suggestion.suggested && !req.body.justification?.trim()) {
-      return res.status(400).json({
-        message:
-          `The thresholds indicate ${suggestion.suggested} for ₱${Number(pr.totalAmount).toLocaleString()} ` +
-          `(${suggestion.rationale}). Record why the committee determined ${modeRecord.name} instead.`,
-        suggestion,
-      });
-    }
-
-    // ── The plan and the determination must agree ─────────────────────────────
-    // IRR Sec. 7.8 — "No government procurement shall be undertaken unless it is
-    // in accordance with the approved Indicative APP or final APP." The APP
-    // carries a mode of procurement as a required field (Sec. 7.7.2(d)), and
-    // nothing previously compared it with what the committee determined here.
-    // The plan could say Competitive Bidding and the requisition proceed under
-    // Small Value Procurement with no one told the two disagreed.
-    const plannedMode = pr.appEntry?.procurementMode ?? null;
-    if (plannedMode && plannedMode !== chosenKey && !req.body.justification?.trim()) {
-      return res.status(409).json({
-        message:
-          `The approved APP plans this project for ${plannedMode}, but ${modeRecord.name} is being ` +
-          `determined. Procurement must accord with the approved APP (IRR Sec. 7.8) — either determine ` +
-          `the planned mode, revise the APP line, or record why the committee departed from the plan.`,
-        plannedMode,
-        determinedMode: chosenKey,
-      });
-    }
-
-    // An alternative mode that the IRR conditions on prior approval by the Head
-    // of the Procuring Entity cannot be settled by the committee alone. The
-    // approval is recorded against the requisition rather than assumed.
-    if (modeRecord.requiresHopeApproval && !req.body.hopeApprovalReference?.trim()) {
-      return res.status(409).json({
-        message:
-          `${modeRecord.name} (${modeRecord.citation}) requires the prior approval of the Head of the ` +
-          `Procuring Entity. Record the approval reference before determining this mode.`,
-      });
-    }
-  }
-
-  await withAuditTransaction(async (transaction, audit) => {
-    await pr.reload({ transaction, lock: transaction.LOCK.UPDATE });
-    if (pr.status !== previousStatus) throw workflowError("This requisition changed. Reload before recording the action.");
-    const bac = action === "determineMode" ? await assertBacAction(req, { transaction }) : null;
-    const changes = { status: result.to };
-
-    if (action === "return") changes.returnRemarks = remarks.trim();
+    const permission = permissionForTransition(action, current.status);
+    if (isDepartmentAction) {
+      const scopedPermission = req.permissions.has("pr.endorse") && (Number(current.departmentId) === Number(req.currentUser.departmentId) || hasCentralAccess(req, PR_CENTRAL_PERMISSIONS));
+      if (!isHead && !scopedPermission) throw workflowError("Only this department's head or an authorized officer may endorse or return its requisitions.", 403);
+    } else if (!permission || !req.permissions.has(permission)) throw workflowError("You do not have permission to perform this action.", 403);
+    if (action === "submit") assertDepartmentScope(req, current.departmentId, PR_CENTRAL_PERMISSIONS, "requisitions");
+    if (["endorse", "certifyCash", "approve", "certify", "obligate", "determineMode"].includes(action) && current.requesterId === req.currentUser.id) throw workflowError("Another authorized officer must review or approve your requisition.", 403);
+    const result = evaluateTransition({ action, currentStatus: current.status, remarks });
+    if (!result.ok) throw workflowError(result.message);
+    const beforeState = prState(current);
+    const existingObligations = await Obligation.findAll({ where: { prHeaderId: current.id }, transaction });
+    beforeState.obligations = existingObligations.map(recordState);
     if (action === "submit") {
-      changes.returnRemarks = null;
-      changes.submittedAt = new Date();
+      if (Number(current.departmentId) !== Number(app?.implementingUnitId)) throw workflowError("The requisition and linked APP belong to different departments. Correct the draft before submitting.");
+      await validateRequisition(current, app, current.lineItems, current.totalAmount, { transaction, excludePrId: current.id, submitting: true });
     }
-
-    // Step 16 — the Treasurer. Recorded against the officer personally: the
-    // statement that the money is there is a personal accountability, not an
-    // office-level one.
-    if (action === "certifyCash") {
-      changes.cashCertifiedAt = new Date();
-      changes.cashCertifiedById = req.currentUser.id;
+    let fundSource = null, obligationNumber = null;
+    if (["certify", "obligate"].includes(action)) {
+      if (!app?.appropriationId) throw workflowError("The linked APP must identify the appropriation before funds can be certified or obligated.");
+      approvedApp(app);
+      const appropriation = await Appropriation.findByPk(app.appropriationId, { transaction });
+      if (!appropriation || appropriation.status !== "enacted") throw workflowError("Funds can only be certified or obligated against an enacted appropriation.");
+      if (appropriation.fiscalYear !== app.fiscalYear) throw workflowError("The procurement project and its appropriation must have the same fiscal year.");
+      if (appropriation.departmentId && Number(appropriation.departmentId) !== Number(current.departmentId)) throw workflowError("The appropriation is assigned to another department.");
+      const allocation = await ProjectAllocation.findOne({ where: { appEntryId: app.id }, transaction, lock: transaction.LOCK.UPDATE });
+      if (!allocation || allocation.status !== "active" || allocation.appropriationId !== appropriation.id || allocation.fiscalYear !== app.fiscalYear) throw workflowError("Approve an active project allocation from this appropriation before certifying or obligating this requisition.");
+      const position = await projectFinancialPosition(app.id, { transaction });
+      if (cents(current.totalAmount) + Math.max(cents(position.obligated), cents(position.grossExpenses), cents(position.certifiedGross)) > cents(allocation.amount)) throw workflowError("The requisition exceeds the project's approved available allocation. Obtain an authorized allocation adjustment first.", 409, { allocated: Number(allocation.amount), obligated: position.obligated });
+      const balance = await availableFor(appropriation.id, { transaction });
+      if (Number(current.totalAmount) > balance.available) throw workflowError(`The requisition exceeds the available appropriation balance of ${balance.available.toLocaleString()}.`, 409, { balance });
+      const classError = expenseClassMismatch(current.lineItems, appropriation.expenseClass);
+      if (classError) throw workflowError(classError, 400);
+      fundSource = appropriation.fund;
+      if (action === "obligate") {
+        if (existingObligations.some((row) => row.status === "obligated")) throw workflowError("This requisition already has an active obligation.");
+        obligationNumber = await nextObligationNo(appropriation.fiscalYear, transaction);
+      }
     }
-
-    // Step 17 — the Mayor approves the request itself.
-    if (action === "approve") {
-      changes.mayorApprovedAt = new Date();
-      changes.mayorApprovedById = req.currentUser.id;
-    }
-
-    // Step 18 — the Budget Office certifies and names the fund.
-    if (action === "certify") {
-      changes.appropriationCertifiedAt = new Date();
-      changes.appropriationCertifiedById = req.currentUser.id;
-      changes.fundSource = fundSource;
-    }
-
-    // Step 18b — the Accountant obligates. `fundsReservedAt` is the moment the
-    // money actually stops being available to anything else, which is this one
-    // and not the certification before it.
-    if (action === "obligate") {
-      changes.fundsReservedAt = new Date();
-      changes.obligatedById = req.currentUser.id;
-    }
-
-    // Step 19 — the BAC.
+    let modeRecord = null, suggestion = null, bac = null;
     if (action === "determineMode") {
-      changes.procurementModeId = modeRecord.id;
-      changes.modeDeterminedAt = new Date();
-      changes.modeDeterminedById = req.currentUser.id;
-      changes.suggestedModeKey = suggestion.suggested;
-      changes.modeJustification =
-        req.body.justification?.trim() ||
-        `Determined per ${suggestion.citation}: ${suggestion.rationale}`;
+      const lgu = await getLguProfile();
+      suggestion = suggestProcurementMode(Number(current.totalAmount), lgu, app?.category ?? "all");
+      const chosenKey = req.body.procurementModeKey ?? suggestion.suggested;
+      if (/negotiated/i.test(chosenKey)) throw workflowError("Negotiated Procurement requires approved failures, eligibility review and BAC approval. Start it from procurement attempt history.");
+      const amountIssue = procurementAmountError(Number(current.totalAmount), chosenKey, lgu, app?.category ?? "all");
+      if (amountIssue) throw workflowError(amountIssue, 400);
+      modeRecord = await ProcurementMode.findOne({ where: { key: chosenKey }, transaction });
+      if (!modeRecord) throw workflowError(`Unknown procurement mode: ${chosenKey}.`, 400);
+      if ((chosenKey !== suggestion.suggested || (app?.procurementMode && app.procurementMode !== chosenKey)) && !req.body.justification?.trim()) throw workflowError("Record the BAC's justification for departing from the approved plan or suggested procurement mode.", 400);
+      if (modeRecord.requiresHopeApproval && !req.body.hopeApprovalReference?.trim()) throw workflowError("Record the required prior HoPE approval reference for this procurement mode.");
+      bac = await assertBacAction(req, { transaction });
     }
-
-    await pr.update(changes, { transaction });
-
-    if (action === "obligate") {
-      await Obligation.create(
-        {
-          obligationNo: obligationNumber,
-          amount: pr.totalAmount,
-          status: "obligated",
-          certifiedAt: new Date(),
-          certifiedById: req.currentUser.id,
-          particulars: pr.purpose ?? pr.prNumber,
-          appropriationId: pr.appEntry.appropriationId,
-          prHeaderId: pr.id,
-        },
-        { transaction }
-      );
-    }
-
-    // Returning a certified requisition releases the money it was holding.
-    // Without this the balance would stay committed to a requisition that is no
-    // longer going anywhere, and the appropriation would silently bleed away.
+    const changes = { status: result.to };
+    if (action === "submit") Object.assign(changes, { returnRemarks: null, submittedAt: new Date() });
+    if (action === "certifyCash") Object.assign(changes, { cashCertifiedAt: new Date(), cashCertifiedById: req.currentUser.id });
+    if (action === "approve") Object.assign(changes, { mayorApprovedAt: new Date(), mayorApprovedById: req.currentUser.id });
+    if (action === "certify") Object.assign(changes, { appropriationCertifiedAt: new Date(), appropriationCertifiedById: req.currentUser.id, fundSource });
+    if (action === "obligate") Object.assign(changes, { fundsReservedAt: new Date(), obligatedById: req.currentUser.id });
+    if (action === "determineMode") Object.assign(changes, { procurementModeId: modeRecord.id, modeDeterminedAt: new Date(), modeDeterminedById: req.currentUser.id,
+      suggestedModeKey: suggestion.suggested, modeJustification: req.body.justification?.trim() || `Determined per ${suggestion.citation}: ${suggestion.rationale}` });
     if (action === "return") {
-      await Obligation.update(
-        {
-          status: "cancelled",
-          cancelledAt: new Date(),
-          cancellationReason: `${pr.prNumber} returned: ${remarks.trim()}`,
-        },
-        { where: { prHeaderId: pr.id, status: "obligated" }, transaction }
-      );
+      changes.returnRemarks = remarks.trim();
+      for (const key of ["cashCertifiedAt", "cashCertifiedById", "mayorApprovedAt", "mayorApprovedById", "appropriationCertifiedAt", "appropriationCertifiedById", "fundsReservedAt", "obligatedById", "fundSource", "procurementModeId", "modeDeterminedAt", "modeDeterminedById", "suggestedModeKey", "modeJustification"]) changes[key] = null;
+      for (const obligation of existingObligations.filter((row) => row.status === "obligated")) {
+        const before = recordState(obligation);
+        await obligation.update({ status: "cancelled", cancelledAt: new Date(), cancellationReason: `${current.prNumber} returned: ${remarks.trim()}` }, { transaction });
+        await audit(actorAudit(req, { actionType: "budget.obligation.cancelled", entityRef: "obligation", entityId: obligation.id, summary: `${obligation.obligationNo}: obligation cancelled on return`, beforeState: before, afterState: recordState(obligation) }));
+      }
     }
-    if (bac) await audit(actorAudit(req, { actionType: "bac.modeDetermined", entityRef: "pr", entityId: pr.id, summary: "BAC determined procurement method with recorded attendance and quorum.", beforeState: { status: previousStatus }, afterState: { status: result.to, mode: modeRecord.key, justification: changes.modeJustification, quorum: bac.quorum, members: committeeSnapshot(bac) } }));
-  });
-
+    await current.update(changes, { transaction });
+    if (action === "obligate") {
+      const obligation = await Obligation.create({ obligationNo: obligationNumber, amount: current.totalAmount, status: "obligated", certifiedAt: new Date(), certifiedById: req.currentUser.id,
+        particulars: current.purpose ?? current.prNumber, appropriationId: app.appropriationId, prHeaderId: current.id }, { transaction });
+      await audit(actorAudit(req, { actionType: "budget.obligation.created", entityRef: "obligation", entityId: obligation.id, summary: `${obligation.obligationNo}: funds obligated`, beforeState: null, afterState: recordState(obligation) }));
+    }
+    const afterState = { ...prState(current), obligations: (await Obligation.findAll({ where: { prHeaderId: current.id }, transaction })).map(recordState), action,
+      ...(bac ? { members: committeeSnapshot(bac), quorum: bac.quorum, hopeApprovalReference: req.body.hopeApprovalReference?.trim() ?? null } : {}) };
+    await audit(actorAudit(req, { actionType: action === "determineMode" ? AUDIT_ACTIONS.PR_MODE_DETERMINED : AUDIT_ACTIONS.PR_TRANSITION, entityRef: "pr", entityId: current.id,
+      summary: `${current.prNumber}: ${action}${obligationNumber ? ` (${obligationNumber})` : ""}`, beforeState, afterState }));
+    if (bac) await audit(actorAudit(req, { actionType: "bac.modeDetermined", entityRef: "pr", entityId: current.id, summary: `${current.prNumber}: BAC determined procurement mode`, beforeState, afterState }));
+    return { pr: current, result, modeRecord };
+  }));
   const amount = Number(pr.totalAmount).toLocaleString();
-
-  await auditFromRequest(req, {
-    actionType:
-      action === "determineMode" ? AUDIT_ACTIONS.PR_MODE_DETERMINED : AUDIT_ACTIONS.PR_TRANSITION,
-    entityRef: "pr",
-    entityId: pr.id,
-    summary: obligationNumber
-      ? `${pr.prNumber}: appropriation certified — ${obligationNumber} obligated ₱${amount} against the ${FUND_LABELS[fundSource] ?? "fund"}`
-      : action === "certifyCash"
-        ? `${pr.prNumber}: treasury certified funds available for ₱${amount}`
-        : action === "approve"
-          ? `${pr.prNumber}: approved by the Local Chief Executive`
-          : action === "determineMode"
-            ? `${pr.prNumber}: mode determined — ${modeRecord.name} (${modeRecord.citation})`
-            : `${pr.prNumber}: ${action}`,
-    beforeState: { status: previousStatus },
-    afterState: {
-      status: result.to,
-      remarks: remarks?.trim() ?? null,
-      ...(obligationNumber ? { obligationNo: obligationNumber, fundSource } : {}),
-      // Each certification on the record, so the whole signature chain is
-      // reconstructable from the log alone.
-      ...(action === "certifyCash" ? { cashCertified: true, amountCertified: Number(pr.totalAmount) } : {}),
-      ...(action === "approve" ? { mayorApproved: true } : {}),
-      ...(action === "determineMode"
-        ? {
-            mode: modeRecord.key,
-            suggestedMode: suggestion.suggested,
-            departedFromSuggestion: modeRecord.key !== suggestion.suggested,
-            citation: modeRecord.citation,
-          }
-        : {}),
-    },
-  });
 
   if (action === "return") {
     await notifyUsers([pr.requesterId], {

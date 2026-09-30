@@ -83,9 +83,10 @@ test("CSS cannot escape the style element or fetch external resources", () => {
   }
 });
 const env = { NODE_ENV: "production", CLOUDFLARE_WORKER: "true", SESSION_SECRET: "s".repeat(64), MFA_ENCRYPTION_KEY: "m".repeat(64), FRONTEND_ORIGIN: "https://municipality.example", SMTP_HOST: "smtp.example", SMTP_USER: "test", SMTP_PASSWORD: "test" };
-test("production rejects absent keys, console mail, bad origins and volatile stores", () => {
+test("production requires strong secrets, SMTP and exact HTTPS origins for either durable runtime", () => {
   assert.doesNotThrow(() => validateProductionConfig(env));
-  for (const key of ["SESSION_SECRET", "MFA_ENCRYPTION_KEY", "FRONTEND_ORIGIN", "SMTP_PASSWORD", "CLOUDFLARE_WORKER"]) assert.throws(() => validateProductionConfig({ ...env, [key]: "" }));
+  assert.doesNotThrow(() => validateProductionConfig({ ...env, CLOUDFLARE_WORKER: "" }));
+  for (const key of ["SESSION_SECRET", "MFA_ENCRYPTION_KEY", "FRONTEND_ORIGIN", "SMTP_PASSWORD"]) assert.throws(() => validateProductionConfig({ ...env, [key]: "" }));
   assert.throws(() => validateProductionConfig({ ...env, MFA_ENCRYPTION_KEY: env.SESSION_SECRET }));
   assert.throws(() => validateProductionConfig({ ...env, FRONTEND_ORIGIN: "https://example.test/path" }));
 });
@@ -193,6 +194,11 @@ test("payment release rechecks status under a database lock", async (t) => {
     async reload(options) { assert.equal(options.transaction, transaction); assert.equal(options.lock, "UPDATE"); this.status = "released"; },
     async update() { assert.fail("A stale payment must never release again"); } };
   t.mock.method(Payment, "findByPk", async () => payment);
+  t.mock.method(Invoice, "findByPk", async (_id, options) => {
+    assert.equal(options.transaction, transaction);
+    assert.equal(options.lock, "UPDATE");
+    return { status: "certified" };
+  });
   t.mock.method(sequelize, "transaction", async (fn) => fn(transaction));
   await assert.rejects(releasePayment({ body: {}, params: { paymentId: 1 }, currentUser: { id: 3 } }, {}), { code: "WORKFLOW_CONFLICT" });
 });

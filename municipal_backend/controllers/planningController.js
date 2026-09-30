@@ -1,5 +1,4 @@
 import { Op } from "sequelize";
-import { sequelize } from "../models/db.js";
 import {
   DevelopmentPlan,
   DevelopmentGoal,
@@ -16,7 +15,9 @@ import {
   isEditable,
   AIP_TRANSITIONS,
 } from "../services/aipWorkflow.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { withAuditTransaction, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
+import { assertPlanningPermission, planningSnapshot, lockPlanningCycle, lockPlan, lockProgram, lockEntry, goalProgressError, validateGoalLink, validateImplementingUnit } from "../services/planningRecords.js";
 import { notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
 
 // ── Development planning ─────────────────────────────────────────────────────
@@ -28,6 +29,9 @@ import { notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js
 // checked against.
 
 const num = (value) => (value === null || value === undefined ? 0 : Number(value));
+const textError = (payload, fields) => fields.find((key) => payload[key] != null && typeof payload[key] !== "string");
+const nonempty = (value) => typeof value === "string" && Boolean(value.trim());
+const auditPlanning = (req, audit, actionType, entityRef, row, before, summary, extra = {}) => audit(actorAudit(req, { actionType, entityRef, entityId: row.id, summary, beforeState: before, afterState: { ...planningSnapshot(row), ...extra } }));
 
 // Every role with planning visibility reads the same development-plan record.
 // The notification is supplementary to that shared source of truth: the
@@ -128,12 +132,13 @@ export const listPlans = async (req, res) => {
 };
 
 const validatePlan = (payload) => {
-  if (!payload.title?.trim()) return "A title is required.";
+  if (!nonempty(payload.title)) return "A title is required.";
+  if (textError(payload, ["vision", "remarks"])) return "Plan vision and remarks must be text.";
 
   const start = Number(payload.startYear);
   const end = Number(payload.endYear);
   if (!Number.isInteger(start) || start < 2000 || start > 2100) return "A valid start year is required.";
-  if (!Number.isInteger(end) || end < start) return "The end year must not be earlier than the start year.";
+  if (!Number.isInteger(end) || end < start || end > 2100) return "The end year must be between the start year and 2100.";
   // A "development plan" covering a single year is an investment program by
   // another name, and one covering a decade is not a plan anybody executes.
   if (end - start + 1 > 10) return "A development plan may not span more than ten years.";
@@ -142,88 +147,38 @@ const validatePlan = (payload) => {
 };
 
 export const createPlan = async (req, res) => {
+  assertPlanningPermission(req, "planning.manageCdp");
   const error = validatePlan(req.body);
-  if (error) return res.status(400).json({ message: error });
-
-  // Older clients create an empty draft then add its goals separately. The
-  // current form collects them in the same conversation, so validate and save
-  // them with the plan. A transaction makes it impossible to leave a plan
-  // behind without the goals that the successful response says it has.
+  if (error) throw workflowError(error, 400);
   const initialGoals = normaliseInitialGoals(req.body.goals);
-  if (initialGoals.error) return res.status(400).json({ message: initialGoals.error });
-
-  const plan = await sequelize.transaction(async (transaction) => {
-    const created = await DevelopmentPlan.create(
-      {
-        title: req.body.title.trim(),
-        startYear: Number(req.body.startYear),
-        endYear: Number(req.body.endYear),
-        vision: req.body.vision?.trim() || null,
-        remarks: req.body.remarks?.trim() || null,
-        status: "draft",
-        preparedById: req.currentUser.id,
-      },
-      { transaction }
-    );
-
-    if (initialGoals.goals.length > 0) {
-      await DevelopmentGoal.bulkCreate(
-        initialGoals.goals.map((goal) => ({ ...goal, developmentPlanId: created.id })),
-        { transaction }
-      );
+  if (initialGoals.error) throw workflowError(initialGoals.error, 400);
+  const plan = await withAuditTransaction(async (transaction, audit) => {
+    const created = await DevelopmentPlan.create({ title: req.body.title.trim(), startYear: Number(req.body.startYear), endYear: Number(req.body.endYear), vision: req.body.vision?.trim() || null, remarks: req.body.remarks?.trim() || null, status: "draft", preparedById: req.currentUser.id }, { transaction });
+    await auditPlanning(req, audit, AUDIT_ACTIONS.CDP_RECORDED, "developmentPlan", created, null, "Development plan created as a draft.");
+    for (const values of initialGoals.goals) {
+      const goal = await DevelopmentGoal.create({ ...values, developmentPlanId: created.id }, { transaction });
+      await auditPlanning(req, audit, "planning.goal.created", "developmentGoal", goal, null, "Development goal created with the draft plan.");
     }
-
     return created;
   });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.CDP_RECORDED,
-    entityRef: "developmentPlan",
-    entityId: plan.id,
-    summary: `${plan.title} (${plan.startYear}–${plan.endYear})`,
-    afterState: {
-      status: plan.status,
-      startYear: plan.startYear,
-      endYear: plan.endYear,
-      goals: initialGoals.goals.length,
-    },
-  });
-
-  await notifyPlanningViewers(plan, {
-    title: "New development plan recorded",
-    body: `${plan.title} is available for planning review.`,
-  });
-
+  await notifyPlanningViewers(plan, { title: "New development plan recorded", body: `${plan.title} is available for planning review.` });
   res.status(201).json(serializePlan(await DevelopmentPlan.findByPk(plan.id, planIncludes)));
 };
 
 export const updatePlan = async (req, res) => {
-  const plan = await DevelopmentPlan.findByPk(req.params.id, planIncludes);
-  if (!plan) return res.status(404).json({ message: "Development plan not found." });
-
-  if (plan.status !== "draft") {
-    return res.status(409).json({
-      message: `This plan is "${plan.status}" and can no longer be edited. Supersede it with a new plan instead.`,
-    });
-  }
-
-  const merged = { ...serializePlan(plan), ...req.body };
-  const error = validatePlan(merged);
-  if (error) return res.status(400).json({ message: error });
-
-  await plan.update({
-    title: merged.title.trim(),
-    startYear: Number(merged.startYear),
-    endYear: Number(merged.endYear),
-    vision: merged.vision?.trim() || null,
-    remarks: merged.remarks?.trim() || null,
+  assertPlanningPermission(req, "planning.manageCdp");
+  if (Object.hasOwn(req.body, "status") || Object.hasOwn(req.body, "goals")) throw workflowError("Use the plan adoption or goal actions to change workflow records.", 400);
+  const plan = await withAuditTransaction(async (transaction, audit) => {
+    const row = await lockPlan(req.params.id, transaction);
+    if (row.status !== "draft") throw workflowError(`This plan is "${row.status}" and can no longer be edited. Supersede it with a new plan instead.`);
+    const before = planningSnapshot(row), merged = { ...before, ...req.body };
+    const error = validatePlan(merged);
+    if (error) throw workflowError(error, 400);
+    await row.update({ title: merged.title.trim(), startYear: Number(merged.startYear), endYear: Number(merged.endYear), vision: merged.vision?.trim() || null, remarks: merged.remarks?.trim() || null }, { transaction });
+    if (row.changed() || JSON.stringify(before) !== JSON.stringify(planningSnapshot(row))) await auditPlanning(req, audit, "planning.cdp.updated", "developmentPlan", row, before, "Draft development plan updated.");
+    return row;
   });
-
-  await notifyPlanningViewers(plan, {
-    title: "Development plan updated",
-    body: `${plan.title} was updated and is available for review.`,
-  });
-
+  await notifyPlanningViewers(plan, { title: "Development plan updated", body: `${plan.title} was updated and is available for review.` });
   res.json(serializePlan(await DevelopmentPlan.findByPk(plan.id, planIncludes)));
 };
 
@@ -232,51 +187,27 @@ export const updatePlan = async (req, res) => {
 // simultaneously adopted plans covering the same year would give a budget line
 // two different authorities to trace to.
 export const adoptPlan = async (req, res) => {
-  const plan = await DevelopmentPlan.findByPk(req.params.id, planIncludes);
-  if (!plan) return res.status(404).json({ message: "Development plan not found." });
-
-  if (plan.status !== "draft") {
-    return res.status(409).json({ message: `This plan is already "${plan.status}".` });
-  }
-  if (!req.body.resolutionNo?.trim()) {
-    return res.status(400).json({ message: "The adopting resolution number is required." });
-  }
-  if ((plan.goals ?? []).length === 0) {
-    return res.status(409).json({ message: "A plan with no goals cannot be adopted." });
-  }
-
-  await DevelopmentPlan.update(
-    { status: "superseded" },
-    {
-      where: {
-        id: { [Op.ne]: plan.id },
-        status: "adopted",
-        startYear: { [Op.lte]: plan.endYear },
-        endYear: { [Op.gte]: plan.startYear },
-      },
+  assertPlanningPermission(req, "planning.adoptAip");
+  if (!nonempty(req.body.resolutionNo)) throw workflowError("The adopting resolution number is required.", 400);
+  const adoptedAt = req.body.adoptedAt ?? new Date().toISOString().slice(0, 10);
+  if (typeof adoptedAt !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(adoptedAt) || !Number.isFinite(new Date(adoptedAt).getTime()) || new Date(adoptedAt).toISOString().slice(0, 10) !== adoptedAt) throw workflowError("Enter a valid adoption date.", 400);
+  const plan = await withAuditTransaction(async (transaction, audit) => {
+    await lockPlanningCycle(transaction);
+    const row = await lockPlan(req.params.id, transaction);
+    if (row.status !== "draft") throw workflowError(`This plan is already "${row.status}".`);
+    if (!await DevelopmentGoal.count({ where: { developmentPlanId: row.id, status: "active" }, transaction })) throw workflowError("A plan with no active goals cannot be adopted.");
+    const previous = await DevelopmentPlan.findAll({ where: { id: { [Op.ne]: row.id }, status: "adopted", startYear: { [Op.lte]: row.endYear }, endYear: { [Op.gte]: row.startYear } }, order: [["id", "ASC"]], transaction, lock: transaction.LOCK.UPDATE });
+    for (const prior of previous) {
+      const before = planningSnapshot(prior);
+      await prior.update({ status: "superseded" }, { transaction });
+      await auditPlanning(req, audit, "planning.cdp.superseded", "developmentPlan", prior, before, `Development plan superseded by adoption of ${row.title}.`, { supersededByPlanId: row.id, adoptingResolutionNo: req.body.resolutionNo.trim() });
     }
-  );
-
-  await plan.update({
-    status: "adopted",
-    resolutionNo: req.body.resolutionNo.trim(),
-    adoptedAt: req.body.adoptedAt ?? new Date().toISOString().slice(0, 10),
+    const before = planningSnapshot(row);
+    await row.update({ status: "adopted", resolutionNo: req.body.resolutionNo.trim(), adoptedAt }, { transaction });
+    await auditPlanning(req, audit, AUDIT_ACTIONS.CDP_ADOPTED, "developmentPlan", row, before, "Development plan adoption recorded.", { supersededPlanIds: previous.map((prior) => prior.id) });
+    return row;
   });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.CDP_ADOPTED,
-    entityRef: "developmentPlan",
-    entityId: plan.id,
-    summary: `${plan.title} adopted under ${plan.resolutionNo}`,
-    afterState: { status: "adopted", resolutionNo: plan.resolutionNo, goals: plan.goals.length },
-  });
-
-  await notifyPlanningViewers(plan, {
-    type: NOTIFICATION_EVENTS.CDP_APPROVED,
-    title: "Development plan approval recorded",
-    body: `${plan.title} was recorded under Resolution No. ${plan.resolutionNo}.`,
-  });
-
+  await notifyPlanningViewers(plan, { type: NOTIFICATION_EVENTS.CDP_APPROVED, title: "Development plan approval recorded", body: `${plan.title} was recorded under Resolution No. ${plan.resolutionNo}.` });
   res.json(serializePlan(await DevelopmentPlan.findByPk(plan.id, planIncludes)));
 };
 
@@ -314,55 +245,43 @@ const normaliseInitialGoals = (payload) => {
 };
 
 export const createGoal = async (req, res) => {
-  const plan = await DevelopmentPlan.findByPk(req.params.id);
-  if (!plan) return res.status(404).json({ message: "Development plan not found." });
-  if (plan.status === "superseded") {
-    return res.status(409).json({ message: "A superseded plan cannot take new goals." });
-  }
-
+  assertPlanningPermission(req, "planning.manageCdp");
   const error = validateGoal(req.body);
-  if (error) return res.status(400).json({ message: error });
-
-  const goal = await DevelopmentGoal.create({
-    developmentPlanId: plan.id,
-    sector: req.body.sector,
-    subsector: req.body.subsector?.trim() || null,
-    title: req.body.title.trim(),
-    description: req.body.description?.trim() || null,
+  if (error) throw workflowError(error, 400);
+  const result = await withAuditTransaction(async (transaction, audit) => {
+    const plan = await lockPlan(req.params.id, transaction);
+    if (plan.status !== "draft") throw workflowError("Goals may be added only to a draft development plan. An adopted or superseded plan's approved content is retained.");
+    const goal = await DevelopmentGoal.create({ developmentPlanId: plan.id, sector: req.body.sector, subsector: req.body.subsector?.trim() || null, title: req.body.title.trim(), description: req.body.description?.trim() || null }, { transaction });
+    await auditPlanning(req, audit, "planning.goal.created", "developmentGoal", goal, null, "Development goal added to the draft plan.");
+    return { plan, goal };
   });
-
-  await notifyPlanningViewers(plan, {
-    title: "Development plan goal added",
-    body: `A goal was added to ${plan.title}.`,
-  });
-
-  res.status(201).json(serializeGoal(goal));
+  await notifyPlanningViewers(result.plan, { title: "Development plan goal added", body: `A goal was added to ${result.plan.title}.` });
+  res.status(201).json(serializeGoal(result.goal));
 };
 
 export const updateGoal = async (req, res) => {
-  const goal = await DevelopmentGoal.findByPk(req.params.goalId, {
-    include: [{ model: DevelopmentPlan, as: "plan" }],
+  assertPlanningPermission(req, "planning.manageCdp");
+  if (textError(req.body, ["progressRemarks", "remarks"])) throw workflowError("Goal progress remarks must be text.", 400);
+  const result = await withAuditTransaction(async (transaction, audit) => {
+    const found = await DevelopmentGoal.findByPk(req.params.goalId, { attributes: ["id", "developmentPlanId"], transaction });
+    if (!found) throw workflowError("Goal not found.", 404);
+    const plan = await lockPlan(found.developmentPlanId, transaction);
+    const goal = await DevelopmentGoal.findByPk(found.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (plan.status === "superseded") throw workflowError("A superseded plan's goals are retained as historical records.");
+    if (["isMayorPriority", "priorityRank", "priorityFiscalYear", "developmentPlanId"].some((key) => Object.hasOwn(req.body, key))) throw workflowError("Use the Mayor's priority action to change priority records; a goal cannot be moved to another plan.", 400);
+    const before = planningSnapshot(goal), merged = { ...before, ...req.body };
+    if (plan.status === "draft" && merged.status === "achieved") throw workflowError("Adopt the development plan before recording a goal as achieved.");
+    const error = validateGoal(merged) || goalProgressError({ currentStatus: goal.status, nextStatus: merged.status, reason: req.body.progressRemarks ?? req.body.remarks });
+    if (error) throw workflowError(error, 400);
+    if (plan.status === "adopted" && ["sector", "subsector", "title", "description"].some((key) => Object.hasOwn(req.body, key) && (req.body[key] ?? null) !== (before[key] ?? null))) throw workflowError("An adopted goal's approved content cannot be rewritten. Record its progress status with a reason instead.");
+    await goal.update({ sector: merged.sector, subsector: merged.subsector?.trim() || null, title: merged.title.trim(), description: merged.description?.trim() || null, status: merged.status }, { transaction });
+    const progressRemarks = (req.body.progressRemarks ?? req.body.remarks)?.trim() || null;
+    const progress = before.status !== goal.status || Boolean(progressRemarks);
+    if (progress || JSON.stringify(before) !== JSON.stringify(planningSnapshot(goal))) await auditPlanning(req, audit, progress ? "planning.goal.progressUpdated" : "planning.goal.updated", "developmentGoal", goal, before, progress ? "Development goal progress recorded." : "Development goal updated.", { progressRemarks });
+    return { plan, goal };
   });
-  if (!goal) return res.status(404).json({ message: "Goal not found." });
-
-  const merged = { ...serializeGoal(goal), ...req.body };
-  const error = validateGoal(merged);
-  if (error) return res.status(400).json({ message: error });
-
-  await goal.update({
-    sector: merged.sector,
-    subsector: merged.subsector?.trim() || null,
-    title: merged.title.trim(),
-    description: merged.description?.trim() || null,
-    status: ["active", "achieved", "dropped"].includes(merged.status) ? merged.status : goal.status,
-  });
-
-  await notifyPlanningViewers(goal.plan, {
-    title: "Development plan goal updated",
-    body: `A goal in ${goal.plan.title} was updated.`,
-  });
-
-  res.json(serializeGoal(goal));
+  await notifyPlanningViewers(result.plan, { title: "Development plan goal updated", body: `A goal in ${result.plan.title} was updated.` });
+  res.json(serializeGoal(result.goal));
 };
 
 // ── The Mayor's priorities (step 2) ──────────────────────────────────────────
@@ -371,89 +290,34 @@ export const updateGoal = async (req, res) => {
 // goals hold rank 1 — which is the kind of quiet inconsistency that makes a
 // "top three priorities" report untrustworthy.
 export const setPriorities = async (req, res) => {
+  assertPlanningPermission(req, "planning.setPriorities");
   const fiscalYear = Number(req.body.fiscalYear);
-  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) {
-    return res.status(400).json({ message: "A valid fiscal year is required." });
-  }
-
-  const goalIds = Array.isArray(req.body.goalIds) ? req.body.goalIds.map(Number).filter(Boolean) : [];
-  if (goalIds.length === 0) {
-    return res.status(400).json({ message: "Select at least one goal to prioritise." });
-  }
-  if (new Set(goalIds).size !== goalIds.length) {
-    return res.status(400).json({ message: "The same goal appears more than once in the priority list." });
-  }
-
-  const goals = await DevelopmentGoal.findAll({
-    where: { id: { [Op.in]: goalIds } },
-    include: [{ model: DevelopmentPlan, as: "plan" }],
+  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) throw workflowError("A valid fiscal year is required.", 400);
+  const goalIds = Array.isArray(req.body.goalIds) ? req.body.goalIds.map(Number) : [];
+  if (!goalIds.length || goalIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) throw workflowError("Select at least one valid goal to prioritise.", 400);
+  if (new Set(goalIds).size !== goalIds.length) throw workflowError("The same goal appears more than once in the priority list.", 400);
+  const planId = await withAuditTransaction(async (transaction, audit) => {
+    await lockPlanningCycle(transaction);
+    const goals = await DevelopmentGoal.findAll({ where: { id: { [Op.in]: goalIds } }, transaction, lock: transaction.LOCK.UPDATE });
+    if (goals.length !== goalIds.length) throw workflowError("One or more selected goals does not exist.", 400);
+    for (const goal of goals) {
+      const plan = await lockPlan(goal.developmentPlanId, transaction);
+      if (plan.status !== "adopted" || plan.startYear > fiscalYear || plan.endYear < fiscalYear || goal.status !== "active") throw workflowError("Priorities must be active goals from an adopted development plan that covers the selected fiscal year.");
+    }
+    const previous = await DevelopmentGoal.findAll({ where: { priorityFiscalYear: fiscalYear }, order: [["priorityRank", "ASC"]], transaction, lock: transaction.LOCK.UPDATE });
+    if (previous.length === goalIds.length && previous.every((goal, index) => goal.id === goalIds[index] && goal.isMayorPriority && goal.priorityRank === index + 1)) return goals[0].developmentPlanId;
+    const affected = new Map([...previous, ...goals].map((goal) => [goal.id, goal]));
+    const before = [...affected.values()].map(planningSnapshot);
+    for (const goal of affected.values()) {
+      const prior = planningSnapshot(goal), index = goalIds.indexOf(goal.id);
+      await goal.update(index < 0 ? { isMayorPriority: false, priorityRank: null, priorityFiscalYear: null, prioritisedAt: null, prioritisedById: null } : { isMayorPriority: true, priorityRank: index + 1, priorityFiscalYear: fiscalYear, prioritisedAt: new Date(), prioritisedById: req.currentUser.id }, { transaction });
+      await auditPlanning(req, audit, "planning.goal.priorityChanged", "developmentGoal", goal, prior, index < 0 ? "Goal removed from the fiscal year's priority list." : "Mayor's priority and rank recorded.", { fiscalYear });
+    }
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.PRIORITIES_SET, entityRef: "developmentPlan", entityId: goals[0].developmentPlanId, summary: `Mayor's priorities set for FY ${fiscalYear}.`, beforeState: { fiscalYear, goals: before }, afterState: { fiscalYear, goals: [...affected.values()].map(planningSnapshot), goalIds } }));
+    return goals[0].developmentPlanId;
   });
-  if (goals.length !== goalIds.length) {
-    return res.status(400).json({ message: "One or more of those goals does not exist." });
-  }
-
-  // Priorities are set against an adopted plan. Prioritising goals in a draft
-  // would let the executive commit the year to objectives the Sanggunian has
-  // not adopted.
-  const notAdopted = goals.find((goal) => goal.plan?.status !== "adopted");
-  if (notAdopted) {
-    return res.status(409).json({
-      message: `"${notAdopted.title}" belongs to a plan that has not been adopted. Priorities are set against an adopted development plan.`,
-    });
-  }
-
-  // Clear the previous year's set first, so re-running this is a replacement
-  // rather than an accumulation.
-  await DevelopmentGoal.update(
-    { isMayorPriority: false, priorityRank: null, priorityFiscalYear: null },
-    { where: { priorityFiscalYear: fiscalYear } }
-  );
-
-  for (const [index, goalId] of goalIds.entries()) {
-    await DevelopmentGoal.update(
-      {
-        isMayorPriority: true,
-        priorityRank: index + 1,
-        priorityFiscalYear: fiscalYear,
-        prioritisedAt: new Date(),
-        prioritisedById: req.currentUser.id,
-      },
-      { where: { id: goalId } }
-    );
-  }
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.PRIORITIES_SET,
-    entityRef: "developmentPlan",
-    entityId: goals[0].developmentPlanId,
-    summary: `${goalIds.length} priority goal(s) set for FY ${fiscalYear}`,
-    afterState: {
-      fiscalYear,
-      priorities: goalIds.map((id, index) => ({
-        rank: index + 1,
-        title: goals.find((goal) => goal.id === id)?.title ?? null,
-      })),
-    },
-  });
-
-  // The Planning Office builds the investment program from these, so it is told
-  // rather than left to check.
-  await notifyByPermission("planning.manageAip", {
-    type: NOTIFICATION_EVENTS.AIP_STATUS,
-    title: `Mayor's priorities set for FY ${fiscalYear}`,
-    body: `${goalIds.length} goal(s) prioritised. The investment program can now be prepared against them.`,
-    link: "/planning/investment-program",
-    refEntity: "developmentPlan",
-    refId: goals[0].developmentPlanId,
-    severity: "info",
-  });
-
-  const refreshed = await DevelopmentGoal.findAll({
-    where: { priorityFiscalYear: fiscalYear },
-    include: [{ model: User, as: "prioritisedBy", attributes: ["id", "name"] }],
-    order: [["priorityRank", "ASC"]],
-  });
-
+  await notifyByPermission("planning.manageAip", { type: NOTIFICATION_EVENTS.AIP_STATUS, title: `Mayor's priorities set for FY ${fiscalYear}`, body: `${goalIds.length} goal(s) prioritised. The investment program can now be prepared against them.`, link: "/planning/investment-program", refEntity: "developmentPlan", refId: planId, severity: "info" });
+  const refreshed = await DevelopmentGoal.findAll({ where: { priorityFiscalYear: fiscalYear }, include: [{ model: User, as: "prioritisedBy", attributes: ["id", "name"] }], order: [["priorityRank", "ASC"]] });
   res.json(refreshed.map(serializeGoal));
 };
 
@@ -538,48 +402,43 @@ export const listPrograms = async (req, res) => {
 };
 
 export const createProgram = async (req, res) => {
+  assertPlanningPermission(req, "planning.manageAip");
   const fiscalYear = Number(req.body.fiscalYear);
-  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) {
-    return res.status(400).json({ message: "A valid fiscal year is required." });
-  }
-
-  const existing = await InvestmentProgram.findOne({ where: { fiscalYear } });
-  if (existing) {
-    return res.status(409).json({ message: `An investment program for ${fiscalYear} already exists.` });
-  }
-
-  // The AIP is the year's slice of a development plan; without one there is
-  // nothing for its projects to pursue.
-  const plan = await DevelopmentPlan.findOne({
-    where: {
-      status: "adopted",
-      startYear: { [Op.lte]: fiscalYear },
-      endYear: { [Op.gte]: fiscalYear },
-    },
+  if (!Number.isInteger(fiscalYear) || fiscalYear < 2000 || fiscalYear > 2100) throw workflowError("A valid fiscal year is required.", 400);
+  if (textError(req.body, ["title", "remarks"])) throw workflowError("The investment program title and remarks must be text.", 400);
+  const program = await withAuditTransaction(async (transaction, audit) => {
+    await lockPlanningCycle(transaction);
+    if (await InvestmentProgram.findOne({ where: { fiscalYear }, transaction, lock: transaction.LOCK.UPDATE })) throw workflowError(`An investment program for ${fiscalYear} already exists.`);
+    const plan = await DevelopmentPlan.findOne({ where: { status: "adopted", startYear: { [Op.lte]: fiscalYear }, endYear: { [Op.gte]: fiscalYear } }, transaction, lock: transaction.LOCK.UPDATE });
+    if (!plan) throw workflowError(`No adopted development plan covers ${fiscalYear}. Adopt one before preparing the investment program.`);
+    const row = await InvestmentProgram.create({ fiscalYear, title: req.body.title?.trim() || `Annual Investment Program ${fiscalYear}`, developmentPlanId: plan.id, remarks: req.body.remarks?.trim() || null, preparedById: req.currentUser.id, status: "draft" }, { transaction });
+    await auditPlanning(req, audit, "planning.aip.created", "investmentProgram", row, null, "Annual Investment Program created as a draft.");
+    return row;
   });
-  if (!plan) {
-    return res.status(409).json({
-      message: `No adopted development plan covers ${fiscalYear}. Adopt one before preparing the investment program.`,
-    });
-  }
-
-  const program = await InvestmentProgram.create({
-    fiscalYear,
-    title: req.body.title?.trim() || `Annual Investment Program ${fiscalYear}`,
-    developmentPlanId: plan.id,
-    remarks: req.body.remarks?.trim() || null,
-    preparedById: req.currentUser.id,
-    status: "draft",
-  });
-
   res.status(201).json(serializeProgram(await InvestmentProgram.findByPk(program.id, aipIncludes)));
 };
 
+export const updateProgram = async (req, res) => {
+  assertPlanningPermission(req, "planning.manageAip");
+  if (Object.keys(req.body).some((key) => !["title", "remarks"].includes(key))) throw workflowError("Only the draft program title and remarks may be edited. Use the workflow actions to change status.", 400);
+  const program = await withAuditTransaction(async (transaction, audit) => {
+    const { program: row } = await lockProgram(req.params.id, transaction);
+    if (!isEditable(row.status)) throw workflowError("The investment program must be a draft or returned for correction before its header can be edited.");
+    const before = planningSnapshot(row), values = { title: req.body.title ?? row.title, remarks: Object.hasOwn(req.body, "remarks") ? req.body.remarks : row.remarks };
+    if (!nonempty(values.title) || textError(values, ["remarks"])) throw workflowError("Enter a program title and text remarks.", 400);
+    await row.update({ title: values.title.trim(), remarks: values.remarks?.trim() || null }, { transaction });
+    if (JSON.stringify(before) !== JSON.stringify(planningSnapshot(row))) await auditPlanning(req, audit, "planning.aip.updated", "investmentProgram", row, before, "Draft Annual Investment Program header updated.");
+    return row;
+  });
+  res.json(serializeProgram(await InvestmentProgram.findByPk(program.id, aipIncludes)));
+};
+
 const validateAipEntry = (payload) => {
-  if (!payload.title?.trim()) return "A project title is required.";
+  if (!nonempty(payload.title)) return "A project title is required.";
+  if (textError(payload, ["reference", "description", "expectedOutput", "papCode", "remarks"])) return "Project descriptions, references and remarks must be text.";
 
   const cost = Number(payload.estimatedCost);
-  if (!Number.isFinite(cost) || cost <= 0) return "The estimated cost must be greater than 0.";
+  if (typeof payload.estimatedCost === "boolean" || !Number.isFinite(cost) || cost <= 0 || cost > 9999999999999.99) return "The estimated cost must be a positive amount within the supported limit.";
 
   if (payload.expenseClass && !EXPENSE_CLASSES.includes(payload.expenseClass)) {
     return "Unknown expense class.";
@@ -587,6 +446,7 @@ const validateAipEntry = (payload) => {
   if (payload.fund && !FUNDS.includes(payload.fund)) return "Unknown fund.";
 
   const quarters = ["Q1", "Q2", "Q3", "Q4"];
+  if ([payload.startQuarter, payload.endQuarter].some((value) => value != null && !quarters.includes(value))) return "Choose a valid start and end quarter (Q1 to Q4).";
   if (payload.startQuarter && payload.endQuarter) {
     if (quarters.indexOf(payload.endQuarter) < quarters.indexOf(payload.startQuarter)) {
       return "The end quarter cannot fall before the start quarter.";
@@ -596,210 +456,98 @@ const validateAipEntry = (payload) => {
 };
 
 export const createAipEntry = async (req, res) => {
-  const program = await InvestmentProgram.findByPk(req.params.id);
-  if (!program) return res.status(404).json({ message: "Investment program not found." });
-  if (!isEditable(program.status)) {
-    return res.status(409).json({
-      message: `This investment program is "${program.status}" and can no longer take new entries.`,
-    });
-  }
-
+  assertPlanningPermission(req, "planning.manageAip");
   const error = validateAipEntry(req.body);
-  if (error) return res.status(400).json({ message: error });
-
-  // The traceability rule the whole module exists for: a project has to pursue
-  // a goal, and that goal has to belong to the plan this program implements.
-  // The id is checked for being a number before the lookup — `findByPk(NaN)`
-  // reaches the database and comes back as a 500, which reads to the user as a
-  // system fault rather than a missing field.
-  const goalId = Number(req.body.developmentGoalId);
-  if (!Number.isInteger(goalId) || goalId <= 0) {
-    return res.status(400).json({ message: "Select the development goal this project pursues." });
-  }
-
-  const goal = await DevelopmentGoal.findByPk(goalId);
-  if (!goal) {
-    return res.status(400).json({ message: "That development goal does not exist." });
-  }
-  if (goal.developmentPlanId !== program.developmentPlanId) {
-    return res.status(400).json({
-      message: "That goal belongs to a different development plan from the one this program implements.",
-    });
-  }
-
-  if (req.body.implementingUnitId) {
-    const department = await Department.findByPk(Number(req.body.implementingUnitId));
-    if (!department) return res.status(400).json({ message: "That implementing office does not exist." });
-  }
-
-  const entry = await AipEntry.create({
-    investmentProgramId: program.id,
-    developmentGoalId: goal.id,
-    reference: req.body.reference?.trim() || null,
-    title: req.body.title.trim(),
-    description: req.body.description?.trim() || null,
-    expectedOutput: req.body.expectedOutput?.trim() || null,
-    expenseClass: req.body.expenseClass ?? "mooe",
-    fund: req.body.fund ?? "generalFund",
-    papCode: req.body.papCode?.trim() || null,
-    estimatedCost: Number(req.body.estimatedCost),
-    startQuarter: req.body.startQuarter ?? "Q1",
-    endQuarter: req.body.endQuarter ?? "Q4",
-    implementingUnitId: req.body.implementingUnitId ? Number(req.body.implementingUnitId) : null,
-    remarks: req.body.remarks?.trim() || null,
+  if (error) throw workflowError(error, 400);
+  if (req.body.status != null && req.body.status !== "planned") throw workflowError("A new investment project starts as Planned.", 400);
+  const entry = await withAuditTransaction(async (transaction, audit) => {
+    const { program } = await lockProgram(req.params.id, transaction);
+    if (!isEditable(program.status)) throw workflowError(`This investment program is "${program.status}" and cannot take new entries.`);
+    const goal = await validateGoalLink(req.body.developmentGoalId, program, { transaction });
+    const implementingUnitId = await validateImplementingUnit(req.body.implementingUnitId, { transaction });
+    const reference = req.body.reference?.trim() || null;
+    if (reference && await AipEntry.findOne({ where: { investmentProgramId: program.id, reference }, transaction })) throw workflowError("That project reference already exists in this investment program.");
+    const row = await AipEntry.create({ investmentProgramId: program.id, developmentGoalId: goal.id, reference, title: req.body.title.trim(), description: req.body.description?.trim() || null, expectedOutput: req.body.expectedOutput?.trim() || null, expenseClass: req.body.expenseClass ?? "mooe", fund: req.body.fund ?? "generalFund", papCode: req.body.papCode?.trim() || null, estimatedCost: Number(req.body.estimatedCost), startQuarter: req.body.startQuarter ?? "Q1", endQuarter: req.body.endQuarter ?? "Q4", implementingUnitId, remarks: req.body.remarks?.trim() || null }, { transaction });
+    await auditPlanning(req, audit, "planning.aipEntry.created", "aipEntry", row, null, "Investment project added to the draft Annual Investment Program.", { fiscalYear: program.fiscalYear });
+    return row;
   });
-
-  res.status(201).json(
-    serializeAipEntry(
-      await AipEntry.findByPk(entry.id, {
-        include: [
-          { model: DevelopmentGoal, as: "goal" },
-          { model: Department, as: "implementingUnit" },
-        ],
-      })
-    )
-  );
+  res.status(201).json(serializeAipEntry(await AipEntry.findByPk(entry.id, { include: [{ model: DevelopmentGoal, as: "goal" }, { model: Department, as: "implementingUnit" }] })));
 };
 
 export const updateAipEntry = async (req, res) => {
-  const entry = await AipEntry.findByPk(req.params.entryId, {
-    include: [
-      { model: InvestmentProgram, as: "program" },
-      { model: DevelopmentGoal, as: "goal" },
-      { model: Department, as: "implementingUnit" },
-    ],
+  assertPlanningPermission(req, "planning.manageAip");
+  const entry = await withAuditTransaction(async (transaction, audit) => {
+    const { entry: row, program } = await lockEntry(req.params.entryId, transaction);
+    const adopted = program.status === "adopted";
+    if (!adopted && !isEditable(program.status)) throw workflowError("This investment program is under review. Return it to the Planning Office before changing its projects.");
+    if (adopted && Object.keys(req.body).some((key) => !["status", "remarks"].includes(key))) throw workflowError("An adopted entry may only be dropped or annotated; its approved cost and content are locked.");
+    if (Object.hasOwn(req.body, "investmentProgramId")) throw workflowError("An investment project cannot be moved to another program.", 400);
+    const before = planningSnapshot(row), merged = { ...before, ...req.body };
+    if (!["planned", "dropped"].includes(merged.status)) throw workflowError("Choose Planned or Dropped for the investment project.", 400);
+    if (merged.status !== row.status && !nonempty(req.body.remarks)) throw workflowError("Record the reason for changing the investment project's status.", 400);
+    if (adopted && row.status === "dropped" && merged.status === "planned") throw workflowError("A dropped adopted project cannot be silently reinstated. Record it through an authorized reprogramming process.");
+    if (textError(merged, ["remarks"])) throw workflowError("Project remarks must be text.", 400);
+    const values = { status: merged.status, remarks: merged.remarks?.trim() || null };
+    if (!adopted) {
+      const error = validateAipEntry(merged);
+      if (error) throw workflowError(error, 400);
+      const goal = await validateGoalLink(merged.developmentGoalId, program, { transaction, allowInactive: merged.status === "dropped" });
+      const implementingUnitId = await validateImplementingUnit(merged.implementingUnitId, { transaction });
+      const reference = merged.reference?.trim() || null;
+      if (reference && await AipEntry.findOne({ where: { investmentProgramId: program.id, reference, id: { [Op.ne]: row.id } }, transaction })) throw workflowError("That project reference already exists in this investment program.");
+      Object.assign(values, { developmentGoalId: goal.id, reference, title: merged.title.trim(), description: merged.description?.trim() || null, expectedOutput: merged.expectedOutput?.trim() || null, expenseClass: merged.expenseClass, fund: merged.fund, papCode: merged.papCode?.trim() || null, estimatedCost: Number(merged.estimatedCost), startQuarter: merged.startQuarter, endQuarter: merged.endQuarter, implementingUnitId });
+    }
+    await row.update(values, { transaction });
+    if (JSON.stringify(before) !== JSON.stringify(planningSnapshot(row))) await auditPlanning(req, audit, before.status !== row.status ? "planning.aipEntry.statusChanged" : "planning.aipEntry.updated", "aipEntry", row, before, before.status !== row.status ? "Investment project status changed with a recorded reason." : "Investment project updated.", { fiscalYear: program.fiscalYear, programStatus: program.status });
+    return row;
   });
-  if (!entry) return res.status(404).json({ message: "Investment program entry not found." });
-
-  // Dropping a project after adoption is legitimate and has to stay possible —
-  // that is what a supplemental or a re-programming does. Rewriting its cost
-  // after adoption is not, because the budget was built on the old figure.
-  const adopted = entry.program?.status === "adopted";
-  if (adopted && Object.keys(req.body).some((key) => key !== "status" && key !== "remarks")) {
-    return res.status(409).json({
-      message:
-        "This program has been adopted. An adopted entry may only be dropped or annotated, not re-costed.",
-    });
-  }
-
-  const merged = { ...serializeAipEntry(entry), ...req.body };
-  if (!adopted) {
-    const error = validateAipEntry(merged);
-    if (error) return res.status(400).json({ message: error });
-  }
-
-  await entry.update({
-    ...(adopted
-      ? {}
-      : {
-          reference: merged.reference?.trim() || null,
-          title: merged.title.trim(),
-          description: merged.description?.trim() || null,
-          expectedOutput: merged.expectedOutput?.trim() || null,
-          expenseClass: merged.expenseClass,
-          fund: merged.fund,
-          papCode: merged.papCode?.trim() || null,
-          estimatedCost: Number(merged.estimatedCost),
-          startQuarter: merged.startQuarter,
-          endQuarter: merged.endQuarter,
-          implementingUnitId: merged.implementingUnitId ? Number(merged.implementingUnitId) : null,
-        }),
-    status: ["planned", "dropped"].includes(merged.status) ? merged.status : entry.status,
-    remarks: merged.remarks?.trim() || null,
-  });
-
-  res.json(
-    serializeAipEntry(
-      await AipEntry.findByPk(entry.id, {
-        include: [
-          { model: DevelopmentGoal, as: "goal" },
-          { model: Department, as: "implementingUnit" },
-        ],
-      })
-    )
-  );
+  res.json(serializeAipEntry(await AipEntry.findByPk(entry.id, { include: [{ model: DevelopmentGoal, as: "goal" }, { model: Department, as: "implementingUnit" }] })));
 };
 
 export const deleteAipEntry = async (req, res) => {
-  const entry = await AipEntry.findByPk(req.params.entryId, {
-    include: [{ model: InvestmentProgram, as: "program" }],
+  assertPlanningPermission(req, "planning.manageAip");
+  await withAuditTransaction(async (transaction, audit) => {
+    const { entry, program } = await lockEntry(req.params.entryId, transaction);
+    if (!isEditable(program.status)) throw workflowError("This program is no longer a draft. Drop the entry instead of deleting it, so the record survives.");
+    const before = planningSnapshot(entry);
+    try { await entry.destroy({ transaction }); } catch (error) { if (error.name === "SequelizeForeignKeyConstraintError") throw workflowError("This investment project is linked to other records. Drop it instead of deleting it."); throw error; }
+    await audit(actorAudit(req, { actionType: "planning.aipEntry.deleted", entityRef: "aipEntry", entityId: entry.id, summary: "Draft investment project deleted; its full previous record remains in the audit history.", beforeState: before, afterState: { deleted: true, deletedAt: new Date(), investmentProgramId: program.id, fiscalYear: program.fiscalYear } }));
   });
-  if (!entry) return res.status(404).json({ message: "Investment program entry not found." });
-
-  if (!isEditable(entry.program?.status)) {
-    return res.status(409).json({
-      message: "This program is no longer a draft. Drop the entry instead of deleting it, so the record survives.",
-    });
-  }
-
-  await entry.destroy();
   res.json({ deleted: true });
 };
 
 export const transitionProgram = async (req, res) => {
   const { action, remarks } = req.body;
-  const program = await InvestmentProgram.findByPk(req.params.id, aipIncludes);
-  if (!program) return res.status(404).json({ message: "Investment program not found." });
-
-  const requiredPermission = permissionForTransition(action, program.status);
-  if (!requiredPermission || !req.permissions.has(requiredPermission)) {
-    return res.status(403).json({ message: "You do not have permission to perform this action." });
-  }
-
-  const result = evaluateTransition({ action, currentStatus: program.status, remarks });
-  if (!result.ok) return res.status(409).json({ message: result.message });
-
-  const previousStatus = program.status;
-
-  if (action === "submit" && (program.entries ?? []).filter((e) => e.status === "planned").length === 0) {
-    return res.status(409).json({ message: "An investment program with no live projects cannot be submitted." });
-  }
-
-  if (action === "adopt" && !req.body.resolutionNo?.trim()) {
-    return res.status(400).json({ message: "The adopting resolution number is required." });
-  }
-
-  const changes = { status: result.to };
-  if (action === "return") changes.returnRemarks = remarks.trim();
-  if (action === "submit") changes.returnRemarks = null;
-  if (action === "endorse") {
-    changes.endorsedAt = new Date();
-    changes.endorsedById = req.currentUser.id;
-  }
-  if (action === "adopt") {
-    changes.adoptedAt = new Date();
-    changes.resolutionNo = req.body.resolutionNo.trim();
-  }
-
-  await program.update(changes);
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.AIP_TRANSITION,
-    entityRef: "investmentProgram",
-    entityId: program.id,
-    summary: `AIP ${program.fiscalYear}: ${action}`,
-    beforeState: { status: previousStatus },
-    afterState: {
-      status: result.to,
-      remarks: remarks?.trim() ?? null,
-      ...(action === "adopt" ? { resolutionNo: changes.resolutionNo } : {}),
-    },
+  const program = await withAuditTransaction(async (transaction, audit) => {
+    const { program: row, plan } = await lockProgram(req.params.id, transaction);
+    const requiredPermission = permissionForTransition(action, row.status);
+    if (!requiredPermission) throw workflowError("This action is unavailable at the current investment-program stage.", 409);
+    assertPlanningPermission(req, requiredPermission);
+    const result = evaluateTransition({ action, currentStatus: row.status, remarks });
+    if (!result.ok) throw workflowError(result.message);
+    if (textError(req.body, ["remarks", "resolutionNo"])) throw workflowError("Remarks and resolution references must be text.", 400);
+    if (action === "adopt" && !nonempty(req.body.resolutionNo)) throw workflowError("The adopting resolution number is required.", 400);
+    if (action !== "return") {
+      if (plan.status === "draft" || plan.startYear > row.fiscalYear || plan.endYear < row.fiscalYear) throw workflowError("This investment program must cite an adopted development plan covering its fiscal year.");
+      const entries = await AipEntry.findAll({ where: { investmentProgramId: row.id, status: "planned" }, transaction, lock: transaction.LOCK.UPDATE });
+      if (!entries.length) throw workflowError("An investment program with no live projects cannot advance.");
+      for (const entry of entries) {
+        const error = validateAipEntry(planningSnapshot(entry));
+        if (error) throw workflowError(`${entry.title}: ${error}`, 400);
+        await validateGoalLink(entry.developmentGoalId, row, { transaction });
+        await validateImplementingUnit(entry.implementingUnitId, { transaction });
+      }
+    }
+    const before = planningSnapshot(row), changes = { status: result.to };
+    if (action === "return") Object.assign(changes, { returnRemarks: remarks.trim(), endorsedAt: null, endorsedById: null });
+    if (action === "submit") changes.returnRemarks = null;
+    if (action === "endorse") Object.assign(changes, { endorsedAt: new Date(), endorsedById: req.currentUser.id });
+    if (action === "adopt") Object.assign(changes, { adoptedAt: new Date(), resolutionNo: req.body.resolutionNo.trim() });
+    await row.update(changes, { transaction });
+    await auditPlanning(req, audit, AUDIT_ACTIONS.AIP_TRANSITION, "investmentProgram", row, before, `AIP ${row.fiscalYear}: ${action}.`, { action, transitionRemarks: remarks?.trim() || null });
+    return row;
   });
-
-  // Once adopted, the offices that build budget proposals and PPMP lines from
-  // it need to know it is available.
-  if (result.to === "adopted") {
-    await notifyByPermission("budget.proposeBudget", {
-      type: NOTIFICATION_EVENTS.AIP_STATUS,
-      title: `Investment program adopted for FY ${program.fiscalYear}`,
-      body: "Budget proposals and PPMP lines may now be prepared against it.",
-      link: "/planning/investment-program",
-      refEntity: "investmentProgram",
-      refId: program.id,
-      severity: "success",
-    });
-  }
-
+  if (program.status === "adopted") await notifyByPermission("budget.proposeBudget", { type: NOTIFICATION_EVENTS.AIP_STATUS, title: `Investment program adopted for FY ${program.fiscalYear}`, body: "Budget proposals and PPMP lines may now be prepared against it.", link: "/planning/investment-program", refEntity: "investmentProgram", refId: program.id, severity: "success" });
   res.json(serializeProgram(await InvestmentProgram.findByPk(program.id, aipIncludes)));
 };
 

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
+import { useActionQueue } from '../../context/useActionQueue'
 import { BarChart3, TrendingUp, Users, Gavel, AlertTriangle, Info } from 'lucide-react'
 import * as insightsApi from '../../api/insights'
 import { FLAG_TONES, FLAG_LABELS } from '../../api/insights'
@@ -17,19 +19,21 @@ const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { maximumFra
 
 export default function DssDashboard() {
   const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  const { fiscalYear, setFiscalYear } = useActionQueue()
 
   useEffect(() => {
     let cancelled = false
     insightsApi
-      .fetchDss()
+      .fetchDss({ fiscalYear })
       .then((result) => {
-        if (!cancelled) setData(result)
+        if (!cancelled) { setData(result); setError('') }
       })
-      .catch(() => {})
+      .catch((issue) => { if (!cancelled) setError(issue.response?.data?.message || 'Decision support could not be loaded.') })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [fiscalYear])
 
   // Called before the loading return below, because hooks cannot sit after an
   // early exit. `data?.departmentFlags` is undefined until the fetch lands,
@@ -51,10 +55,10 @@ export default function DssDashboard() {
     },
   })
 
-  if (!data) {
+  if (!data || String(data.fiscalYear) !== String(fiscalYear)) {
     return (
       <DashboardPage>
-        <p className="text-[13px] text-text-faint">Loading insights...</p>
+        <FiscalYearFilter value={fiscalYear} onChange={setFiscalYear} /><p role={error ? 'alert' : 'status'} className="text-[13px] text-text-faint">{error || 'Loading insights...'}</p>
       </DashboardPage>
     )
   }
@@ -68,6 +72,8 @@ export default function DssDashboard() {
         subtitle={`Fiscal year ${data.fiscalYear} — spending patterns, department flags, and competition health.`}
       />
 
+      <FiscalYearFilter value={fiscalYear} onChange={setFiscalYear} />
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {/* Say plainly when there is too little history to read much into. */}
       {data.thin && (
         <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4">
@@ -82,12 +88,18 @@ export default function DssDashboard() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Allocated" value={peso(data.headline.totalAllocated)} icon={TrendingUp} />
         <StatCard
-          label="Disbursed"
-          value={peso(data.headline.totalDisbursed)}
-          hint={`${(data.headline.utilisationRatio * 100).toFixed(1)}% utilised`}
+          label="Gross expenses"
+          value={peso(data.headline.totalGrossExpenses)}
+          hint={`${(data.headline.utilisationRatio * 100).toFixed(1)}% of appropriation spent`}
           icon={TrendingUp}
           tone="success"
         />
+        <StatCard label="Enacted appropriation" value={peso(data.headline.totalAppropriated)} icon={TrendingUp} />
+        <StatCard label="APP planned" value={peso(data.headline.totalPlanned)} icon={TrendingUp} />
+        <StatCard label="Net supplier payments" value={peso(data.headline.totalSupplierPaid)} icon={TrendingUp} />
+        <StatCard label="Unpaid obligations" value={peso(data.headline.totalUnpaid)} icon={TrendingUp} />
+        <StatCard label="Taxes withheld" value={peso(data.headline.totalTaxesWithheld)} icon={TrendingUp} />
+        <StatCard label="Outstanding retention" value={peso(data.headline.totalRetention)} icon={TrendingUp} />
         <StatCard label="Active Procurements" value={data.headline.activeProcurements} icon={Gavel} />
         <StatCard label="Awards Issued" value={data.headline.awardsIssued} icon={BarChart3} tone="success" />
       </div>
@@ -155,7 +167,7 @@ export default function DssDashboard() {
                   <SortableTh {...flagTable.sortProps('code')}>Department</SortableTh>
                   <SortableTh {...flagTable.sortProps('allocated')}>Allocated</SortableTh>
                   <SortableTh {...flagTable.sortProps('committed')}>Committed</SortableTh>
-                  <SortableTh {...flagTable.sortProps('utilisationRatio')}>Utilisation</SortableTh>
+                  <SortableTh {...flagTable.sortProps('utilisationRatio')}>Obligation rate</SortableTh>
                   <SortableTh {...flagTable.sortProps('flag')}>Flag</SortableTh>
                 </tr>
               </thead>

@@ -31,6 +31,8 @@ export function AuthProvider({ children }) {
   }, [])
 
   const clearSession = useCallback((message = '', broadcast = false) => {
+    // Flush the latest form fields synchronously before protected views unmount.
+    window.dispatchEvent(new Event('auth:before-clear'))
     generation.current += 1
     advanceAuthEpoch()
     setUser(null)

@@ -7,6 +7,7 @@ import { TwgAssessment } from "../models/twgModel.js";
 import { EvaluationReturn, EvaluatorDeclaration } from "../models/evaluationWorkflowModel.js";
 import { Invoice } from "../models/paymentModel.js";
 import { User } from "../models/userModel.js";
+import { BudgetControlRequest } from "../models/budgetControlModel.js";
 import { checksumOf, safeFilename, validateFileContent } from "../services/documentStore.js";
 import { svpQuotationsDisclosable } from "../services/svpDisclosure.js";
 import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
@@ -27,6 +28,10 @@ export const accessFor = async (req, entityRef, entityId, { docType } = {}) => {
     : null;
 
   switch (entityRef) {
+    case "budgetControlRequest": {
+      const request = await BudgetControlRequest.findByPk(entityId);
+      return { read: Boolean(request) && (has("budget.view") || has("audit.viewAll")), write: Boolean(request) && request.status === "draft" && request.requesterId === req.currentUser.id && has("budget.requestControl") };
+    }
     case "rfq": {
       const rfq = await Rfq.findByPk(entityId);
       const hopeEvidence = docType === "rfqCancellationEvidence" && req.currentUser.Role?.key === "hope" && has("bidding.award");
@@ -175,9 +180,12 @@ export const uploadDocument = async (req, res) => {
   const filename = safeFilename(req.file.originalname);
   const checksum = checksumOf(req.file.buffer);
 
-  if (["rfq", "twgAssessment"].includes(entityRef)) {
+  if (["rfq", "twgAssessment", "budgetControlRequest"].includes(entityRef)) {
     const document = await withAuditTransaction(async (transaction, audit) => {
-      await lockTechnicalAttachment(req, entityRef, Number(entityId), transaction, { docType });
+      if (entityRef === "budgetControlRequest") {
+        const request = await BudgetControlRequest.findByPk(entityId, { transaction, lock: transaction.LOCK.UPDATE });
+        if (request?.status !== "draft" || request.requesterId !== req.currentUser.id || !req.permissions.has("budget.requestControl")) throw workflowError("Evidence cannot be changed after submission.", 403);
+      } else await lockTechnicalAttachment(req, entityRef, Number(entityId), transaction, { docType });
       // New evidence is appended, never substituted for an official old file.
       const created = await Document.create({ filename, mimeType: req.file.mimetype, sizeBytes: req.file.size, content: req.file.buffer, checksum, entityRef, entityId: Number(entityId), docType: docType ?? null, label: label ?? null, uploadedById: req.currentUser.id, uploadedAt: new Date() }, { transaction });
       await audit(actorAudit(req, { actionType: "document.uploaded", entityRef, entityId: Number(entityId), summary: "Supporting procurement evidence uploaded.", afterState: { documentId: created.id, filename, checksum, docType: docType ?? null } }));
@@ -271,7 +279,7 @@ export const deleteDocument = async (req, res) => {
     attributes: DOCUMENT_METADATA_ATTRIBUTES,
   });
   if (!document) return res.status(404).json({ message: "Document not found." });
-  if (document.entityRef === "rfq") throw workflowError("Procurement evidence is preserved in the attempt history. Attach an additional supporting record instead of deleting it.");
+  if (["rfq", "budgetControlRequest"].includes(document.entityRef)) throw workflowError("Official evidence is permanently preserved. Attach an additional supporting record instead of deleting it.");
 
   const access = await accessFor(req, document.entityRef, document.entityId);
   if (!access.write) {

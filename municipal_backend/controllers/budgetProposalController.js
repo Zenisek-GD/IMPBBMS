@@ -1,5 +1,4 @@
 import { Op } from "sequelize";
-import { sequelize } from "../models/db.js";
 import {
   ExecutiveBudget,
   BudgetProposal,
@@ -15,14 +14,17 @@ import {
 import { AipEntry, InvestmentProgram } from "../models/investmentProgramModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
-import { proposalsEditableIn } from "../services/budgetPreparationWorkflow.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { proposalsEditableIn, PROPOSAL_DECISION_STAGES, permissionForTransition } from "../services/budgetPreparationWorkflow.js";
+import { withAuditTransaction, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { notifyByPermission, notifyUsers, NOTIFICATION_EVENTS } from "../services/notifier.js";
 
 // Step 6 of the municipal process: each office prepares what it is asking for,
 // built from its slice of the investment program. Steps 7 and 11 also live
 // here, because reviewing and finalising a proposal is work done *on* the
 // proposal — the executive budget's own state machine moves the whole set.
+
+import { actorAudit, workflowError } from '../services/workflowSupport.js';
+import { lockBudget, lockProposal, returnBudgetForRevision, snapshot } from '../services/budgetRecordSupport.js';
 
 const num = (value) => (value === null || value === undefined ? 0 : Number(value));
 const peso = (value) => `₱${num(value).toLocaleString()}`;
@@ -54,6 +56,8 @@ const serializeLine = (line) => ({
   finalAmount: line.finalAmount === null ? null : num(line.finalAmount),
   remarks: line.remarks,
   aipEntryId: line.aipEntryId,
+  isDevelopmentFund: Boolean(line.isDevelopmentFund),
+  isLdrrmf: Boolean(line.isLdrrmf),
   aipEntryTitle: line.aipEntry?.title ?? null,
   aipEstimatedCost: line.aipEntry ? num(line.aipEntry.estimatedCost) : null,
 });
@@ -97,20 +101,22 @@ const serialize = (proposal) => {
 // What this office was appropriated in the previous fiscal year. Looked up
 // rather than typed, because the growth ceiling is only credible if the base
 // figure comes from the register rather than from the office asking for more.
-const previousAppropriationFor = async (departmentId, fiscalYear) => {
+const previousAppropriationFor = async (departmentId, fiscalYear, transaction) => {
   const total = await Appropriation.sum("amount", {
+    transaction,
     where: { departmentId, fiscalYear: fiscalYear - 1, status: { [Op.in]: ["enacted", "closed"] } },
   });
   return total === null || total === undefined ? null : Number(total);
 };
 
-const computeLines = async (rawLines, { fiscalYear }) => {
+const computeLines = async (rawLines, { fiscalYear, transaction }) => {
   if (!Array.isArray(rawLines) || rawLines.length === 0) {
     return { error: "A proposal needs at least one line." };
   }
 
   const lines = [];
   for (const raw of rawLines) {
+    if (!raw || typeof raw !== "object") return { error: "Every line must be a record." };
     if (!raw.title?.trim()) return { error: "Every line needs a title." };
 
     const amount = Number(raw.proposedAmount);
@@ -126,6 +132,7 @@ const computeLines = async (rawLines, { fiscalYear }) => {
     if (raw.aipEntryId) {
       const entry = await AipEntry.findByPk(Number(raw.aipEntryId), {
         include: [{ model: InvestmentProgram, as: "program" }],
+        transaction,
       });
       if (!entry) return { error: `The investment program entry cited by "${raw.title}" does not exist.` };
       if (entry.program?.fiscalYear !== fiscalYear) {
@@ -143,6 +150,9 @@ const computeLines = async (rawLines, { fiscalYear }) => {
     }
 
     lines.push({
+      ...(raw.id != null ? { id: Number(raw.id) } : {}),
+      isDevelopmentFund: raw.isDevelopmentFund === true,
+      isLdrrmf: raw.isLdrrmf === true,
       title: raw.title.trim(),
       expenseClass: raw.expenseClass ?? "mooe",
       fund: raw.fund ?? "generalFund",
@@ -168,6 +178,8 @@ export const listProposals = async (req, res) => {
   // An office sees its own proposal; the bodies that act on the whole set see
   // all of them. Same shape as the requisition queue.
   const canSeeAll = [
+    "budget.prepareExecutive",
+    "budget.recordProvincialReview",
     "budget.reviewProposal",
     "budget.consolidateProposals",
     "budget.conductForum",
@@ -178,8 +190,8 @@ export const listProposals = async (req, res) => {
     "audit.viewAll",
   ].some((permission) => req.permissions.has(permission));
 
-  if (!canSeeAll && req.currentUser.departmentId) {
-    where.departmentId = req.currentUser.departmentId;
+  if (!canSeeAll) {
+    where.departmentId = req.currentUser.departmentId ?? -1;
   }
 
   const proposals = await BudgetProposal.findAll({
@@ -191,326 +203,189 @@ export const listProposals = async (req, res) => {
   res.json(proposals.map(serialize));
 };
 
+const requireEditor = (req, proposal) => {
+  if (!req.permissions.has('budget.prepareExecutive') &&
+      (!req.permissions.has('budget.proposeBudget') || (proposal && proposal.departmentId !== req.currentUser.departmentId))) {
+    throw workflowError("You may only prepare your own office's proposal.", 403);
+  }
+};
+const requireEditable = (budget, proposal) => {
+  if (!proposalsEditableIn(budget.status) || (proposal && proposal.status !== 'draft')) {
+    throw workflowError('This proposal is no longer editable. Return the budget for revision first.');
+  }
+};
+const auditProposal = (audit, req, proposal, actionType, beforeState, summary) => audit(actorAudit(req, {
+  actionType, entityRef: 'budgetProposal', entityId: proposal.id,
+  summary, beforeState, afterState: snapshot(proposal),
+}));
+
 export const createProposal = async (req, res) => {
-  const budget = await ExecutiveBudget.findByPk(Number(req.body.executiveBudgetId));
-  if (!budget) return res.status(400).json({ message: "That budget does not exist." });
-
-  if (!proposalsEditableIn(budget.status)) {
-    return res.status(409).json({
-      message: `${budget.title} is no longer open for proposals — it is at "${budget.status}".`,
-    });
-  }
-
-  // An office proposes for itself. A Budget Officer preparing on behalf of an
-  // office may name the department explicitly; everyone else gets their own.
-  const departmentId = req.permissions.has("budget.prepareExecutive")
-    ? Number(req.body.departmentId ?? req.currentUser.departmentId)
-    : req.currentUser.departmentId;
-
-  if (!departmentId) {
-    return res.status(400).json({ message: "You are not assigned to an office, so there is nothing to propose for." });
-  }
-  const department = await Department.findByPk(departmentId);
-  if (!department) return res.status(400).json({ message: "That office does not exist." });
-
-  const existing = await BudgetProposal.findOne({
-    where: { executiveBudgetId: budget.id, departmentId },
-  });
-  if (existing) {
-    return res.status(409).json({
-      message: `${department.name} already has a proposal for ${budget.title}. Edit it instead of creating a second one.`,
-      proposalId: existing.id,
-    });
-  }
-
-  const computed = await computeLines(req.body.lines, { fiscalYear: budget.fiscalYear });
-  if (computed.error) return res.status(400).json({ message: computed.error });
-
-  const created = await sequelize.transaction(async (transaction) => {
-    const proposal = await BudgetProposal.create(
-      {
-        executiveBudgetId: budget.id,
-        departmentId,
-        fiscalYear: budget.fiscalYear,
-        status: "draft",
-        proposedTotal: computed.total,
-        previousYearAppropriation: await previousAppropriationFor(departmentId, budget.fiscalYear),
-        justification: req.body.justification?.trim() || null,
-        preparedById: req.currentUser.id,
-      },
-      { transaction }
-    );
-
-    await BudgetProposalLine.bulkCreate(
-      computed.lines.map((line) => ({ ...line, budgetProposalId: proposal.id })),
-      { transaction }
-    );
-
+  requireEditor(req);
+  const created = await withAuditTransaction(async (transaction, audit) => {
+    const budget = await lockBudget(Number(req.body.executiveBudgetId), transaction);
+    requireEditable(budget);
+    const departmentId = req.permissions.has('budget.prepareExecutive')
+      ? Number(req.body.departmentId ?? req.currentUser.departmentId) : req.currentUser.departmentId;
+    if (!departmentId) throw workflowError('An office is required for this proposal.', 400);
+    const department = await Department.findByPk(departmentId, { transaction });
+    if (!department) throw workflowError('That office does not exist.', 400);
+    if (budget.proposals.some((p) => p.departmentId === departmentId)) {
+      throw workflowError('This office already has a proposal for this budget. Edit the existing proposal.');
+    }
+    const computed = await computeLines(req.body.lines, { fiscalYear: budget.fiscalYear, transaction });
+    if (computed.error) throw workflowError(computed.error, 400);
+    if (computed.lines.some((line) => line.id != null)) throw workflowError('New proposal lines cannot supply existing IDs.', 400);
+    const proposal = await BudgetProposal.create({
+      executiveBudgetId: budget.id, departmentId, fiscalYear: budget.fiscalYear,
+      status: 'draft', proposedTotal: computed.total,
+      previousYearAppropriation: await previousAppropriationFor(departmentId, budget.fiscalYear, transaction),
+      justification: req.body.justification?.trim() || null, preparedById: req.currentUser.id,
+    }, { transaction });
+    proposal.setDataValue('lines', await BudgetProposalLine.bulkCreate(computed.lines.map((line) => ({ ...line, budgetProposalId: proposal.id })), { transaction }));
+    await auditProposal(audit, req, proposal, 'budget.proposal.created', null, `Proposal opened for FY ${budget.fiscalYear}`);
     return proposal;
   });
-
   res.status(201).json(serialize(await BudgetProposal.findByPk(created.id, proposalIncludes)));
 };
 
 export const updateProposal = async (req, res) => {
-  const proposal = await BudgetProposal.findByPk(req.params.id, proposalIncludes);
-  if (!proposal) return res.status(404).json({ message: "Proposal not found." });
-
-  if (proposal.status !== "draft" || !proposalsEditableIn(proposal.budget?.status)) {
-    return res.status(409).json({
-      message: "This proposal has been submitted and can no longer be edited by the office.",
-    });
-  }
-  if (
-    proposal.departmentId !== req.currentUser.departmentId &&
-    !req.permissions.has("budget.prepareExecutive")
-  ) {
-    return res.status(403).json({ message: "You may only edit your own office's proposal." });
-  }
-
-  let computed = null;
-  if (req.body.lines) {
-    computed = await computeLines(req.body.lines, { fiscalYear: proposal.fiscalYear });
-    if (computed.error) return res.status(400).json({ message: computed.error });
-  }
-
-  await sequelize.transaction(async (transaction) => {
-    await proposal.update(
-      {
-        justification: req.body.justification?.trim() ?? proposal.justification,
-        ...(computed ? { proposedTotal: computed.total } : {}),
-      },
-      { transaction }
-    );
-
-    if (computed) {
-      await BudgetProposalLine.destroy({ where: { budgetProposalId: proposal.id }, transaction });
-      await BudgetProposalLine.bulkCreate(
-        computed.lines.map((line) => ({ ...line, budgetProposalId: proposal.id })),
-        { transaction }
-      );
+  const updated = await withAuditTransaction(async (transaction, audit) => {
+    const { budget, proposal } = await lockProposal(req.params.id, transaction);
+    requireEditor(req, proposal);
+    requireEditable(budget, proposal);
+    const before = snapshot(proposal);
+    let computed;
+    if (req.body.lines !== undefined) {
+      computed = await computeLines(req.body.lines, { fiscalYear: budget.fiscalYear, transaction });
+      if (computed.error) throw workflowError(computed.error, 400);
+      const existing = new Map(proposal.lines.map((line) => [line.id, line]));
+      const seen = new Set();
+      for (const line of computed.lines) {
+        if (line.id != null && (!existing.has(line.id) || seen.has(line.id))) {
+          throw workflowError('Line IDs must be unique and belong to this proposal.', 400);
+        }
+        if (line.id != null) seen.add(line.id);
+      }
+      const removed = proposal.lines.filter((line) => !seen.has(line.id));
+      if (removed.length && await Appropriation.count({ where: { budgetProposalLineId: removed.map((line) => line.id) }, transaction })) {
+        throw workflowError('An appropriated proposal line cannot be removed.');
+      }
+      for (const line of removed) await line.destroy({ transaction });
+      const saved = [];
+      for (const values of computed.lines) {
+        const line = values.id != null ? existing.get(values.id) : null;
+        saved.push(line ? await line.update(values, { transaction }) : await BudgetProposalLine.create({ ...values, budgetProposalId: proposal.id }, { transaction }));
+      }
+      proposal.setDataValue('lines', saved);
+      proposal.lines = saved;
     }
+    await proposal.update({
+      justification: req.body.justification?.trim() ?? proposal.justification,
+      ...(computed ? { proposedTotal: computed.total } : {}),
+    }, { transaction });
+    await auditProposal(audit, req, proposal, 'budget.proposal.updated', before, `Draft proposal revised for FY ${proposal.fiscalYear}`);
+    return proposal;
   });
-
-  res.json(serialize(await BudgetProposal.findByPk(proposal.id, proposalIncludes)));
+  res.json(serialize(await BudgetProposal.findByPk(updated.id, proposalIncludes)));
 };
 
 export const submitProposal = async (req, res) => {
-  const proposal = await BudgetProposal.findByPk(req.params.id, proposalIncludes);
-  if (!proposal) return res.status(404).json({ message: "Proposal not found." });
-
-  if (proposal.status !== "draft") {
-    return res.status(409).json({ message: `This proposal is already "${proposal.status}".` });
-  }
-  if (!proposalsEditableIn(proposal.budget?.status)) {
-    return res.status(409).json({ message: "The budget is no longer accepting proposals." });
-  }
-  if (
-    proposal.departmentId !== req.currentUser.departmentId &&
-    !req.permissions.has("budget.prepareExecutive")
-  ) {
-    return res.status(403).json({ message: "You may only submit your own office's proposal." });
-  }
-  if ((proposal.lines ?? []).length === 0) {
-    return res.status(409).json({ message: "An empty proposal cannot be submitted." });
-  }
-
-  // Over-ceiling requests are allowed through, but not silently: the office has
-  // to say why, because the hearing will ask and the answer belongs on the
-  // record rather than in the room.
-  const pct = proposal.budget?.ceilingGrowthPct;
-  if (pct !== null && pct !== undefined && proposal.previousYearAppropriation) {
-    const ceiling = num(proposal.previousYearAppropriation) * (1 + num(pct) / 100);
-    if (num(proposal.proposedTotal) > ceiling && !proposal.justification?.trim()) {
-      return res.status(409).json({
-        message: `${peso(proposal.proposedTotal)} exceeds the ${pct}% growth ceiling of ${peso(
-          ceiling
-        )} over last year's ${peso(
-          proposal.previousYearAppropriation
-        )}. Record a justification before submitting.`,
-        ceiling: Number(ceiling.toFixed(2)),
-      });
+  const submitted = await withAuditTransaction(async (transaction, audit) => {
+    const { budget, proposal } = await lockProposal(req.params.id, transaction);
+    requireEditor(req, proposal);
+    requireEditable(budget, proposal);
+    if (!proposal.lines.length) throw workflowError('An empty proposal cannot be submitted.');
+    const pct = budget.ceilingGrowthPct;
+    if (pct != null && proposal.previousYearAppropriation != null) {
+      const ceiling = num(proposal.previousYearAppropriation) * (1 + num(pct) / 100);
+      if (num(proposal.proposedTotal) > ceiling && !proposal.justification?.trim()) {
+        throw workflowError('This proposal exceeds the growth ceiling. Record a justification before submitting.', 409, { ceiling });
+      }
     }
-  }
-
-  await proposal.update({ status: "submitted", submittedAt: new Date(), returnRemarks: null });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.BUDGET_PROPOSAL_SUBMITTED,
-    entityRef: "budgetProposal",
-    entityId: proposal.id,
-    summary: `${proposal.office?.code ?? proposal.departmentId} submitted ${peso(
-      proposal.proposedTotal
-    )} for FY ${proposal.fiscalYear}`,
-    afterState: {
-      status: "submitted",
-      proposedTotal: num(proposal.proposedTotal),
-      lines: (proposal.lines ?? []).length,
-    },
+    const before = snapshot(proposal);
+    await proposal.update({ status: 'submitted', submittedAt: new Date(), returnRemarks: null }, { transaction });
+    await auditProposal(audit, req, proposal, AUDIT_ACTIONS.BUDGET_PROPOSAL_SUBMITTED, before, `Proposal submitted for FY ${proposal.fiscalYear}`);
+    return proposal;
   });
-
-  await notifyByPermission("budget.reviewProposal", {
-    type: NOTIFICATION_EVENTS.BUDGET_STATUS,
-    title: `Budget proposal received — ${proposal.office?.name ?? "an office"}`,
-    body: `${peso(proposal.proposedTotal)} proposed for FY ${proposal.fiscalYear}.`,
-    link: "/budget/preparation",
-    refEntity: "budgetProposal",
-    refId: proposal.id,
-    severity: "info",
+  await notifyByPermission('budget.reviewProposal', {
+    type: NOTIFICATION_EVENTS.BUDGET_STATUS, title: `Budget proposal received ? FY ${submitted.fiscalYear}`,
+    body: `${peso(submitted.proposedTotal)} proposed.`, link: '/budget/preparation',
+    refEntity: 'budgetProposal', refId: submitted.id, severity: 'info',
   });
-
-  res.json(serialize(await BudgetProposal.findByPk(proposal.id, proposalIncludes)));
+  res.json(serialize(await BudgetProposal.findByPk(submitted.id, proposalIncludes)));
 };
 
-// ── Step 7: the Municipal Budget Council's recommendation ────────────────────
-// Amounts are recorded per line, not as a single total, because the council's
-// decision is line by line and a lump-sum recommendation cannot be traced to
-// what was actually cut.
-const applyAmounts = async (req, res, { field, totalField, permission, actionLabel }) => {
-  const proposal = await BudgetProposal.findByPk(req.params.id, proposalIncludes);
-  if (!proposal) return res.status(404).json({ message: "Proposal not found." });
-
-  if (!req.permissions.has(permission)) {
-    return res.status(403).json({ message: "You do not have permission to perform this action." });
-  }
-  if (proposal.status === "draft") {
-    return res.status(409).json({ message: "This proposal has not been submitted yet." });
-  }
-
-  const amounts = req.body.amounts;
-  if (!Array.isArray(amounts) || amounts.length === 0) {
-    return res.status(400).json({ message: "Provide an amount for each line." });
-  }
-
-  const byId = new Map((proposal.lines ?? []).map((line) => [line.id, line]));
-  const updates = [];
-
-  for (const entry of amounts) {
-    const line = byId.get(Number(entry.lineId));
-    if (!line) return res.status(400).json({ message: `Line ${entry.lineId} is not on this proposal.` });
-
-    const amount = Number(entry.amount);
-    // Zero is a real decision — it is how a line is refused — so the floor is 0
-    // rather than 1, and only a negative or non-numeric value is rejected.
-    if (!Number.isFinite(amount) || amount < 0) {
-      return res.status(400).json({ message: `The amount for "${line.title}" must be zero or more.` });
+const applyAmounts = async (req, res, { action, field, totalField, actionLabel }) => {
+  const updated = await withAuditTransaction(async (transaction, audit) => {
+    const { budget, proposal } = await lockProposal(req.params.id, transaction);
+    const stage = PROPOSAL_DECISION_STAGES[action];
+    if (!req.permissions.has(stage.permission)) throw workflowError('You do not have permission to perform this action.', 403);
+    if (budget.status !== stage.budget || proposal.status !== stage.proposal) {
+      throw workflowError(`This decision is only allowed at the ${stage.budget} stage on a ${stage.proposal} proposal.`);
     }
-    if (amount > num(line.proposedAmount)) {
-      return res.status(400).json({
-        message: `${peso(amount)} for "${line.title}" is more than the ${peso(
-          line.proposedAmount
-        )} the office asked for. A budget review may reduce a request, not enlarge it.`,
-      });
+    const amounts = req.body.amounts;
+    if (!Array.isArray(amounts) || !amounts.length) throw workflowError('Provide an amount for each line.', 400);
+    const byId = new Map(proposal.lines.map((line) => [line.id, line]));
+    const seen = new Set();
+    const updates = [];
+    for (const entry of amounts) {
+      const line = byId.get(Number(entry?.lineId));
+      if (!line || seen.has(line.id)) throw workflowError('Every line must appear exactly once and belong to this proposal.', 400);
+      seen.add(line.id);
+      const amount = Number(entry.amount);
+      if (entry.amount == null || String(entry.amount).trim() === '' || !Number.isFinite(amount) || amount < 0 || amount > num(line.proposedAmount)) {
+        throw workflowError(`The amount for "${line.title}" must be explicitly zero or greater, and cannot exceed the proposed amount.`, 400);
+      }
+      updates.push({ line, amount: Number(amount.toFixed(2)), remarks: entry.remarks });
     }
-
-    updates.push({ line, amount, remarks: entry.remarks?.trim() || null });
-  }
-
-  const missing = (proposal.lines ?? []).filter((line) => !amounts.some((a) => Number(a.lineId) === line.id));
-  if (missing.length > 0) {
-    return res.status(400).json({
-      message: `No amount given for ${missing.length} line(s): ${missing.map((l) => l.title).join(", ")}.`,
-    });
-  }
-
-  const total = Number(updates.reduce((sum, update) => sum + update.amount, 0).toFixed(2));
-
-  await sequelize.transaction(async (transaction) => {
+    if (seen.size !== byId.size) throw workflowError('Provide an amount for every proposal line.', 400);
+    const before = snapshot(proposal);
     for (const update of updates) {
-      await update.line.update(
-        { [field]: update.amount, ...(update.remarks ? { remarks: update.remarks } : {}) },
-        { transaction }
-      );
+      await update.line.update({ [field]: update.amount, ...(update.remarks !== undefined ? { remarks: update.remarks?.trim() || null } : {}) }, { transaction });
     }
-    await proposal.update(
-      {
-        [totalField]: total,
-        ...(req.body.notes ? { reviewNotes: req.body.notes.trim() } : {}),
-        // A review that only recommends leaves the proposal where it is in the
-        // budget's own sequence; the executive budget's transition is what moves
-        // every proposal on. Recording the status here too would let one
-        // proposal run ahead of the budget it belongs to.
-      },
-      { transaction }
-    );
+    const total = Number(updates.reduce((sum, update) => sum + update.amount, 0).toFixed(2));
+    await proposal.update({ [totalField]: total, ...(req.body.notes !== undefined ? { reviewNotes: req.body.notes?.trim() || null } : {}) }, { transaction });
+    await auditProposal(audit, req, proposal, AUDIT_ACTIONS.BUDGET_PROPOSAL_REVIEWED, before, `${actionLabel}: ${peso(total)} for FY ${proposal.fiscalYear}`);
+    return proposal;
   });
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.BUDGET_PROPOSAL_REVIEWED,
-    entityRef: "budgetProposal",
-    entityId: proposal.id,
-    summary: `${actionLabel} for ${proposal.office?.code ?? proposal.departmentId}: ${peso(
-      proposal.proposedTotal
-    )} proposed → ${peso(total)}`,
-    beforeState: { proposedTotal: num(proposal.proposedTotal) },
-    afterState: { [totalField]: total, notes: req.body.notes?.trim() ?? null },
+  if (updated.preparedById) await notifyUsers([updated.preparedById], {
+    type: NOTIFICATION_EVENTS.BUDGET_STATUS, title: `${actionLabel} ? FY ${updated.fiscalYear}`,
+    body: `${peso(updated.proposedTotal)} proposed, ${peso(updated[totalField])} carried forward.`,
+    link: '/budget/preparation', refEntity: 'budgetProposal', refId: updated.id, severity: 'info',
   });
-
-  // The office is told what happened to its request rather than discovering it
-  // when the ordinance appears.
-  if (proposal.preparedById) {
-    await notifyUsers([proposal.preparedById], {
-      type: NOTIFICATION_EVENTS.BUDGET_STATUS,
-      title: `${actionLabel} — FY ${proposal.fiscalYear} proposal`,
-      body: `${peso(proposal.proposedTotal)} proposed, ${peso(total)} carried forward.`,
-      link: "/budget/preparation",
-      refEntity: "budgetProposal",
-      refId: proposal.id,
-      severity: total < num(proposal.proposedTotal) ? "warning" : "info",
-    });
-  }
-
-  res.json(serialize(await BudgetProposal.findByPk(proposal.id, proposalIncludes)));
+  res.json(serialize(await BudgetProposal.findByPk(updated.id, proposalIncludes)));
 };
 
-export const reviewProposal = (req, res) =>
-  applyAmounts(req, res, {
-    field: "recommendedAmount",
-    totalField: "recommendedTotal",
-    permission: "budget.reviewProposal",
-    actionLabel: "Budget Council recommendation",
-  });
-
-// ── Step 11: deliberation strikes the final figures ──────────────────────────
-export const finaliseProposal = (req, res) =>
-  applyAmounts(req, res, {
-    field: "finalAmount",
-    totalField: "finalTotal",
-    permission: "budget.finaliseExecutive",
-    actionLabel: "Final appropriation figure",
-  });
+export const reviewProposal = (req, res) => applyAmounts(req, res, {
+  action: 'review', field: 'recommendedAmount', totalField: 'recommendedTotal', actionLabel: 'Budget Council recommendation',
+});
+export const finaliseProposal = (req, res) => applyAmounts(req, res, {
+  action: 'finalise', field: 'finalAmount', totalField: 'finalTotal', actionLabel: 'Final appropriation figure',
+});
 
 export const returnProposal = async (req, res) => {
-  const proposal = await BudgetProposal.findByPk(req.params.id, proposalIncludes);
-  if (!proposal) return res.status(404).json({ message: "Proposal not found." });
-
-  if (!req.permissions.has("budget.reviewProposal") && !req.permissions.has("budget.consolidateProposals")) {
-    return res.status(403).json({ message: "You do not have permission to return a proposal." });
-  }
-  if (!req.body.remarks?.trim()) {
-    return res.status(400).json({ message: "Remarks are required when returning a proposal." });
-  }
-  if (proposal.status === "draft") {
-    return res.status(409).json({ message: "This proposal has not been submitted." });
-  }
-
-  await proposal.update({
-    status: "draft",
-    returnRemarks: req.body.remarks.trim(),
-    submittedAt: null,
+  const returned = await withAuditTransaction(async (transaction, audit) => {
+    const { budget, proposal } = await lockProposal(req.params.id, transaction);
+    if (!['pendingMbcReview', 'pendingPlanningConsolidation'].includes(budget.status)) {
+      throw workflowError('Proposals can only be returned during Budget Council review or planning consolidation.');
+    }
+    if (!req.permissions.has(permissionForTransition('return', budget.status))) {
+      throw workflowError('Only the body currently reviewing this budget may return its proposals.', 403);
+    }
+    if (proposal.status === 'draft') throw workflowError('This proposal has not been submitted.');
+    const remarks = req.body.remarks?.trim();
+    if (!remarks) throw workflowError('Remarks are required when returning a proposal.', 400);
+    const before = snapshot(budget), proposalBefore = snapshot(proposal);
+    await returnBudgetForRevision(budget, remarks, transaction);
+    await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.BUDGET_TRANSITION, entityRef: 'executiveBudget', entityId: budget.id,
+      summary: 'Budget returned to reopen proposals and require renewed review', beforeState: before, afterState: snapshot(budget) }));
+    await auditProposal(audit, req, proposal, 'budget.proposal.returned', proposalBefore, `Proposal returned: ${remarks}`);
+    return proposal;
   });
-
-  if (proposal.preparedById) {
-    await notifyUsers([proposal.preparedById], {
-      type: NOTIFICATION_EVENTS.BUDGET_STATUS,
-      title: `FY ${proposal.fiscalYear} budget proposal returned`,
-      body: req.body.remarks.trim(),
-      link: "/budget/preparation",
-      refEntity: "budgetProposal",
-      refId: proposal.id,
-      severity: "danger",
-    });
-  }
-
-  res.json(serialize(await BudgetProposal.findByPk(proposal.id, proposalIncludes)));
+  await notifyByPermission('budget.proposeBudget', {
+    type: NOTIFICATION_EVENTS.BUDGET_STATUS, title: `FY ${returned.fiscalYear} budget reopened for revision`,
+    body: `${req.body.remarks.trim()} Review and resubmit office proposals.`, link: '/budget/preparation',
+    refEntity: 'executiveBudget', refId: returned.executiveBudgetId, severity: 'warning',
+  });
+  res.json(serialize(await BudgetProposal.findByPk(returned.id, proposalIncludes)));
 };

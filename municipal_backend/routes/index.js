@@ -54,6 +54,7 @@ import governanceRoutes from "./procurementGovernanceRoutes.js";
 import procurementScheduleRoutes from "./procurementScheduleRoutes.js";
 import { sessionSecurity, requireSameOrigin } from "../middleware/sessionSecurityMiddleware.js";
 import { requireMfaEnrollment } from "../middleware/mfaMiddleware.js";
+import { protectRouterMutations } from "../middleware/mutationProtection.js";
 
 const router = express.Router();
 router.use(requireSameOrigin, sessionSecurity, requireMfaEnrollment);
@@ -126,4 +127,5 @@ router.use("/api/security", securityRoutes);
 // No session required beyond this point — see publicRoutes.js.
 router.use("/api/public", publicRoutes);
 
+protectRouterMutations(router);
 export default router;

@@ -24,6 +24,7 @@ const AdminThresholds = lazy(() => import('./pages/dashboards/ProcurementLimitsP
 const BidOpportunities = lazy(() => import('./pages/supplier/BidOpportunities'))
 const DevelopmentPlanning = lazy(() => import('./pages/planning/DevelopmentPlanning'))
 const BudgetPreparation = lazy(() => import('./pages/budget/BudgetPreparation'))
+const BudgetControls = lazy(() => import('./pages/budget/BudgetControls'))
 const AppEntries = lazy(() => import('./pages/app/AppEntries'))
 const PurchaseRequisitions = lazy(() => import('./pages/pr/PurchaseRequisitions'))
 const RfqManagement = lazy(() => import('./pages/bidding/RfqManagement'))
@@ -104,6 +105,9 @@ function App() {
           {/* Guide content is shared with every signed-in role. It teaches the
               workflow without granting permission to perform its actions. */}
           <Route path="/help-guide" element={<HelpGuide />} />
+          <Route element={<RoleRoute permission="budget.view" />}>
+            <Route path="/budget/controls" element={<BudgetControls />} />
+          </Route>
 
           {/* Every signed-in account has one, whatever the role — it is reached
               from the sidebar footer rather than a header dropdown, so it needs

@@ -10,6 +10,7 @@ import {
   setPriorities,
   listPrograms,
   createProgram,
+  updateProgram,
   createAipEntry,
   updateAipEntry,
   deleteAipEntry,
@@ -41,6 +42,7 @@ router.post("/priorities", requirePermission("planning.setPriorities"), setPrior
 // ── Annual Investment Program ────────────────────────────────────────────────
 router.get("/investment-programs", requirePermission("planning.view"), listPrograms);
 router.post("/investment-programs", requirePermission("planning.manageAip"), createProgram);
+router.patch("/investment-programs/:id", requirePermission("planning.manageAip"), updateProgram);
 
 router.post("/investment-programs/:id/entries", requirePermission("planning.manageAip"), createAipEntry);
 router.patch("/aip-entries/:entryId", requirePermission("planning.manageAip"), updateAipEntry);

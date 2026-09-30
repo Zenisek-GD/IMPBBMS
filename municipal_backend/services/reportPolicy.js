@@ -3,6 +3,7 @@
 export const anyPermission = (permissions, keys) => keys.some((key) => permissions.has(key));
 export const PROCUREMENT_REPORT_PERMISSIONS = ["bidding.view"];
 export const REPORTS = [
+  ["budget-ledger", "Appropriation and Project Spending Report", "budget"],
   ["procurement-summary", "Procurement Summary", "procurement"],
   ["procurement-status", "Procurement Status Report", "procurement"],
   ["procurement-plans", "Procurement Plan Report", "plans"],
@@ -21,6 +22,7 @@ export const REPORTS = [
 
 export function canReadReport(report, permissions) {
   if (!report) return false;
+  if (report.source === "budget") return permissions.has("budget.view");
   if (report.source === "plans") return anyPermission(permissions, ["app.view", "app.viewPublished"]);
   if (report.source === "audit") return anyPermission(permissions, ["audit.viewAll", "audit.viewLogs"]);
   if (report.source === "contracts") return anyPermission(permissions, ["contract.view", "contract.viewPublished", "delivery.submitInvoice"]);

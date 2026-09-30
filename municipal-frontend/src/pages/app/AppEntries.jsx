@@ -1,3 +1,5 @@
+import { useActionQueue } from '../../context/useActionQueue'
+import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
 import { useEffect, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -33,6 +35,7 @@ import { NextInline } from '../../components/ui/NextStep'
 import { appNext } from '../../config/nextSteps'
 import { useServerTable } from '../../components/ui/useServerTable'
 import useDraftRecovery from '../../hooks/useDraftRecovery'
+import { currentFiscalYear } from '../../utils/fiscalYear'
 import { CommitteeActionModal } from '../bidding/EvaluationForms'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
@@ -102,6 +105,7 @@ const peso = (value) =>
   `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
+  const { fiscalYear } = useActionQueue()
   const [serverError, setServerError] = useState('')
   const [suggestion, setSuggestion] = useState(null)
   const [appropriations, setAppropriations] = useState([])
@@ -109,7 +113,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   const [linkedRecordsLoading, setLinkedRecordsLoading] = useState(true)
   const [linkedRecordsError, setLinkedRecordsError] = useState(false)
   const [linkedRecordsReload, setLinkedRecordsReload] = useState(0)
-  const yearChosenByUser = useRef(Boolean(defaultValues?.id))
+  const yearChosenByUser = useRef(Boolean(defaultValues?.id) || fiscalYear !== 'all')
 
   const {
     register,
@@ -142,8 +146,8 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   useEffect(() => {
     let cancelled = false
     Promise.all([
-      financeApi.fetchAppropriations({ chargeable: 'true' }),
-      planningApi.fetchAipEntries(),
+      financeApi.fetchAppropriations({ chargeable: 'true', fiscalYear: 'all' }),
+      planningApi.fetchAipEntries({ fiscalYear: 'all' }),
     ])
       .then(([lines, projects]) => {
         if (cancelled) return
@@ -161,7 +165,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
           const availableYears = getValues('planCycle') === 'indicative'
             ? [...projectYears]
             : sharedYears.length ? sharedYears : [...projectYears, ...lineYears]
-          const preferredYear = availableYears.length ? Math.max(...availableYears) : new Date().getFullYear()
+          const preferredYear = availableYears.length ? Math.max(...availableYears) : currentFiscalYear()
           setValue('fiscalYear', preferredYear)
         }
       })
@@ -180,7 +184,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
   const watchedAppropriation = useWatch({ control, name: 'appropriationId' })
   const year = Number(watchedFiscalYear)
   const fiscalYears = [...new Set([
-    new Date().getFullYear(),
+    currentFiscalYear(),
     Number(defaultValues?.fiscalYear),
     Number(watchedFiscalYear),
     ...aipEntries.map((entry) => Number(entry.fiscalYear)),
@@ -614,6 +618,7 @@ function ReturnModal({ entry, onClose, onConfirm }) {
 }
 
 export default function AppEntries() {
+  const { fiscalYear, setFiscalYear } = useActionQueue()
   const { user } = useAuth()
   const permissions = usePermissions()
   const [creating, setCreating] = useState(false)
@@ -649,6 +654,7 @@ export default function AppEntries() {
   // it below "₱900" — so ABC sorts on the raw number and Mode on its label.
   const table = useServerTable(appApi.fetchAppEntries, {
     urlKey: 'appEntries',
+    baseParams: { fiscalYear },
     searchKeys: ['projectTitle', 'implementingUnitCode', 'description', 'fundSource', 'accountCode'],
     filters: [
       {
@@ -679,7 +685,7 @@ export default function AppEntries() {
         <EntryFormModal
           title="New procurement plan line"
           defaultValues={{
-            fiscalYear: new Date().getFullYear(),
+            fiscalYear: fiscalYear === 'all' ? currentFiscalYear() : Number(fiscalYear),
             planCycle: 'final',
             projectTitle: '',
             description: '',
@@ -754,6 +760,7 @@ export default function AppEntries() {
           )
         }
       />
+      <FiscalYearFilter value={fiscalYear} onChange={(year) => { paginationProps.onPageChange(1); setFiscalYear(year) }} />
 
       <Card bodyClassName="p-4">
         <TableToolbar {...table.toolbarProps} searchPlaceholder="Search project, description, fund or account…" />

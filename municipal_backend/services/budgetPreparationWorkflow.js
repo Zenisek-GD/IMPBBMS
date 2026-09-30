@@ -122,6 +122,24 @@ export const permissionForTransition = (action, currentStatus) => {
   return BUDGET_TRANSITIONS[action]?.permission ?? null;
 };
 
+export const PROPOSAL_DECISION_STAGES = {
+  review: { budget: 'pendingMbcReview', proposal: 'submitted', permission: 'budget.reviewProposal' },
+  finalise: { budget: 'pendingFinalisation', proposal: 'heard', permission: 'budget.finaliseExecutive' },
+};
+
+export const proceedingPermissions = (type) => ({
+  forum: ['budget.conductForum'],
+  hearing: ['budget.conductHearing'],
+  deliberation: ['budget.finaliseExecutive', 'budget.conductHearing'],
+})[type] ?? [];
+
+// Minutes may be prepared throughout preparation. Once the budget is sent
+// for approval, revising its supporting record requires a formal return.
+export const proceedingsEditableIn = (status) => [
+  'draft', 'returned', 'pendingMbcReview', 'pendingPlanningConsolidation',
+  'pendingBudgetForum', 'pendingBudgetHearing', 'pendingFinalisation',
+].includes(status);
+
 export const evaluateTransition = ({ action, currentStatus, remarks, budget, payload = {} }) => {
   const transition = BUDGET_TRANSITIONS[action];
   if (!transition) return { ok: false, message: `Unknown action: ${action}` };
@@ -141,7 +159,7 @@ export const evaluateTransition = ({ action, currentStatus, remarks, budget, pay
     };
   }
 
-  if (transition.requiresRemarks && !remarks?.trim()) {
+  if (transition.requiresRemarks && (typeof remarks !== 'string' || !remarks.trim())) {
     return { ok: false, message: "Remarks are required when returning a budget for revision." };
   }
 
@@ -166,7 +184,7 @@ export const evaluateTransition = ({ action, currentStatus, remarks, budget, pay
     }
   }
 
-  if (transition.requiresOrdinance && !payload.ordinanceNo?.trim()) {
+  if (transition.requiresOrdinance && (typeof payload.ordinanceNo !== 'string' || !payload.ordinanceNo.trim())) {
     return { ok: false, message: "The Appropriation Ordinance number is required." };
   }
 

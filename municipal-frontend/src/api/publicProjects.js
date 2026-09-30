@@ -5,8 +5,8 @@ import { apiClient } from './client'
 // kept in their own module so that stays obvious.
 const PUBLIC = '/public'
 
-export const fetchPublicOverview = () =>
-  apiClient.get(`${PUBLIC}/projects/overview`).then((res) => res.data)
+export const fetchPublicOverview = (params = {}) =>
+  apiClient.get(`${PUBLIC}/projects/overview`, { params }).then((res) => res.data)
 
 export const fetchPublicFilters = () =>
   apiClient.get(`${PUBLIC}/projects/filters`).then((res) => res.data)

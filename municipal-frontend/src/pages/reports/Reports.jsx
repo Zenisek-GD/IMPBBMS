@@ -7,6 +7,8 @@ import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Button from '../../components/ui/Button'
 import Pagination from '../../components/ui/Pagination'
+import { useActionQueue } from '../../context/useActionQueue'
+import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
 import fontFaces from '../../styles/fonts.css?inline'
 
 const fieldClass = 'min-h-11 w-full rounded-md border border-border-muted bg-surface px-3 py-2 text-[13px] text-text-primary focus:border-accent focus:outline-none'
@@ -75,6 +77,7 @@ async function buildPrintDocument(printWindow, report, user, filters) {
 
 export default function Reports() {
   const { user } = useAuth()
+  const { fiscalYear, setFiscalYear } = useActionQueue()
   const { reportType } = useParams()
   const navigate = useNavigate()
   const [catalog, setCatalog] = useState(null)
@@ -85,7 +88,12 @@ export default function Reports() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const [reportRequest, setReportRequest] = useState({ key: null, error: '' })
+  const currentData = data && String(data.fiscalYear) === String(fiscalYear) ? data : null
   const selected = catalog?.find((report) => report.key === reportType) || (!reportType ? catalog?.[0] : null)
+  const requestKey = JSON.stringify({ report: selected?.key, query, fiscalYear, refresh })
+  const displayLoading = loading || Boolean(selected && reportRequest.key !== requestKey)
+  const displayError = error || (reportRequest.key === requestKey ? reportRequest.error : '')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -96,11 +104,14 @@ export default function Reports() {
   useEffect(() => {
     if (!selected) return
     const controller = new AbortController()
-    fetchReport(selected.key, query, controller.signal)
-      .then((result) => { if (!controller.signal.aborted) { setData(result); setLoading(false) } })
-      .catch(async (issue) => { if (!controller.signal.aborted) { setError(await errorMessage(issue)); setLoading(false) } })
+    fetchReport(selected.key, { ...query, year: fiscalYear }, controller.signal)
+      .then((result) => { if (!controller.signal.aborted) { setData(result); setReportRequest({ key: requestKey, error: '' }); setLoading(false) } })
+      .catch(async (issue) => {
+        const message = await errorMessage(issue)
+        if (!controller.signal.aborted) { setReportRequest({ key: requestKey, error: message }); setLoading(false) }
+      })
     return () => controller.abort()
-  }, [selected, query, refresh])
+  }, [selected, query, fiscalYear, requestKey])
 
   const updateQuery = (next) => { setLoading(true); setError(''); setQuery(next) }
   const changeReport = (key) => { setDraft({}); setData(null); updateQuery({ page: 1, pageSize: 10, direction: 'desc' }); navigate(`/reports/${key}`) }
@@ -113,10 +124,10 @@ export default function Reports() {
       if (format === 'print') {
         if (!printWindow) throw new Error('Allow popups to open the print-friendly report.')
         printWindow.document.body.textContent = 'Preparing all filtered records for printing…'
-        const report = await fetchReport(selected.key, { ...query, format: 'print' })
-        await buildPrintDocument(printWindow, report, user, query)
+        const report = await fetchReport(selected.key, { ...query, year: fiscalYear, format: 'print' })
+        await buildPrintDocument(printWindow, report, user, { ...query, year: fiscalYear })
       } else {
-        const blob = await exportReportCsv(selected.key, query)
+        const blob = await exportReportCsv(selected.key, { ...query, year: fiscalYear })
         const url = URL.createObjectURL(blob)
         const link = document.createElement('a')
         link.href = url; link.download = `${selected.key}-${new Date().toISOString().slice(0, 10)}.csv`
@@ -132,12 +143,13 @@ export default function Reports() {
     <DashboardPage>
       <PageHeader title="Reports" subtitle="Detailed procurement records and official report generation. Each report follows your account’s access permissions." actions={
         <>
-          <Button variant="secondary" icon={RefreshCw} disabled={!selected || loading} onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh</Button>
-          <Button variant="info" icon={Printer} disabled={!selected?.canExport || exporting || loading} onClick={() => doExport('print')}>Print / PDF</Button>
-          <Button variant="info" icon={Download} disabled={!selected?.canExport || exporting || loading} onClick={() => doExport('csv')}>{exporting ? 'Preparing report…' : 'Export CSV'}</Button>
+          <Button variant="secondary" icon={RefreshCw} disabled={!selected || displayLoading} onClick={() => { setLoading(true); setError(''); setRefresh((value) => value + 1) }}>Refresh</Button>
+          <Button variant="info" icon={Printer} disabled={!selected?.canExport || exporting || displayLoading} onClick={() => doExport('print')}>Print / PDF</Button>
+          <Button variant="info" icon={Download} disabled={!selected?.canExport || exporting || displayLoading} onClick={() => doExport('csv')}>{exporting ? 'Preparing report…' : 'Export CSV'}</Button>
         </>
       } />
-      {error && <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{error}</p>}
+      <FiscalYearFilter value={fiscalYear} onChange={setFiscalYear} />
+      {displayError && <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{displayError}</p>}
       {catalog?.length === 0 && <p className="rounded-lg border border-border-muted bg-surface p-5 text-sm text-text-secondary">There are no reports available for your current permissions.</p>}
       {catalog?.length > 0 && <>
         <form onSubmit={(event) => { event.preventDefault(); updateQuery({ ...draft, page: 1, pageSize: query.pageSize, sort: query.sort, direction: query.direction }) }} className="rounded-lg border border-border-muted bg-surface p-4">
@@ -151,7 +163,7 @@ export default function Reports() {
             <label className="flex flex-col gap-1.5 text-xs text-text-secondary">From date<input type="date" value={draft.from || ''} onChange={(event) => setDraft({ ...draft, from: event.target.value })} className={fieldClass} /></label>
             <label className="flex flex-col gap-1.5 text-xs text-text-secondary">To date<input type="date" min={draft.from || undefined} value={draft.to || ''} onChange={(event) => setDraft({ ...draft, to: event.target.value })} className={fieldClass} /></label>
             <label className="flex flex-col gap-1.5 text-xs text-text-secondary sm:col-span-2">Search records<input type="search" placeholder="Search visible report details…" value={draft.search || ''} onChange={(event) => setDraft({ ...draft, search: event.target.value })} className={fieldClass} /></label>
-            {Object.entries(data?.key === selected?.key ? data.filters : {}).map(([key, options]) => <label key={key} className="flex flex-col gap-1.5 text-xs text-text-secondary">{FILTER_LABELS[key]}
+            {Object.entries(currentData?.key === selected?.key ? currentData.filters : {}).filter(([key]) => key !== 'year').map(([key, options]) => <label key={key} className="flex flex-col gap-1.5 text-xs text-text-secondary">{FILTER_LABELS[key]}
               <select value={draft[key] || ''} onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} className={fieldClass}>
                 <option value="">All</option>{options.map((value) => <option key={value} value={value}>{label(value)}</option>)}
               </select>
@@ -164,9 +176,9 @@ export default function Reports() {
           </div>
         </form>
         {!selected && <p role="alert" className="text-sm text-danger">This report is unavailable for your current permissions. Select an available report.</p>}
-        {selected && <section className="overflow-hidden rounded-lg border border-border-muted bg-surface" aria-busy={loading}>
-          <div className="flex items-center gap-2 border-b border-border-muted px-4 py-3"><FileText size={17} className="text-navy" /><h2 className="font-semibold text-navy">{selected.title}</h2></div>
-          {loading ? <p role="status" className="p-5 text-sm text-text-secondary">Loading report…</p> : data?.key === selected.key && <>
+        {selected && <section className="overflow-hidden rounded-lg border border-border-muted bg-surface" aria-busy={displayLoading}>
+          <div className="flex items-center gap-2 border-b border-border-muted px-4 py-3"><FileText size={17} className="text-navy" /><h2 className="font-semibold text-navy">{selected.title}</h2><span className="ml-auto text-xs text-text-secondary">{fiscalYear === 'all' ? 'All fiscal years (combined)' : `FY ${fiscalYear}`}</span></div>
+          {displayLoading ? <p role="status" className="p-5 text-sm text-text-secondary">Loading report…</p> : currentData?.key === selected.key && <>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-[12px]">
                 <thead className="bg-canvas text-text-secondary"><tr>{data.columns.map((column) => <th key={column.key} scope="col" className="whitespace-nowrap px-4 py-3" aria-sort={query.sort === column.key ? (query.direction === 'asc' ? 'ascending' : 'descending') : 'none'}><button type="button" className="flex items-center gap-1" onClick={() => sortBy(column.key)}>{column.label}{query.sort === column.key && (query.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}</button></th>)}</tr></thead>

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { ROLE_NAV } from '../../municipal-frontend/src/config/navigation.js';
+import { ROLE_NAV, applyRecordPermissions } from '../../municipal-frontend/src/config/navigation.js';
+import { canReadRecordPage } from '../../municipal-frontend/src/config/recordAccess.js';
+import { ROLE_PERMISSIONS } from '../config/permissionMatrix.js';
 import { landingRouteForRole } from '../../municipal-frontend/src/config/roleLanding.js';
 const requireFrontend = createRequire(new URL('../../municipal-frontend/package.json', import.meta.url));
 const { parse } = requireFrontend('@babel/parser');
@@ -15,7 +17,11 @@ function walk(node, allowed = null) {
     const attributes = node.openingElement.attributes;
     const element = attributes.find(attribute => attribute.name?.name === 'element')?.value?.expression;
     if (element?.openingElement?.name?.name === 'RoleRoute') {
-      allowed = element.openingElement.attributes.find(attribute => attribute.name?.name === 'allow').value.expression.elements.map(item => item.value);
+      const props = element.openingElement.attributes;
+      allowed = {
+        roles: props.find(attribute => attribute.name?.name === 'allow')?.value?.expression?.elements?.map(item => item.value) ?? [],
+        permission: props.find(attribute => attribute.name?.name === 'permission')?.value?.value,
+      };
     }
     const routePath = attributes.find(attribute => attribute.name?.name === 'path')?.value?.value;
     if (routePath) routes.set(routePath, allowed);
@@ -31,12 +37,26 @@ walk(ast);
 test('all configured role landing pages and sidebar links exist and accept their role', () => {
   const failures = [];
   for (const [role, nav] of Object.entries(ROLE_NAV)) {
-    const paths = [landingRouteForRole(role), ...nav.sections.flatMap(section => section.items.map(item => item.href))];
+    const permissions = ROLE_PERMISSIONS[role] ?? [];
+    const paths = [landingRouteForRole(role), ...applyRecordPermissions(nav.sections, permissions).flatMap(section => section.items.map(item => item.href))];
     for (const routePath of new Set(paths)) {
       const path = routePath.split('?')[0];
       if (!routes.has(path)) failures.push(`${role}: missing ${path}`);
-      else if (routes.get(path) && !routes.get(path).includes(role)) failures.push(`${role}: route denies ${path}`);
+      else if (routes.get(path)) {
+        const guard = routes.get(path);
+        const granted = canReadRecordPage(path, permissions) ?? (guard.roles.includes(role) || permissions.includes(guard.permission));
+        if (!granted) failures.push(`${role}: route denies ${path}`);
+      }
     }
   }
   assert.deepEqual(failures, []);
+});
+
+test('custom budget viewers can discover budget controls without gaining request or approval authority', () => {
+  const sections = applyRecordPermissions([], ['budget.view']);
+  assert.ok(sections.some(section => section.items.some(item => item.href === '/budget/controls')));
+  assert.equal(routes.get('/budget/controls').permission, 'budget.view');
+  assert.equal(canReadRecordPage('/budget/controls', ['budget.view']), true);
+  assert.equal(canReadRecordPage('/budget/controls', []), false);
+  assert.equal(applyRecordPermissions(sections, []).length, 0);
 });

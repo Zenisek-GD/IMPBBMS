@@ -1,3 +1,4 @@
+import { fundingIncludes, fundingYearCondition, fundingYearOf } from "../services/fundingYear.js";
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
 import {
@@ -25,7 +26,7 @@ import { parseListParams, pageEnvelope, searchCondition } from "../services/list
 const contractIncludes = {
   include: [
     { model: Vendor, as: "vendor" },
-    { model: Award, as: "award", include: [{ model: Rfq, as: "rfq" }] },
+    { model: Award, as: "award", include: [{ model: Rfq, as: "rfq", include: fundingIncludes() }] },
     { model: Delivery, as: "deliveries" },
     { model: User, as: "draftedBy", attributes: ["id", "name"] },
   ],
@@ -34,6 +35,7 @@ const contractIncludes = {
 const serialize = (contract) => ({
   id: contract.id,
   contractNo: contract.contractNo,
+  fiscalYear: fundingYearOf(contract.award?.rfq),
   poRef: contract.poRef,
   amount: Number(contract.amount),
   amountPaid: Number(contract.amountPaid ?? 0),
@@ -75,6 +77,8 @@ const serialize = (contract) => ({
 export const listContracts = async (req, res) => {
   const { status } = req.query;
   const where = {};
+  const fundingScope = fundingYearCondition(req.query.fiscalYear);
+  if (fundingScope) where[Op.and] = [fundingScope];
   const canViewAll = req.permissions.has("contract.view");
   if (status && canViewAll) where.status = status;
 
@@ -114,7 +118,7 @@ export const listContracts = async (req, res) => {
     "$award.rfq.title$",
     "$vendor.businessName$",
   ]);
-  if (search) where[Op.and] = [search];
+  if (search) where[Op.and] = [...(where[Op.and] ?? []), search];
 
   const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
   if (!wantsPaging) {
