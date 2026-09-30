@@ -1,1 +1,0 @@
-municipal-frontend/public/guide-videos/*.mp4 filter=lfs diff=lfs merge=lfs -text
