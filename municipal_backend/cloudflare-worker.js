@@ -126,7 +126,7 @@ const repairTruncatedJsonResponse = async (response) => {
 const configureDatabaseConnection = () => {
   if (!env.HYPERDRIVE) {
     throw new Error(
-      "The HYPERDRIVE binding is missing. Create it as described in CLOUDFLARE_DEPLOYMENT.md."
+      "The HYPERDRIVE binding is missing. Configure the HYPERDRIVE database binding in wrangler.jsonc before deploying."
     );
   }
   process.env.CLOUDFLARE_WORKER = "true";

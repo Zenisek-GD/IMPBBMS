@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/verifyGuideVideos.mjs && vite build",
+    "check:guide-videos": "node scripts/verifyGuideVideos.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
