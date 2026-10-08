@@ -18,6 +18,19 @@ import { downloadDocument } from '../../api/documents'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
+function SolicitationDetails({ rfq }) {
+  return <div className="space-y-2 text-xs text-text-secondary">
+    <p>Submission deadline: {new Date(rfq.closingDate).toLocaleString('en-PH')}</p>
+    <p>Bid opening: {rfq.openingDate ? new Date(rfq.openingDate).toLocaleString('en-PH') : 'Schedule pending'}</p>
+    {rfq.openingVenue && <p>Bid opening venue: {rfq.openingVenue}</p>}
+    {rfq.prebidRequired && <p>Pre-bid conference: {rfq.prebidAt ? new Date(rfq.prebidAt).toLocaleString('en-PH') : 'Schedule pending'}{rfq.prebidVenue && ` — ${rfq.prebidVenue}`}</p>}
+    {rfq.procurementContactPerson && <p>Procurement contact: {rfq.procurementContactPerson}</p>}
+    {rfq.procurementContactEmail && <p>Email: {rfq.procurementContactEmail}</p>}
+    {rfq.requiredSupplierDocuments && <p className="whitespace-pre-wrap">Required supplier documents: {rfq.requiredSupplierDocuments}</p>}
+    {(rfq.technicalSpecifications ?? []).filter((item) => item.specifications).map((item, index) => <p key={index} className="whitespace-pre-wrap">{item.description}: {item.specifications}</p>)}
+  </div>
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Submitting a bid is a two-step act (workflow requirement 14): enter the price,
 // then confirm with a code emailed to the accredited address.
@@ -32,6 +45,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
   const [price, setPrice] = useState('')
   const [technicalOffer, setTechnicalOffer] = useState(null)
   const [eligibilityEvidence, setEligibilityEvidence] = useState(null)
+  const [signedBidDocument, setSignedBidDocument] = useState(null)
   const [challenge, setChallenge] = useState(null)
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState('')
@@ -82,6 +96,7 @@ function BidModal({ rfq, onClose, onSubmitted }) {
         totalBidPrice: Number(price),
         reference: verified.reference,
         ticket: verified.ticket,
+        ...(signedBidDocument ? { signedBidDocument } : {}),
         ...(isSmallValue ? { technicalOffer, ...(eligibilityEvidence ? { eligibilityEvidence } : {}) } : {}),
       })
       onSubmitted()
@@ -202,6 +217,10 @@ function BidModal({ rfq, onClose, onSubmitted }) {
         </p>
       )}
 
+      <div className="mt-3 space-y-2 text-xs text-text-secondary">
+        <SolicitationDetails rfq={rfq} />
+        {!isSmallValue && <label className="block font-medium">Signed bid document (optional supporting file)<input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={(event) => setSignedBidDocument(event.target.files?.[0] ?? null)} className="mt-1 block w-full text-xs" /></label>}
+      </div>
       {isSmallValue && <div className="mt-4 space-y-3 rounded border border-border-muted p-3">
         <div><p className="text-xs font-semibold text-navy">RFQ technical specifications and terms</p><p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-text-secondary">{rfq.svpTechnicalSpecifications}</p></div>
         <label className="block text-xs font-medium text-text-secondary">Signed quotation and technical offer (PDF, PNG or JPEG)
@@ -271,6 +290,7 @@ export default function BidOpportunities() {
   const [myQuotations, setMyQuotations] = useState([])
   const [profile, setProfile] = useState(null)
   const [bidding, setBidding] = useState(null)
+  const [detailsFor, setDetailsFor] = useState(null)
   const [eligibilityFor, setEligibilityFor] = useState(null)
   const [notice, setNotice] = useState('')
   const [refreshToken, setRefreshToken] = useState(0)
@@ -375,6 +395,7 @@ export default function BidOpportunities() {
                       <dd className="mt-0.5 font-medium text-text-secondary">{new Date(rfq.closingDate).toLocaleString()}</dd>
                     </div>
                   </dl>
+                  <Button className="mt-4 w-full" variant="secondary" onClick={() => setDetailsFor(rfq)}>View solicitation details</Button>
                   {rfq.status === 'published' && verified && (
                     <Button className="mt-4 w-full" size="md" icon={Gavel} onClick={() => setBidding(rfq)}>
                       {rfq.modeKey === 'smallValueProcurement' ? 'Submit quotation' : 'Submit bid'}
@@ -410,6 +431,7 @@ export default function BidOpportunities() {
                       <Badge tone={RFQ_STATUS_TONES[rfq.status]}>{RFQ_STATUS_LABELS[rfq.status]}</Badge>
                     </td>
                     <td className="px-4 py-3">
+                      <Button size="table" variant="secondary" onClick={() => setDetailsFor(rfq)}>View solicitation details</Button>
                       {rfq.status === 'published' && verified && (
                         <Button
                           size="table"
@@ -443,6 +465,8 @@ export default function BidOpportunities() {
           </div>
         })}</div>
       </Card>}
+
+      {detailsFor && <Modal title={`Solicitation details — ${detailsFor.referenceNo}`} onClose={() => setDetailsFor(null)}><p className="mb-3 text-sm font-medium text-navy">{detailsFor.title}</p><SolicitationDetails rfq={detailsFor} />{detailsFor.svpTechnicalSpecifications && <p className="mt-3 whitespace-pre-wrap text-xs text-text-secondary">RFQ terms: {detailsFor.svpTechnicalSpecifications}</p>}<Button className="mt-4" variant="secondary" onClick={() => setDetailsFor(null)}>Close</Button></Modal>}
 
       {bidding && (
         <BidModal

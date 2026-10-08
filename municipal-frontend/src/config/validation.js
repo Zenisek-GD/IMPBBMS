@@ -80,6 +80,7 @@ export const counterSubmissionSchema = z
       .trim()
       .min(1, 'Registered business name is required')
       .max(200, 'That name is too long'),
+    supplierCategory: z.string().trim().max(255).optional(),
     tin: z.string().trim().max(40, 'That TIN is too long').optional().or(z.literal('')),
     organizationType: z.enum(['corporation', 'partnership', 'soleProprietorship', 'cooperative']),
     category: z.enum(['goods', 'infrastructure', 'consulting']),

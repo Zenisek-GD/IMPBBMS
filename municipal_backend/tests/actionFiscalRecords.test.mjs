@@ -38,7 +38,7 @@ test('solicitation year filter keeps search and supplier visibility and returns 
     assert.ok(where[Op.and], 'year predicate present');
     assert.ok(where[Op.or], 'search preserved');
     assert.deepEqual(where.status[Op.in], ['published', 'closed']);
-    assert.ok(include.find(row => row.as === 'purchaseRequisition').include[0].include);
+    assert.ok(include.find(row => row.as === 'purchaseRequisition').include.find(row => row.as === 'appEntry').include);
     return [{ id: 1, abc: 100, purchaseRequisition: { appEntry: { fiscalYear: 2026, appropriation: { fiscalYear: 2025 } } } }];
   });
   let result;

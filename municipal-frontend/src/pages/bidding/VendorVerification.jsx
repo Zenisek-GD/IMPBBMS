@@ -751,6 +751,7 @@ export default function VendorVerification() {
                   <tr key={vendor.id} className="border-t border-border-muted align-top">
                     <td className="px-4 py-3">
                       <p className="text-[13px] text-navy">{vendor.businessName}</p>
+                      {vendor.supplierCategory && <p className="mt-1 text-xs text-text-secondary">{vendor.supplierCategory}</p>}
                       <p className="mt-0.5 text-[11px] text-text-faint">
                         {vendor.organizationType}
                         {vendor.referenceCode && <span className="font-mono"> · {vendor.referenceCode}</span>}

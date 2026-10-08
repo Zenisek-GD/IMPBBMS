@@ -68,6 +68,7 @@ export function BidEvaluationModal({ bid, rfq, plan, requirements = [], onClose,
       <LargeFormPage.Section title="Final decision and recommendation">
         <div className="space-y-3">
           {!consulting && <label className="block text-sm">Final evaluation result<select required value={verdict} onChange={(event) => setVerdict(event.target.value)} className={inputClass}><option value="">Select final result</option><option value="passed">Pass</option><option value="failed">Fail</option></select></label>}
+          {!consulting && verdict === 'passed' && <label className="block text-sm">Failure reason<select value="none" disabled className={inputClass}><option value="none">None — evaluation passed</option></select></label>}
           {!consulting && verdict === 'failed' && <><label className="block text-sm">Reason for Failure / Non-Compliance<select required value={failureReason} onChange={(event) => setFailureReason(event.target.value)} className={inputClass}><option value="">Select failure reason</option>{failureReasons.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>{failureReason === 'other' && <label className="block text-sm">Explain the Other failure reason<textarea required value={failureExplanation} onChange={(event) => setFailureExplanation(event.target.value)} className={inputClass} /></label>}</>}
           <label className="block text-sm">Evaluation findings / remarks<textarea required={!consulting && verdict === 'failed'} rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} className={inputClass} /></label>
           <label className="block text-sm">Evaluator recommendation<textarea required rows={2} value={recommendation} onChange={(event) => setRecommendation(event.target.value)} className={inputClass} /></label>
@@ -164,6 +165,7 @@ export function TwgAssessmentModal({ bid, rfq, assessment, onClose, onSaved }) {
 
 export function CommitteeActionModal({ title, description, onClose, onSubmit, resolution = false, reasonRequired = false }) {
   const [attendance, setAttendance] = useState({ attendingMemberIds: [], presidingMemberId: '' })
+  const [resolutionNo, setResolutionNo] = useState('')
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -171,11 +173,12 @@ export function CommitteeActionModal({ title, description, onClose, onSubmit, re
     <p className="text-sm text-text-secondary">{description}</p>
     {reasonRequired && <label className="block text-sm">Reason for correction<textarea required value={reason} onChange={(event) => setReason(event.target.value)} className={inputClass} /></label>}
     <BacAttendance value={attendance} onChange={setAttendance} />
+    {resolution && <label className="block text-sm">BAC resolution number (optional)<input maxLength={255} value={resolutionNo} onChange={(event) => setResolutionNo(event.target.value)} className={inputClass} /><span className="text-xs text-text-faint">Enter the official reference, or leave blank for a generated number.</span></label>}
     {resolution && <p className="text-xs text-text-secondary">The participating members and their BAC positions are retained with the decision.</p>}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={saving || attendance.attendingMemberIds.length === 0 || (reasonRequired && !reason.trim())} onClick={async () => {
       setError(''); setSaving(true)
-      try { await onSubmit({ ...attendance, ...(reasonRequired ? { reason } : {}) }); onClose() } catch (err) { setError(err.response?.data?.message ?? 'Could not finalize the BAC action.') } finally { setSaving(false) }
+      try { await onSubmit({ ...attendance, ...(resolution ? { resolutionNo: resolutionNo.trim() || undefined } : {}), ...(reasonRequired ? { reason } : {}) }); onClose() } catch (err) { setError(err.response?.data?.message ?? 'Could not finalize the BAC action.') } finally { setSaving(false) }
     }}>{saving ? 'Finalizing…' : 'Finalize BAC action'}</Button></div>
   </div></Modal>
 }
@@ -190,8 +193,8 @@ export function PostQualificationModal({ bid, rfq, onClose, onSubmit }) {
     try { await onSubmit({ result: Object.values(checklist).every((value) => value === 'ok') ? 'passed' : 'failed', checklist, remarks }); onClose() } catch (err) { setError(err.response?.data?.message ?? 'Could not record the verification.') } finally { setSaving(false) }
   }}>
     {rfq?.modeKey === 'smallValueProcurement' && <div className="rounded border border-border-muted p-3"><p className="mb-2 text-sm font-semibold text-navy">Submitted quotation evidence</p><QuotationEvidence rfq={rfq} bid={bid} onError={setError} /></div>}
-    {Object.entries(checklist).map(([key, value]) => <label key={key} className="block text-sm capitalize text-text-secondary">{key} verification<select required value={value} onChange={(event) => setChecklist({ ...checklist, [key]: event.target.value })} className={inputClass}><option value="">Select result</option><option value="ok">Verified and compliant</option><option value="failed">Failed verification</option></select></label>)}
-    <label className="block text-xs text-text-secondary">Verification findings<textarea required rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} className={inputClass} /></label>
+    {Object.entries(checklist).map(([key, value]) => <label key={key} className="block text-sm capitalize text-text-secondary">{key} verification{key === 'financial' ? ' (documents and capacity)' : ''}<select required value={value} onChange={(event) => setChecklist({ ...checklist, [key]: event.target.value })} className={inputClass}><option value="">Select result</option><option value="ok">Verified and compliant</option><option value="failed">Failed verification</option></select></label>)}
+    <label className="block text-xs text-text-secondary">Verification findings<textarea required={Object.values(checklist).includes('failed') || rfq?.modeKey === 'smallValueProcurement'} rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} className={inputClass} /></label>
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Record verification'}</Button></div>
   </form></Modal>

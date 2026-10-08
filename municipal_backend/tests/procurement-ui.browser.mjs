@@ -76,6 +76,9 @@ test("procurement screens support dynamic evaluation, schedule approval, BAC fai
     await page.waitForFunction(()=>document.body.innerText.includes("Mandatory compliance checklist"));
     assert.match(await text(),category==="goods"?/Goods/:/Infrastructure Projects/);assert.doesNotMatch(await text(),/Approved quality criteria/);
     assert.equal(await disabled("Submit final evaluation"),true);
+    await page.evaluate(()=>{const label=[...document.querySelectorAll('label')].find(row=>row.textContent.includes('Final evaluation result'));const select=label.querySelector('select');select.value='passed';select.dispatchEvent(new Event('change',{bubbles:true}));});
+    await page.waitForFunction(()=>[...document.querySelectorAll('select')].some(select=>select.value==='none'&&select.disabled));
+    assert.match(await text(),/None.*evaluation passed/);
     await page.evaluate(()=>{const label=[...document.querySelectorAll('label')].find(row=>row.textContent.includes('Final evaluation result'));const select=label.querySelector('select');select.value='failed';select.dispatchEvent(new Event('change',{bubbles:true}));});
     await page.waitForFunction(()=>document.body.innerText.includes("Reason for Failure / Non-Compliance"));await click("Cancel");
   }

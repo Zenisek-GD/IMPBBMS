@@ -10,13 +10,14 @@ import { serializeAssessment } from "./twgController.js";
 import { scheduleError, weightError, assessmentCompliant, activeEvaluations, technicalAverage, complianceRequirementsFor } from "../services/evaluationPolicy.js";
 import { EvaluationPlan } from "../models/evaluationWorkflowModel.js";
 import { workflowError, actorAudit } from "../services/workflowSupport.js";
+import { solicitationInformation, postQualificationError, validDateOnly } from "../services/procurementInformation.js";
 import { assertBacAction, assertNewAttemptAllowed, assertNoPendingFailure, ensureProcurementAttempt, snapshotAttemptOutcome, committeeSnapshot } from "../services/procurementGovernance.js";
 import { sequelize } from "../models/db.js";
 import { Rfq, Bid, BidOpeningRecord, Evaluation, PostQualification, Award } from "../models/biddingModel.js";
 import { ProcurementMode } from "../models/procurementModeModel.js";
 import { Vendor } from "../models/vendorModel.js";
 import { Document, DOCUMENT_METADATA_ATTRIBUTES } from "../models/documentModel.js";
-import { PrHeader } from "../models/prModel.js";
+import { PrHeader, PrLineItem } from "../models/prModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Appropriation } from "../models/appropriationModel.js";
 import { ProjectAllocation } from "../models/budgetControlModel.js";
@@ -57,7 +58,7 @@ const rfqIncludes = {
   include: [
     { model: ProcurementAttempt, as: "attempt", attributes: ["id", "attemptNumber", "status"] },
     { model: ProcurementMode, as: "mode" },
-    { model: PrHeader, as: "purchaseRequisition" },
+    { model: PrHeader, as: "purchaseRequisition", include: [{ model: PrLineItem, as: "lineItems", separate: true }] },
     { model: User, as: "publishedBy", attributes: ["id", "name"] },
   ],
 };
@@ -68,6 +69,11 @@ const serializeRfq = (rfq) => ({
   statusLabel: rfq.status === "failed" && rfq.attempt ? failureStatusLabel(rfq.attempt.attemptNumber) : null,
   referenceNo: rfq.referenceNo,
   title: rfq.title,
+  openingVenue: rfq.openingVenue,
+  procurementContactPerson: rfq.procurementContactPerson,
+  procurementContactEmail: rfq.procurementContactEmail,
+  requiredSupplierDocuments: rfq.requiredSupplierDocuments,
+  technicalSpecifications: (rfq.purchaseRequisition?.lineItems ?? []).map((item) => ({ description: item.description, specifications: item.technicalSpecifications ?? null })),
   abc: Number(rfq.abc),
   category: rfq.category,
   svpTechnicalSpecifications: rfq.mode?.key === "smallValueProcurement" ? rfq.svpTechnicalSpecifications : null,
@@ -119,7 +125,22 @@ const serializeBid = (bid, { blind, includeFinancial, discloseQuotation = false 
   financialScore: !blind && !bid.financialSealed && bid.financialScore != null ? Number(bid.financialScore) : null,
   combinedScore: !blind && !bid.financialSealed && bid.combinedScore != null ? Number(bid.combinedScore) : null,
   twgAssessments: (bid.twgAssessments ?? []).filter((row) => row.status === "submitted").map(serializeAssessment),
+  postQualifications: blind ? [] : (bid.postQualifications ?? []).map((row) => ({ id: row.id, checklist: row.checklist, result: row.result, remarks: row.remarks, verifiedAt: row.verifiedAt, verifiedById: row.verifiedById })),
 });
+
+export const updateRfqInformation = async (req, res) => {
+  const fields = solicitationInformation(req.body);
+  const row = await withAuditTransaction(async (transaction, audit) => {
+    const rfq = await Rfq.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!rfq) throw workflowError("Procurement not found.", 404);
+    if (rfq.status !== "draft") throw workflowError("Published solicitation details are locked. Use the governed procurement revision process.", 409);
+    const before = Object.fromEntries(Object.keys(fields).map((key) => [key, rfq[key]]));
+    await rfq.update(fields, { transaction });
+    await audit(actorAudit(req, { actionType: "rfq.informationUpdated", entityRef: "rfq", entityId: rfq.id, summary: "Draft solicitation venue, contact and document information updated.", beforeState: before, afterState: fields }));
+    return rfq;
+  });
+  res.json({ ...serializeRfq(await Rfq.findByPk(row.id, rfqIncludes)), message: "Solicitation details saved." });
+};
 
 // ── RFQ / ITB ───────────────────────────────────────────────────────────────
 
@@ -181,7 +202,7 @@ export const listRfqs = async (req, res) => {
   const { status, search } = req.query;
   const where = {};
   const funding = fundingIncludes();
-  const listIncludes = { include: rfqIncludes.include.map(entry => entry.as === "purchaseRequisition" ? { ...entry, include: funding[0].include } : entry).concat(funding[1]) };
+  const listIncludes = { include: rfqIncludes.include.map(entry => entry.as === "purchaseRequisition" ? { ...entry, include: [...entry.include, ...funding[0].include] } : entry).concat(funding[1]) };
   const serialize = row => ({ ...serializeRfq(row), fiscalYear: fundingYearOf(row) });
   if (req.query.fiscalYear != null) {
     const scope = fundingYearCondition(req.query.fiscalYear, "");
@@ -286,6 +307,7 @@ export const createRfq = async (req, res) => {
       title: title?.trim() || pr.purpose || `Procurement for ${pr.prNumber}`,
       abc,
       category: category ?? "goods",
+      ...solicitationInformation(req.body),
       ...svpRequirementsFrom(req.body, modeKey),
       closingDate,
       ...config,
@@ -370,6 +392,7 @@ const createEpaSolicitation = async (req, res) => {
       title: title?.trim() || appEntry.projectTitle,
       abc,
       category: category ?? "goods",
+      ...solicitationInformation(req.body),
       ...svpRequirementsFrom(req.body, mode.key),
       closingDate,
       ...config,
@@ -628,6 +651,11 @@ export const submitBid = async (req, res) => {
   const isSmallValue = mode.key === "smallValueProcurement";
   const offerFile = req.files?.technicalOffer?.[0];
   const eligibilityFile = req.files?.eligibilityEvidence?.[0];
+  const signedBidFile = req.files?.signedBidDocument?.[0];
+  if (signedBidFile) {
+    const contentError = validateFileContent(signedBidFile);
+    if (contentError) return res.status(400).json({ message: contentError });
+  }
   if (!isSmallValue && (offerFile || eligibilityFile)) return res.status(400).json({ message: "SVP quotation files cannot be attached to this procurement mode." });
   if (isSmallValue) {
     if (!rfq.svpTechnicalSpecifications?.trim() || !SVP_ELIGIBILITY_DUE_STAGES.includes(rfq.svpEligibilityDueStage)) return res.status(409).json({ message: "This RFQ does not specify the technical terms and eligibility-document timing needed for quotation submission." });
@@ -742,8 +770,8 @@ export const submitBid = async (req, res) => {
   }, { transaction });
 
   const evidence = [];
-  if (isSmallValue) {
-    for (const [file, docType] of [[offerFile, "svpTechnicalOffer"], [eligibilityFile, "svpEligibilityEvidence"]]) {
+  {
+    for (const [file, docType] of [[signedBidFile, "signedBidDocument"], ...(isSmallValue ? [[offerFile, "svpTechnicalOffer"], [eligibilityFile, "svpEligibilityEvidence"]] : [])]) {
       if (!file) continue;
       const document = await Document.create({
         filename: safeFilename(file.originalname),
@@ -754,7 +782,7 @@ export const submitBid = async (req, res) => {
         entityRef: "bid",
         entityId: created.id,
         docType,
-        label: docType === "svpTechnicalOffer" ? "Submitted technical offer" : "Submitted eligibility evidence",
+        label: docType === "signedBidDocument" ? "Signed bid document" : docType === "svpTechnicalOffer" ? "Submitted technical offer" : "Submitted eligibility evidence",
         uploadedById: req.currentUser.id,
         uploadedAt: submittedAt,
       }, { transaction });
@@ -806,7 +834,8 @@ export const submitBid = async (req, res) => {
       totalBidPrice: price,
       abc: Number(rfq.abc),
       ...(securityRequired ? { bidSecurityForm: form, bidSecurityAmount: requiredAmount } : {}),
-      ...(isSmallValue ? { evidence, eligibilityDueStage: rfq.svpEligibilityDueStage } : {}),
+      evidence,
+      ...(isSmallValue ? { eligibilityDueStage: rfq.svpEligibilityDueStage } : {}),
       // The fact of verification, not the code.
       emailVerified: true,
     },
@@ -1062,11 +1091,12 @@ export const listBidsForRfq = async (req, res) => {
       { model: Vendor, as: "vendor" },
       { model: Evaluation, as: "evaluations" },
       { model: TwgAssessment, as: "twgAssessments", include: [{ model: User, as: "member", attributes: ["id", "name"] }] },
+      { model: PostQualification, as: "postQualifications" },
     ],
     order: [["blindLabel", "ASC"]],
   });
-  const evidence = quotationOpened && bids.length ? await Document.findAll({
-    where: { entityRef: "bid", entityId: { [Op.in]: bids.map((bid) => bid.id) }, docType: { [Op.in]: ["svpTechnicalOffer", "svpEligibilityEvidence"] } },
+  const evidence = !blind && bids.length ? await Document.findAll({
+    where: { entityRef: "bid", entityId: { [Op.in]: bids.map((bid) => bid.id) }, docType: { [Op.in]: ["svpTechnicalOffer", "svpEligibilityEvidence", "signedBidDocument"] } },
     attributes: DOCUMENT_METADATA_ATTRIBUTES,
   }) : [];
 
@@ -1093,7 +1123,7 @@ export const listBidsForRfq = async (req, res) => {
         includeFinancial: isSmallValue ? quotationOpened : !blind || bid.status === "technicalPassed",
         discloseQuotation: quotationOpened,
       }),
-      evidence: quotationOpened ? evidence.filter((document) => document.entityId === bid.id).map(({ id, filename, checksum, docType, uploadedAt }) => ({ id, filename, checksum, docType, uploadedAt })) : [],
+      evidence: !blind ? evidence.filter((document) => document.entityId === bid.id).map(({ id, filename, checksum, docType, uploadedAt }) => ({ id, filename, checksum, docType, uploadedAt })) : [],
     })),
   });
 };
@@ -1145,6 +1175,8 @@ export const submitPostQualification = async (req, res) => {
     await bid.reload({ transaction });
     await assertNoPendingFailure(currentRfq, { transaction });
     if (currentRfq.status !== "evaluated" || bid.status !== "technicalPassed") throw workflowError("The bid status changed. Reload before recording post-qualification.");
+    const verificationError = postQualificationError(req.body);
+    if (verificationError) throw workflowError(verificationError, 400);
     if (mode?.key === "smallValueProcurement" && result === "passed") {
       const evidence = await Document.findAll({ where: { entityRef: "bid", entityId: bid.id, docType: { [Op.in]: ["svpTechnicalOffer", "svpEligibilityEvidence"] } }, attributes: ["docType"], transaction });
       if (!["svpTechnicalOffer", "svpEligibilityEvidence"].every((type) => evidence.some((document) => document.docType === type))) throw workflowError("Review the submitted technical offer and eligibility evidence before recording a compliant supplier verification.");
@@ -1232,6 +1264,7 @@ const assertAwardTechnicalReview = async (bid, rfq, { transaction } = {}) => {
 };
 
 export const recommendAward = async (req, res) => {
+  if (req.body.resolutionNo != null && (typeof req.body.resolutionNo !== "string" || req.body.resolutionNo.length > 255)) throw workflowError("BAC resolution reference must be at most 255 characters.", 400);
   const bid = await Bid.findByPk(req.params.bidId, {
     include: [
       { model: Rfq, as: "rfq", include: [{ model: ProcurementMode, as: "mode" }] },
@@ -1362,7 +1395,7 @@ export const recommendAward = async (req, res) => {
       recommendedById: req.currentUser.id, status: "pendingHopeApproval", awardBasis: basis,
     }, { transaction });
     const resolution = await BacResolution.create({
-      resolutionNo: req.body.resolutionNo || await nextResolutionNo(year, transaction),
+      resolutionNo: req.body.resolutionNo?.trim() || await nextResolutionNo(year, transaction),
       type: "recommendAward", title: `Resolution recommending award of ${bid.rfq.referenceNo}`,
       recitals: req.body.remarks?.trim() || `${offersReceived} offers received; ${ranked.length} responsive bids. The recommended bidder ranked first as the ${basisLabel} (${basis}) and passed post-qualification.`,
       resolvedAt: new Date(), members: committeeSnapshot(context), quorumMet: true,
@@ -1505,14 +1538,19 @@ export const approveAward = async (req, res) => {
     await award.reload({ transaction, lock: transaction.LOCK.UPDATE });
     if (award.status !== "pendingHopeApproval" || lockedRfq.status !== "evaluated") throw workflowError("The procurement or award status changed. Reload before approving.");
     await assertAwardTechnicalReview({ id: award.bidId }, lockedRfq, { transaction });
-    await award.update({ status: "issued", approvedById: req.currentUser.id }, { transaction });
+    const noaDate = req.body?.noaDate || new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    if (!validDateOnly(noaDate) || noaDate > today) throw workflowError("Enter a valid Notice of Award issue date that is not in the future.", 400);
+    const externalNoaNumber = req.body?.externalNoaNumber;
+    if (externalNoaNumber != null && (typeof externalNoaNumber !== "string" || externalNoaNumber.length > 255)) throw workflowError("Existing Notice of Award reference must be at most 255 characters.", 400);
+    await award.update({ status: "issued", approvedById: req.currentUser.id, noaDate, externalNoaNumber: externalNoaNumber?.trim() || null }, { transaction });
     await Bid.update({ status: "awarded" }, { where: { id: award.bidId }, transaction });
     await Bid.update({ status: "lost" }, { where: { rfqId: award.rfqId, id: { [Op.ne]: award.bidId }, status: { [Op.notIn]: ["withdrawn", "technicalFailed", "postDisqualified"] } }, transaction });
     await lockedRfq.update({ status: "awarded" }, { transaction });
     const attempt = await ensureProcurementAttempt(lockedRfq, { transaction, actorId: req.currentUser.id });
     await attempt.update({ status: "successful", completedAt: new Date(), nextAction: "Contract preparation", outcomeSnapshot: await snapshotAttemptOutcome(lockedRfq, { transaction }) }, { transaction });
     await audit(actorAudit(req, { actionType: AUDIT_ACTIONS.AWARD_APPROVED, entityRef: "award", entityId: award.id, summary: `${award.noaNumber} approved. Proceed to contract preparation.`, beforeState: { status: "pendingHopeApproval" }, afterState: { status: "issued", rfqId: award.rfqId, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, approvedById: req.currentUser.id } }));
-    await audit(actorAudit(req, { actionType: "award.noticeIssued", entityRef: "award", entityId: award.id, summary: "Approved Notice of Award issued.", afterState: { rfqId: award.rfqId, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, bidId: award.bidId, vendorId: award.vendorId, noaNumber: award.noaNumber, status: "issued" } }));
+    await audit(actorAudit(req, { actionType: "award.noticeIssued", entityRef: "award", entityId: award.id, summary: "Approved Notice of Award issued.", afterState: { rfqId: award.rfqId, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, bidId: award.bidId, vendorId: award.vendorId, noaNumber: award.noaNumber, noaDate: award.noaDate, externalNoaNumber: award.externalNoaNumber, status: "issued" } }));
   });
 
   // Section 7.4: award issuance notifies the winner, and the others are told
@@ -1603,6 +1641,23 @@ export const disapproveAward = async (req, res) => {
   res.json({ id: award.id, status: "disapproved", grounds: grounds.trim() });
 };
 
+export const recordAwardReceipt = async (req, res) => {
+  const date = req.body?.supplierReceivedAt;
+  const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  if (!validDateOnly(date) || date > today) throw workflowError("Enter a valid supplier receipt date that is not in the future.", 400);
+  const award = await withAuditTransaction(async (transaction, audit) => {
+    const row = await Award.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!row) throw workflowError("Award not found.", 404);
+    if (!["issued", "accepted"].includes(row.status)) throw workflowError("Issue the approved Notice of Award before recording supplier receipt.", 409);
+    if (row.supplierReceivedAt) throw workflowError("Supplier receipt has already been recorded.", 409);
+    if (date < row.noaDate) throw workflowError("Supplier receipt cannot precede the Notice of Award issue date.", 400);
+    await row.update({ supplierReceivedAt: date, receiptRecordedById: req.currentUser.id, receiptRecordedAt: new Date() }, { transaction });
+    await audit(actorAudit(req, { actionType: "award.supplierReceiptRecorded", entityRef: "award", entityId: row.id, summary: "Supplier receipt of the issued Notice of Award recorded.", beforeState: { supplierReceivedAt: null }, afterState: { supplierReceivedAt: date, receiptRecordedById: req.currentUser.id } }));
+    return row;
+  });
+  res.json({ id: award.id, supplierReceivedAt: award.supplierReceivedAt, message: "Supplier receipt recorded." });
+};
+
 export const listAwards = async (req, res) => {
   const where = req.permissions.has("bidding.view")
     ? {}
@@ -1623,10 +1678,20 @@ export const listAwards = async (req, res) => {
     { model: Vendor, as: "vendor" },
     { model: User, as: "recommendedBy", attributes: ["id", "name"] },
   ];
+  const resolutionNumbers = new Map();
+  const loadResolutionNumbers = async (awards) => {
+    if (!awards.length) return;
+    const resolutions = await BacResolution.findAll({ where: { entityRef: "award", type: "recommendAward", entityId: { [Op.in]: awards.map((award) => award.id) } }, attributes: ["entityId", "resolutionNo"] });
+    for (const resolution of resolutions) resolutionNumbers.set(resolution.entityId, resolution.resolutionNo);
+  };
   const serializeAward = (award) => ({
     id: award.id,
     noaNumber: award.noaNumber,
     noaDate: award.noaDate,
+    externalNoaNumber: award.externalNoaNumber,
+    supplierReceivedAt: award.supplierReceivedAt,
+    awardBasis: award.awardBasis,
+    resolutionNo: resolutionNumbers.get(award.id) || null,
     amount: Number(award.amount),
     status: award.status,
     referenceNo: award.rfq?.referenceNo ?? null,
@@ -1641,6 +1706,7 @@ export const listAwards = async (req, res) => {
   const wantsPaging = Object.hasOwn(req.query, "page") || Object.hasOwn(req.query, "pageSize");
   if (!wantsPaging) {
     const awards = await Award.findAll({ where, include, order: [["createdAt", "DESC"]] });
+    await loadResolutionNumbers(awards);
     return res.json(awards.map(serializeAward));
   }
 
@@ -1663,6 +1729,7 @@ export const listAwards = async (req, res) => {
     distinct: true,
     subQuery: false,
   });
+  await loadResolutionNumbers(rows);
   return res.json(pageEnvelope({
     rows: rows.map(serializeAward),
     total: count,

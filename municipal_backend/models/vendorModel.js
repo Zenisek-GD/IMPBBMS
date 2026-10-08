@@ -7,6 +7,7 @@ import { Announcement } from "./announcementModel.js";
 // procurement flow (registration + document submission), not open sign-up.
 export const Vendor = sequelize.define("Vendor", {
   businessName: { type: DataTypes.STRING, allowNull: false },
+  supplierCategory: { type: DataTypes.STRING, allowNull: true },
   tin: { type: DataTypes.STRING, allowNull: true },
 
   // Drives which eligibility documents apply — see

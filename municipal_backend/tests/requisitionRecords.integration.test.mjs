@@ -46,7 +46,7 @@ test("APP, requisition and appropriation records enforce scope, atomic audits an
   const aipA = await aip(officeA.id), aipB = await aip(officeB.id);
   const appPayload = (department = officeA, fund = fundingA, investment = aipA, abc = 1000) => ({ projectTitle: `Procurement plan ${++serial}`, abc, fiscalYear: 2028, implementingUnitId: department.id, appropriationId: fund.id, aipEntryId: investment.id, targetStartQuarter: "Q1", targetCompletionQuarter: "Q4", procurementMode: mode.key, planCycle: "final", category: "goods" });
   const makeApp = async (department = officeA, fund = fundingA, abc = 1000) => m.AppEntry.create({ ...appPayload(department, fund, department.id === officeA.id ? aipA : aipB, abc), status: "locked", createdById: department.id === officeA.id ? requester.id : other.id });
-  const items = (amount) => [{ description: "Required office supplies", quantity: 1, unit: "lot", unitCost: amount }];
+  const items = (amount) => [{ description: "Required office supplies", quantity: 1, unit: "lot", unitCost: amount, hasUsefulLifeOverOneYear: false }];
   const call = async (handler, actor, params = {}, body = {}, query = {}) => {
     let output; let statusCode = 200;
     const req = { currentUser: actor, params, body, query, permissions: new Set(actor.testPermissions), ip: "127.0.0.1" };
@@ -54,7 +54,7 @@ test("APP, requisition and appropriation records enforce scope, atomic audits an
     if (statusCode >= 400) throw Object.assign(new Error(output?.message ?? "Request rejected"), { status: statusCode });
     return output;
   };
-  const createPr = (actor, app, amount) => call(prApi.createPr, actor, {}, { appEntryId: app.id, purpose: "Office operations", dateRequired: "2028-12-31", lineItems: items(amount) });
+  const createPr = (actor, app, amount) => call(prApi.createPr, actor, {}, { appEntryId: app.id, purpose: "Office operations", isEmergency: false, dateRequired: "2028-12-31", lineItems: items(amount) });
   const makePr = async (app, amount, status) => {
     const pr = await m.PrHeader.create({ prNumber: `PR-RECORD-${++serial}`, dateRequired: "2028-12-31", purpose: "Office operations", appEntryId: app.id, departmentId: app.implementingUnitId, requesterId: requester.id, totalAmount: amount, status });
     await m.PrLineItem.create({ ...items(amount)[0], lineTotal: amount, prHeaderId: pr.id }); return pr;

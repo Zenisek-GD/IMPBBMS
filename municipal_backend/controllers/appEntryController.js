@@ -22,6 +22,7 @@ import { assertBacAction, committeeSnapshot } from "../services/procurementGover
 import { actorAudit, workflowError } from "../services/workflowSupport.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { APP_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, recordState } from "../services/requisitionRecords.js";
+import { justificationError } from "../services/procurementInformation.js";
 
 // IRR Sec. 7.7 — the lump sum for foreseeable emergencies "shall not be more
 // than four percent (4%) of the Procuring Entity's total appropriations for
@@ -32,6 +33,7 @@ const serialize = (entry) => ({
   id: entry.id,
   projectTitle: entry.projectTitle,
   description: entry.description,
+  categoryDetails: entry.categoryDetails,
   mfoId: entry.mfoId,
   papCode: entry.papCode,
   uacsCode: entry.uacsCode,
@@ -45,6 +47,7 @@ const serialize = (entry) => ({
   targetStartQuarter: entry.targetStartQuarter,
   targetCompletionQuarter: entry.targetCompletionQuarter,
   justification: entry.justification,
+  justificationStatus: entry.justificationStatus,
   fiscalYear: entry.fiscalYear,
   status: entry.status,
   planStage: entry.planStage,
@@ -78,6 +81,7 @@ const serialize = (entry) => ({
   // programmed for this purpose.
   aipEntryId: entry.aipEntryId ?? null,
   aipEntryTitle: entry.aipEntry?.title ?? null,
+  expectedOutput: entry.aipEntry?.expectedOutput ?? null,
   revisionRemarks: entry.revisionRemarks,
   revisedAt: entry.revisedAt,
   cancelledAt: entry.cancelledAt,
@@ -101,6 +105,7 @@ const withIncludes = {
 const EDITABLE_APP_FIELDS = [
   "projectTitle",
   "description",
+  "categoryDetails",
   "mfoId",
   "papCode",
   "uacsCode",
@@ -114,6 +119,7 @@ const EDITABLE_APP_FIELDS = [
   "targetStartQuarter",
   "targetCompletionQuarter",
   "justification",
+  "justificationStatus",
   "fiscalYear",
   "implementingUnitId",
   "appropriationId",
@@ -234,7 +240,11 @@ const liveRequisitionsFor = (appEntryId, transaction) =>
   });
 
 // Section 4.3 validation rules, enforced server-side.
-const validateEntry = ({ fiscalYear, abc, targetStartQuarter, targetCompletionQuarter, procurementMode, justification }) => {
+const validateEntry = ({ fiscalYear, abc, targetStartQuarter, targetCompletionQuarter, procurementMode, justification, justificationStatus, projectTitle, category, categoryDetails }) => {
+  if (typeof projectTitle !== "string" || !projectTitle.trim()) return "Project title is required.";
+  if (!["goods", "infrastructure", "consulting"].includes(category)) return "Select a procurement category.";
+  if (categoryDetails != null && (typeof categoryDetails !== "string" || categoryDetails.length > 255)) return "Category details must be text of at most 255 characters.";
+  if (justification != null && typeof justification !== "string") return "The procurement mode justification must be text.";
   if (fiscalYear !== undefined && (!Number.isInteger(Number(fiscalYear)) || Number(fiscalYear) < 2000 || Number(fiscalYear) > 2100)) {
     return "A valid fiscal year is required.";
   }
@@ -254,9 +264,8 @@ const validateEntry = ({ fiscalYear, abc, targetStartQuarter, targetCompletionQu
   }
 
   // Section 4.3: alternative procurement modes require a justification.
-  if (procurementMode && procurementMode !== "competitiveBidding" && !justification?.trim()) {
-    return "A justification is required when using an alternative procurement mode.";
-  }
+  const reasonError = justificationError({ status: justificationStatus, text: justification, applicable: procurementMode && procurementMode !== "competitiveBidding", label: "Alternative procurement mode justification" });
+  if (reasonError) return reasonError;
 
   return null;
 };
@@ -438,6 +447,7 @@ const validatePlanLinks = async (payload, { excludeAppEntryId, transaction } = {
 
 export const createAppEntry = async (req, res) => {
   const payload = pickEditable(req.body, EDITABLE_APP_FIELDS);
+  if (payload.justificationStatus === "") payload.justificationStatus = null;
   payload.implementingUnitId = Number(payload.implementingUnitId ?? req.currentUser.departmentId);
   payload.fiscalYear = Number(payload.fiscalYear ?? new Date().getFullYear());
   payload.planCycle = payload.planCycle ?? "final";
@@ -457,6 +467,7 @@ export const updateAppEntry = async (req, res) => {
   const initial = await AppEntry.findByPk(req.params.id);
   if (!initial) throw workflowError("APP entry not found.", 404);
   const body = pickEditable(req.body, EDITABLE_APP_FIELDS);
+  if (body.justificationStatus === "") body.justificationStatus = null;
   const entry = await withAuditTransaction(async (transaction, audit) => {
     await lockFundingLines([initial.appropriationId, body.appropriationId], transaction);
     const current = await AppEntry.findByPk(initial.id, { transaction, lock: transaction.LOCK.UPDATE });

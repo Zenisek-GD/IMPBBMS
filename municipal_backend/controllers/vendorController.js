@@ -90,6 +90,7 @@ const serialize = (vendor, invitation) => ({
   id: vendor.id,
   referenceCode: vendor.referenceCode,
   businessName: vendor.businessName,
+  supplierCategory: vendor.supplierCategory,
   tin: vendor.tin,
   organizationType: vendor.organizationType,
   isJointVenture: vendor.isJointVenture,
@@ -216,6 +217,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@,]+\.[a-z]{2,}$/i;
 export const recordCounterSubmission = async (req, res) => {
   const {
     businessName,
+    supplierCategory,
     tin,
     organizationType,
     isJointVenture,
@@ -236,6 +238,7 @@ export const recordCounterSubmission = async (req, res) => {
   const errors = {};
 
   const cleanBusinessName = String(businessName ?? "").trim();
+  if (supplierCategory != null && (typeof supplierCategory !== "string" || supplierCategory.length > 255)) errors.supplierCategory = "Supplier category must be text of at most 255 characters.";
   if (!cleanBusinessName) errors.businessName = "Registered business name is required.";
   else if (cleanBusinessName.length > 200) errors.businessName = "That name is too long.";
 
@@ -324,6 +327,7 @@ export const recordCounterSubmission = async (req, res) => {
 
   const profile = {
     businessName: cleanBusinessName,
+    supplierCategory: supplierCategory?.trim() || null,
     tin: String(tin ?? "").trim() || null,
     organizationType: organizationType ?? "corporation",
     isJointVenture: Boolean(isJointVenture),

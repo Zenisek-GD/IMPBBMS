@@ -129,6 +129,7 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
     try {
       const result = await biddingApi.recordCounterSubmission({
         businessName: values.businessName,
+        supplierCategory: values.supplierCategory ?? '',
         tin: values.tin || null,
         organizationType: values.organizationType,
         isJointVenture: values.isJointVenture,
@@ -213,6 +214,7 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
       </LargeFormPage.Section>
 
       <LargeFormPage.Section title="Business identity">
+        <FormField label="Supplier category (optional)" registration={register('supplierCategory')} error={errors.supplierCategory?.message ?? fieldErrors.supplierCategory} />
         <div className="flex flex-col gap-3">
           <FormField
             label="Registered business name"

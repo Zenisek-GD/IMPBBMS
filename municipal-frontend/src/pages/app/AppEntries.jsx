@@ -56,6 +56,7 @@ const entrySchema = z
     planCycle: z.enum(['indicative', 'final']),
     projectTitle: z.string().trim().min(1, 'Project title is required'),
     description: z.string().optional(),
+    categoryDetails: z.string().max(255, 'Category details must be at most 255 characters.').optional(),
     category: z.enum(['goods', 'infrastructure', 'consulting'], { message: 'Select a procurement category.' }),
     aipEntryId: z.coerce.number({ message: 'An investment program project is required' }).positive(
       'Select the investment program project this APP line will procure.'
@@ -76,6 +77,7 @@ const entrySchema = z
     papCode: z.string().optional(),
     uacsCode: z.string().optional(),
     justification: z.string().optional(),
+    justificationStatus: z.enum(['provided', 'notApplicable', '']).nullable().optional(),
   })
   .superRefine((values, ctx) => {
     if (values.planCycle === 'final' && !values.appropriationId) {
@@ -99,6 +101,8 @@ const entrySchema = z
         message: 'A justification is required for alternative procurement modes.',
       })
     }
+    if (values.justificationStatus === 'notApplicable' && values.procurementMode !== 'competitiveBidding') ctx.addIssue({ code: 'custom', path: ['justificationStatus'], message: 'Alternative procurement modes require a justification.' })
+    if (values.justificationStatus === 'provided' && !values.justification?.trim()) ctx.addIssue({ code: 'custom', path: ['justification'], message: 'Enter the explanation or select Not Applicable when public bidding applies.' })
   })
 
 const peso = (value) =>
@@ -181,6 +185,10 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
 
   const watchedAbc = useWatch({ control, name: 'abc' })
   const watchedCategory = useWatch({ control, name: 'category' })
+  const watchedMode = useWatch({ control, name: 'procurementMode' })
+  const justificationStatus = useWatch({ control, name: 'justificationStatus' })
+  const watchedAipEntry = useWatch({ control, name: 'aipEntryId' })
+  const selectedProject = aipEntries.find((entry) => String(entry.id) === String(watchedAipEntry))
   const watchedAppropriation = useWatch({ control, name: 'appropriationId' })
   const year = Number(watchedFiscalYear)
   const fiscalYears = [...new Set([
@@ -370,6 +378,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
               ))}
             </select>
             {errors.aipEntryId && <p className="mt-1 text-xs text-danger">{errors.aipEntryId.message}</p>}
+            {selectedProject && <dl className="mt-3 space-y-1 text-xs text-text-secondary"><div><dt className="font-medium">Development goal / sector</dt><dd>{selectedProject.goalTitle ?? selectedProject.developmentGoalTitle ?? selectedProject.sectorLabel ?? 'See linked development goal in Planning'}</dd></div><div><dt className="font-medium">Expected output</dt><dd>{selectedProject.expectedOutput || 'Not recorded in the linked AIP project'}</dd></div></dl>}
             {!linkedRecordsLoading && !linkedRecordsError && yearAipEntries.length === 0 && (
               <p className="mt-1.5 text-xs text-warning">
                 No adopted investment program projects are available for FY {year}. Create and adopt an AIP
@@ -451,6 +460,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
             {errors.category && <p className="mt-1 text-xs text-danger">{errors.category.message}</p>}
             <p className="mt-1.5 text-xs text-text-faint">Used to calculate the suggested procurement mode.</p>
           </div>
+          <FormField label="Category details (optional)" maxLength={255} error={errors.categoryDetails?.message} registration={register('categoryDetails')} hint="Describe the type of goods, infrastructure or consulting service." />
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField
@@ -493,7 +503,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
             </label>
             <select
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
-              {...register('procurementMode')}
+              {...register('procurementMode', { onChange: (event) => { if (event.target.value !== 'competitiveBidding') setValue('justificationStatus', 'provided') } })}
             >
               {PROCUREMENT_MODES.map((mode) => (
                 <option key={mode.key} value={mode.key}>
@@ -505,15 +515,20 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
 
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-              Justification (required for alternative modes)
+              Reason for alternative procurement mode
             </label>
-            <textarea
+            <select aria-label="Reason for alternative procurement mode response" value={watchedMode !== 'competitiveBidding' ? 'provided' : justificationStatus ?? ''} onChange={(event) => { setValue('justificationStatus', event.target.value); if (event.target.value === 'notApplicable') setValue('justification', '') }} className="min-h-11 w-full rounded border border-border-muted bg-surface px-4 py-2 text-sm text-navy">
+              {watchedMode === 'competitiveBidding' && <><option value="">Select a response</option><option value="notApplicable">Not Applicable — regular public bidding</option></>}<option value="provided">Provide an explanation</option>
+            </select>
+            {errors.justificationStatus && <p className="mt-1 text-xs text-danger">{errors.justificationStatus.message}</p>}
+            {justificationStatus !== 'notApplicable' && <textarea
               rows={2}
               className={`w-full rounded border px-4 py-2 text-sm text-navy focus:outline-none ${
                 errors.justification ? 'border-danger' : 'border-border-muted focus:border-navy'
               }`}
               {...register('justification')}
-            />
+            />}
+            {justificationStatus === 'notApplicable' && <p className="mt-1 text-xs text-text-faint">Not Applicable will be saved explicitly. An alternative mode still requires an explanation.</p>}
             {errors.justification && <p className="mt-1 text-xs text-danger">{errors.justification.message}</p>}
           </div>
         </div>
@@ -689,6 +704,7 @@ export default function AppEntries() {
             planCycle: 'final',
             projectTitle: '',
             description: '',
+            categoryDetails: '',
             category: 'goods',
             aipEntryId: '',
             appropriationId: '',
@@ -704,6 +720,7 @@ export default function AppEntries() {
             papCode: '',
             uacsCode: '',
             justification: '',
+            justificationStatus: '',
           }}
           onClose={() => setCreating(false)}
           onSubmit={async (values) => {
@@ -734,6 +751,8 @@ export default function AppEntries() {
             papCode: editing.papCode ?? '',
             uacsCode: editing.uacsCode ?? '',
             justification: editing.justification ?? '',
+            justificationStatus: editing.justificationStatus ?? (editing.justification ? 'provided' : ''),
+            categoryDetails: editing.categoryDetails ?? '',
           }}
           onClose={() => setEditing(null)}
           onSubmit={async (values) => {

@@ -24,6 +24,8 @@ import SortableTh, { Th } from '../../components/ui/SortableTh'
 import { NextInline } from '../../components/ui/NextStep'
 import { rfqNext } from '../../config/nextSteps'
 import { useServerTable } from '../../components/ui/useServerTable'
+import SolicitationInformationFields from './SolicitationInformationFields'
+import AwardQueue from './AwardQueue'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
@@ -122,7 +124,7 @@ function CreateRfqModal({ onClose, onCreated }) {
               setError('')
               setSaving(true)
               try {
-                await biddingApi.createRfq({ prHeaderId: Number(form.prHeaderId), title: form.title, category: form.category, ...(isSmallValue ? { svpTechnicalSpecifications: form.svpTechnicalSpecifications, svpEligibilityDueStage: form.svpEligibilityDueStage } : {}), ...schedulePayload(form) })
+                await biddingApi.createRfq({ prHeaderId: Number(form.prHeaderId), title: form.title, category: form.category, openingVenue: form.openingVenue ?? '', procurementContactPerson: form.procurementContactPerson ?? '', procurementContactEmail: form.procurementContactEmail ?? '', requiredSupplierDocuments: form.requiredSupplierDocuments ?? '', ...(isSmallValue ? { svpTechnicalSpecifications: form.svpTechnicalSpecifications, svpEligibilityDueStage: form.svpEligibilityDueStage } : {}), ...schedulePayload(form) })
                 onCreated()
                 onClose()
               } catch (err) {
@@ -163,6 +165,7 @@ function CreateRfqModal({ onClose, onCreated }) {
         </div>
       </LargeFormPage.Section>
 
+      <LargeFormPage.Section title="Venue, contact and document requirements"><SolicitationInformationFields form={form} setForm={setForm} /></LargeFormPage.Section>
       <LargeFormPage.Section
         title="Solicitation"
         description="What bidders will see on the advertisement."
@@ -585,6 +588,8 @@ export default function RfqManagement() {
       {abstractFor && (
         <AbstractOfBidsModal rfq={abstractFor} onClose={() => setAbstractFor(null)} />
       )}
+
+      {canPublish && <AwardQueue onChanged={refresh} />}
 
       {opening && (
         <Modal title={`${opening.modeKey === 'smallValueProcurement' ? 'Open quotations' : 'Open bids'} — ${opening.referenceNo}`} onClose={() => setOpening(null)}>

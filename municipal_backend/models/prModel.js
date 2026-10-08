@@ -42,8 +42,9 @@ export const PrHeader = sequelize.define(
 
     // Section 5.3: emergency requisitions bypass the 15-day lead time but
     // require a justification.
-    isEmergency: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    isEmergency: { type: DataTypes.BOOLEAN, allowNull: true, defaultValue: false },
     justification: { type: DataTypes.TEXT, allowNull: true },
+    justificationStatus: { type: DataTypes.ENUM("provided", "notApplicable"), allowNull: true },
 
     // Denormalised sum of the line items, recomputed on every write so it can
     // be compared against the linked APP entry's remaining balance.
@@ -93,6 +94,7 @@ export const PrHeader = sequelize.define(
     // and an officer behind it even for requisitions that never reach an RFQ.
     modeDeterminedAt: { type: DataTypes.DATE, allowNull: true },
     modeJustification: { type: DataTypes.TEXT, allowNull: true },
+    modeJustificationStatus: { type: DataTypes.ENUM("provided", "notApplicable"), allowNull: true },
     // What the threshold service indicated at the time, kept alongside what was
     // chosen. A determination that departed from the indicated mode is the
     // thing an auditor looks for, and it cannot be reconstructed later if the
@@ -130,6 +132,7 @@ export const ASSET_CLASS_LABELS = {
 
 export const PrLineItem = sequelize.define("PrLineItem", {
   description: { type: DataTypes.STRING, allowNull: false },
+  technicalSpecifications: { type: DataTypes.TEXT, allowNull: true },
   unit: { type: DataTypes.STRING, allowNull: true },
   quantity: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
   unitCost: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
@@ -138,7 +141,7 @@ export const PrLineItem = sequelize.define("PrLineItem", {
   // Whether the item lasts beyond one accounting period. This is the requester's
   // to state — the system cannot infer it from a description — and it is what
   // the classification below is derived from.
-  hasUsefulLifeOverOneYear: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  hasUsefulLifeOverOneYear: { type: DataTypes.BOOLEAN, allowNull: true, defaultValue: false },
 
   // Derived server-side from `hasUsefulLifeOverOneYear` and the **unit** cost
   // against the threshold. Unit cost, not line total: ten chairs at ₱6,000 are

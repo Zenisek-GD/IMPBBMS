@@ -9,6 +9,7 @@ export const createRfq = (payload) =>
 
 export const updateRfqSchedule = (rfqId, payload) =>
   apiClient.patch(`/bidding/rfqs/${rfqId}/schedule`, payload).then((res) => res.data)
+export const updateRfqInformation = (rfqId, payload) => apiClient.patch(`/bidding/rfqs/${rfqId}/information`, payload).then((res) => res.data)
 
 export const updateSvpTerms = (rfqId, payload) =>
   apiClient.patch(`/bidding/rfqs/${rfqId}/svp-terms`, payload).then((res) => res.data)
@@ -31,7 +32,7 @@ export const verifyBidCode = (id, reference, code) =>
   apiClient.post(`/bidding/rfqs/${id}/bids/verify-code`, { reference, code }).then((res) => res.data)
 
 export const submitBid = (id, payload) => {
-  if (payload.technicalOffer) {
+  if (payload.technicalOffer || payload.signedBidDocument) {
     const form = new FormData()
     for (const [key, value] of Object.entries(payload)) if (value != null) form.append(key, value)
     return apiClient.post(`/bidding/rfqs/${id}/bids`, form).then((res) => res.data)
@@ -61,7 +62,8 @@ export const submitPostQualification = (bidId, payload) =>
 export const recommendAward = (bidId, payload) =>
   apiClient.post(`/bidding/bids/${bidId}/recommend-award`, payload).then((res) => res.data)
 
-export const approveAward = (id) => apiClient.post(`/bidding/awards/${id}/approve`).then((res) => res.data)
+export const approveAward = (id, payload = {}) => apiClient.post(`/bidding/awards/${id}/approve`, payload).then((res) => res.data)
+export const recordAwardReceipt = (id, supplierReceivedAt) => apiClient.post(`/bidding/awards/${id}/receipt`, { supplierReceivedAt }).then((res) => res.data)
 export const fetchAwards = (params = {}) => apiClient.get('/bidding/awards', { params }).then((res) => res.data)
 
 // Vendor registration

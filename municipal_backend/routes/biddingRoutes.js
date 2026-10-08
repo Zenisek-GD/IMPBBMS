@@ -1,6 +1,7 @@
 import express from "express";
 import { getEvaluationPlan, saveEvaluationPlan, approveEvaluationPlan, declareEvaluatorConflict, returnEvaluationForCorrection, getEvaluationAdministration, requestCriteriaAmendment, approveCriteriaAmendment } from "../controllers/evaluationWorkflowController.js";
 import { updateRfqSchedule, updateSvpTerms } from "../controllers/biddingController.js";
+import { updateRfqInformation, recordAwardReceipt } from "../controllers/biddingController.js";
 import { listTwg, declareTwgConflict, saveTwg } from "../controllers/twgController.js";
 import {
   listRfqs,
@@ -48,6 +49,7 @@ router.get(
 router.post("/rfqs", requirePermission("bidding.publish"), createRfq);
 router.patch("/rfqs/:id/schedule", requirePermission("bidding.publish"), updateRfqSchedule);
 router.patch("/rfqs/:id/svp-terms", requirePermission("bidding.publish"), updateSvpTerms);
+router.patch("/rfqs/:id/information", requirePermission("bidding.publish"), updateRfqInformation);
 router.get("/rfqs/:id/twg", requireAnyPermission("bidding.view", "bidding.evaluate", "bidding.technicalInput", "bidding.chairEvaluation", "audit.viewAll"), listTwg);
 router.post("/rfqs/:id/twg/declaration", requirePermission("bidding.technicalInput"), declareTwgConflict);
 router.post("/bids/:bidId/twg", requirePermission("bidding.technicalInput"), saveTwg);
@@ -83,6 +85,7 @@ router.post(
 const receiveQuotationEvidence = (req, res, next) => upload.fields([
   { name: "technicalOffer", maxCount: 1 },
   { name: "eligibilityEvidence", maxCount: 1 },
+  { name: "signedBidDocument", maxCount: 1 },
 ])(req, res, (error) => error ? res.status(400).json({ message: describeUploadError(error) }) : next());
 router.post("/rfqs/:id/bids", requirePermission("bidding.submitBid"), rateLimit({ bucket: "upload", max: 60 }), receiveQuotationEvidence, submitBid);
 router.get("/my-quotations", requirePermission("bidding.submitBid"), listMyQuotations);
@@ -113,6 +116,7 @@ router.post(
 );
 router.post("/bids/:bidId/recommend-award", requirePermission("bidding.chairEvaluation"), recommendAward);
 router.post("/awards/:id/approve", requirePermission("bidding.award"), approveAward);
+router.post("/awards/:id/receipt", requirePermission("bidding.publish"), recordAwardReceipt);
 
 // RA 12009 Sec. 66 — the HoPE may disapprove on written grounds furnished to
 // the BAC. Same permission as approval: it is the same decision, either way.

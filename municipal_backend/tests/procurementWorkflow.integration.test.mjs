@@ -96,8 +96,8 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
     await call(evalApi.closeEvaluation,chair,{id:rfq.id},{attendingMemberIds});
     assert.equal((await a.reload()).combinedScore,"72.5000");
     assert.equal((await b.reload()).combinedScore,"85.0000");
-    await assert.rejects(call(bidding.submitPostQualification,member,{bidId:a.id},{result:"passed"}), /highest-ranked/);
-    await call(bidding.submitPostQualification,member,{bidId:b.id},{result:"passed"});
+    await assert.rejects(call(bidding.submitPostQualification,member,{bidId:a.id},{result:"passed",checklist:{legal:"ok",technical:"ok",financial:"ok"}}), /highest-ranked/);
+    await call(bidding.submitPostQualification,member,{bidId:b.id},{result:"passed",checklist:{legal:"ok",technical:"ok",financial:"ok"}});
     let award = await call(bidding.recommendAward,chair,{bidId:b.id},{attendingMemberIds});
     assert.equal(award.statusCode,201);
     assert.equal(await m.BacResolution.count({where:{entityRef:"award",entityId:award.body.id}}),1);
@@ -125,7 +125,7 @@ test("procurement workflow and additive migration against isolated MySQL", { ski
     await call(evalApi.submitEvaluation,member,{bidId:bid.id},{noConflictDeclared:true,criteriaBreakdown:{...goodsChecks,technicalSpecifications:"nonCompliant"},verdict:"failed",failureReason:"technicalSpecification",remarks:"Mandatory specification missing.",recommendation:"Exclude this non-compliant bid."});
     await call(evalApi.closeEvaluation,chair,{id:rfq.id},{attendingMemberIds});
     assert.equal((await bid.reload()).status,"technicalFailed"); assert.equal(bid.financialSealed,true); assert.equal(bid.combinedScore,null);
-    assert.equal((await call(bidding.submitPostQualification,member,{bidId:bid.id},{result:"passed"})).statusCode,409);
+    assert.equal((await call(bidding.submitPostQualification,member,{bidId:bid.id},{result:"passed",checklist:{legal:"ok",technical:"ok",financial:"ok"}})).statusCode,409);
   });
   await t.test("no-bid opening does not silently fail, histories preserve two attempts and require independent BAC review", async () => {
     const rfq = await makeRfq("goods","closed");

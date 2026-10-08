@@ -31,6 +31,7 @@ import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../service
 import { AUDIT_ACTIONS } from "../services/auditLog.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { PR_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, hasCentralAccess, recordState } from "../services/requisitionRecords.js";
+import { procurementAnswer, justificationError, validDateOnly } from "../services/procurementInformation.js";
 
 // ── What a requester may actually write ──────────────────────────────────────
 // Everything else on the model — status, the four certification stamps, the
@@ -43,7 +44,13 @@ import { PR_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, hasCen
 // four signatures forged and the total raised past the APP balance, producing
 // no obligation and no audit entry. A whitelist is the fix; a blacklist would
 // have to be updated every time a column is added.
-const EDITABLE_PR_FIELDS = ["purpose", "dateRequired", "isEmergency", "justification"];
+const EDITABLE_PR_FIELDS = ["purpose", "dateRequired", "isEmergency", "justification", "justificationStatus"];
+const editableHeader = (body, { creating = false } = {}) => {
+  const header = pickEditable(body, EDITABLE_PR_FIELDS);
+  if (creating || Object.hasOwn(header, "isEmergency")) header.isEmergency = procurementAnswer(header.isEmergency, "Emergency purchase");
+  if (header.justificationStatus === "") header.justificationStatus = null;
+  return header;
+};
 
 const pickEditable = (body, allowed) =>
   Object.fromEntries(Object.entries(body ?? {}).filter(([key]) => allowed.includes(key)));
@@ -80,6 +87,7 @@ const serialize = (pr) => ({
   dateRequired: pr.dateRequired,
   isEmergency: pr.isEmergency,
   justification: pr.justification,
+  justificationStatus: pr.justificationStatus,
   totalAmount: Number(pr.totalAmount),
   status: pr.status,
   returnRemarks: pr.returnRemarks,
@@ -105,6 +113,7 @@ const serialize = (pr) => ({
   modeDeterminedAt: pr.modeDeterminedAt,
   modeDeterminedByName: pr.modeDeterminedBy?.name ?? null,
   modeJustification: pr.modeJustification,
+  modeJustificationStatus: pr.modeJustificationStatus,
   suggestedModeKey: pr.suggestedModeKey,
   // True where the committee chose something other than what the thresholds
   // indicated. Surfaced rather than left to be worked out by comparing two
@@ -118,10 +127,13 @@ const serialize = (pr) => ({
   appEntryTitle: pr.appEntry?.projectTitle ?? null,
   appEntryAbc: pr.appEntry ? Number(pr.appEntry.abc) : null,
   departmentCode: pr.department?.code ?? null,
+  departmentName: pr.department?.name ?? null,
+  plannedFundSource: pr.appEntry?.fundSource ?? null,
   requesterName: pr.requester?.name ?? null,
   lineItems: (pr.lineItems ?? []).map((item) => ({
     id: item.id,
     description: item.description,
+    technicalSpecifications: item.technicalSpecifications,
     unit: item.unit,
     quantity: Number(item.quantity),
     unitCost: Number(item.unitCost),
@@ -172,7 +184,7 @@ export const remainingBalanceFor = async (appEntryId, { excludePrId, transaction
 // the determination is the BAC's — the system's job is to make sure the
 // committee cannot say it did not know the rule.
 export const getModeSuggestion = async (req, res) => {
-  const pr = await PrHeader.findByPk(req.params.id, { include: [{ model: AppEntry, as: "appEntry", attributes: ["category"] }] });
+  const pr = await PrHeader.findByPk(req.params.id, { include: [{ model: AppEntry, as: "appEntry", attributes: ["category", "procurementMode", "justification"] }] });
   if (!pr) return res.status(404).json({ message: "Requisition not found." });
 
   const lgu = await getLguProfile();
@@ -182,6 +194,8 @@ export const getModeSuggestion = async (req, res) => {
 
   res.json({
     abc: Number(pr.totalAmount),
+    plannedMode: pr.appEntry?.procurementMode ?? null,
+    plannedJustification: pr.appEntry?.justification ?? null,
     lgu: { type: lgu.lguType, incomeClass: lgu.incomeClass },
     ...suggestion,
     modes: modes.map((mode) => ({
@@ -213,7 +227,9 @@ const computeLineItems = (rawItems, { capitalizationThreshold }) => {
 
   const items = [];
   for (const raw of rawItems) {
-    if (!raw.description?.trim()) return { error: "Every line item needs a description." };
+    if (typeof raw?.description !== "string" || !raw.description.trim()) return { error: "Every line item needs a description." };
+    if (raw.description.trim().length > 255) return { error: "Line item descriptions must be at most 255 characters; use technical specifications for longer details." };
+    if (raw.technicalSpecifications != null && (typeof raw.technicalSpecifications !== "string" || raw.technicalSpecifications.length > 8000)) return { error: "Technical specifications must be text of at most 8000 characters." };
 
     const quantity = Number(raw.quantity);
     const unitCost = Number(raw.unitCost);
@@ -224,7 +240,7 @@ const computeLineItems = (rawItems, { capitalizationThreshold }) => {
       return { error: `Unit cost for "${raw.description}" must be greater than 0.` };
     }
 
-    const hasUsefulLifeOverOneYear = Boolean(raw.hasUsefulLifeOverOneYear);
+    const hasUsefulLifeOverOneYear = procurementAnswer(raw.hasUsefulLifeOverOneYear, `Useful life for ${raw.description}`);
 
     // Section 5.3: estimated costs are validated and summed automatically —
     // the client never supplies the line total. The asset class is derived the
@@ -232,6 +248,7 @@ const computeLineItems = (rawItems, { capitalizationThreshold }) => {
     // purchase may be charged to, so it must not be assertable from the form.
     items.push({
       description: raw.description.trim(),
+      technicalSpecifications: raw.technicalSpecifications?.trim() || null,
       unit: raw.unit ?? null,
       quantity,
       unitCost,
@@ -269,8 +286,13 @@ const EXPENSE_CLASS_HINT = {
   capitalOutlay: "Capital Outlay",
 };
 
-const validateHeader = ({ dateRequired, isEmergency, justification }, { submitting }) => {
-  if (!dateRequired) return "Date required is mandatory.";
+const validateHeader = ({ purpose, dateRequired, isEmergency, justification, justificationStatus }, { submitting }) => {
+  if (!validDateOnly(dateRequired)) return "Enter a valid date required.";
+  if (submitting && (typeof purpose !== "string" || !purpose.trim())) return "Purchase requisition purpose is required before submission.";
+  if (submitting && isEmergency == null) return "Select Yes or No for Emergency purchase before submission.";
+  if (justification != null && typeof justification !== "string") return "Emergency justification must be text.";
+  const reasonError = justificationError({ status: justificationStatus, text: justification, applicable: isEmergency === true, label: "Emergency justification" });
+  if (reasonError) return reasonError;
 
   if (isEmergency) {
     if (!justification || justification.trim().length < EMERGENCY_JUSTIFICATION_MIN_LENGTH) {
@@ -368,6 +390,7 @@ const validateRequisition = async (header, app, items, total, { transaction, exc
   const error = validateHeader(header, { submitting });
   if (error) throw workflowError(error, 400);
   if (!items.length || !Number.isFinite(Number(total)) || Number(total) <= 0) throw workflowError("At least one valid requisition line item is required.", 400);
+  if (submitting && items.some((item) => item.hasUsefulLifeOverOneYear == null)) throw workflowError("Select Yes or No for useful life on every line item before submission.", 400);
   const appropriation = app.appropriationId ? await Appropriation.findByPk(app.appropriationId, { transaction }) : null;
   const classError = expenseClassMismatch(items, appropriation?.expenseClass);
   if (classError) throw workflowError(classError, 400);
@@ -380,7 +403,7 @@ export const createPr = async (req, res) => {
   const observed = await AppEntry.findByPk(req.body?.appEntryId);
   if (!observed) throw workflowError("A linked approved APP entry is required.", 400);
   assertDepartmentScope(req, observed.implementingUnitId, PR_CENTRAL_PERMISSIONS, "requisitions");
-  const header = pickEditable(req.body, EDITABLE_PR_FIELDS);
+  const header = editableHeader(req.body, { creating: true });
   const computed = computeLineItems(req.body.lineItems, await getLguProfile());
   if (computed.error) throw workflowError(computed.error, 400);
   const created = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
@@ -400,7 +423,7 @@ export const createPr = async (req, res) => {
 export const updatePr = async (req, res) => {
   const observed = await PrHeader.findByPk(req.params.id, withIncludes);
   if (!observed) throw workflowError("Requisition not found.", 404);
-  const header = pickEditable(req.body, EDITABLE_PR_FIELDS);
+  const header = editableHeader(req.body);
   let computed;
   if (Object.hasOwn(req.body, "lineItems")) {
     computed = computeLineItems(req.body.lineItems, await getLguProfile());
@@ -481,13 +504,15 @@ export const transitionPr = async (req, res) => {
     if (action === "determineMode") {
       const lgu = await getLguProfile();
       suggestion = suggestProcurementMode(Number(current.totalAmount), lgu, app?.category ?? "all");
-      const chosenKey = req.body.procurementModeKey ?? suggestion.suggested;
+      const chosenKey = req.body.procurementModeKey ?? app?.procurementMode ?? suggestion.suggested;
       if (/negotiated/i.test(chosenKey)) throw workflowError("Negotiated Procurement requires approved failures, eligibility review and BAC approval. Start it from procurement attempt history.");
       const amountIssue = procurementAmountError(Number(current.totalAmount), chosenKey, lgu, app?.category ?? "all");
       if (amountIssue) throw workflowError(amountIssue, 400);
       modeRecord = await ProcurementMode.findOne({ where: { key: chosenKey }, transaction });
       if (!modeRecord) throw workflowError(`Unknown procurement mode: ${chosenKey}.`, 400);
-      if ((chosenKey !== suggestion.suggested || (app?.procurementMode && app.procurementMode !== chosenKey)) && !req.body.justification?.trim()) throw workflowError("Record the BAC's justification for departing from the approved plan or suggested procurement mode.", 400);
+      const justificationApplies = Boolean(modeRecord.requiresJustification) || (chosenKey !== "competitiveBidding" && chosenKey !== suggestion.suggested) || (app?.procurementMode && app.procurementMode !== chosenKey);
+      const reasonError = justificationError({ status: req.body.justificationStatus, text: req.body.justification, applicable: justificationApplies, label: "BAC mode determination justification" });
+      if (reasonError) throw workflowError(reasonError, 400);
       if (modeRecord.requiresHopeApproval && !req.body.hopeApprovalReference?.trim()) throw workflowError("Record the required prior HoPE approval reference for this procurement mode.");
       bac = await assertBacAction(req, { transaction });
     }
@@ -498,10 +523,10 @@ export const transitionPr = async (req, res) => {
     if (action === "certify") Object.assign(changes, { appropriationCertifiedAt: new Date(), appropriationCertifiedById: req.currentUser.id, fundSource });
     if (action === "obligate") Object.assign(changes, { fundsReservedAt: new Date(), obligatedById: req.currentUser.id });
     if (action === "determineMode") Object.assign(changes, { procurementModeId: modeRecord.id, modeDeterminedAt: new Date(), modeDeterminedById: req.currentUser.id,
-      suggestedModeKey: suggestion.suggested, modeJustification: req.body.justification?.trim() || `Determined per ${suggestion.citation}: ${suggestion.rationale}` });
+      suggestedModeKey: suggestion.suggested, modeJustificationStatus: req.body.justificationStatus || null, modeJustification: req.body.justificationStatus === "notApplicable" ? null : req.body.justification?.trim() || `Determined per ${suggestion.citation}: ${suggestion.rationale}` });
     if (action === "return") {
       changes.returnRemarks = remarks.trim();
-      for (const key of ["cashCertifiedAt", "cashCertifiedById", "mayorApprovedAt", "mayorApprovedById", "appropriationCertifiedAt", "appropriationCertifiedById", "fundsReservedAt", "obligatedById", "fundSource", "procurementModeId", "modeDeterminedAt", "modeDeterminedById", "suggestedModeKey", "modeJustification"]) changes[key] = null;
+      for (const key of ["cashCertifiedAt", "cashCertifiedById", "mayorApprovedAt", "mayorApprovedById", "appropriationCertifiedAt", "appropriationCertifiedById", "fundsReservedAt", "obligatedById", "fundSource", "procurementModeId", "modeDeterminedAt", "modeDeterminedById", "suggestedModeKey", "modeJustification", "modeJustificationStatus"]) changes[key] = null;
       for (const obligation of existingObligations.filter((row) => row.status === "obligated")) {
         const before = recordState(obligation);
         await obligation.update({ status: "cancelled", cancelledAt: new Date(), cancellationReason: `${current.prNumber} returned: ${remarks.trim()}` }, { transaction });

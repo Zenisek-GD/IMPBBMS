@@ -82,6 +82,7 @@ export const AppEntry = sequelize.define(
   {
     projectTitle: { type: DataTypes.STRING, allowNull: false },
     description: { type: DataTypes.TEXT, allowNull: true },
+    categoryDetails: { type: DataTypes.STRING, allowNull: true },
 
     // Section 4.4 reference codes.
     mfoId: { type: DataTypes.STRING, allowNull: true },
@@ -105,6 +106,7 @@ export const AppEntry = sequelize.define(
 
     // Section 4.3: alternative procurement modes require a justification.
     justification: { type: DataTypes.TEXT, allowNull: true },
+    justificationStatus: { type: DataTypes.ENUM("provided", "notApplicable"), allowNull: true },
 
     fiscalYear: { type: DataTypes.INTEGER, allowNull: false },
     status: { type: DataTypes.ENUM(...APP_STATES), allowNull: false, defaultValue: "draft" },

@@ -51,7 +51,7 @@ export const submitEvaluation = async (req, res) => {
     const supportingDocuments = await normalizeSupportingDocuments(req.body.supportingDocuments, rfq, { transaction });
     const attempt = await ensureProcurementAttempt(rfq, { transaction, actorId: req.currentUser.id });
     if (!previous) await audit(actorAudit(req, { actionType: "evaluation.started", entityRef: "bid", entityId: bid.id, summary: "Authorized BAC evaluator started the procurement-category evaluation.", afterState: { rfqId: rfq.id, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, evaluatorId: req.currentUser.id, category: rfq.category, evaluationPlanId: plan?.id ?? null } }));
-    const created = await Evaluation.create({ bidId: bid.id, evaluatorId: req.currentUser.id, criteriaBreakdown: rated ? req.body.criteriaBreakdown : { verdict: req.body.verdict, requirementsExamined: req.body.criteriaBreakdown }, score, blindFlag, remarks: req.body.remarks ?? null, noConflictDeclared: true, declaredAt: declaration.declaredAt, submittedAt: new Date(), status: "submitted", failureReason: req.body.verdict === "failed" ? req.body.failureReason : null, failureExplanation: req.body.verdict === "failed" ? req.body.failureExplanation ?? req.body.remarks : null, requirementRemarks: req.body.requirementRemarks ?? {}, recommendation: req.body.recommendation.trim(), supportingDocuments, evaluationPlanId: plan?.id ?? null }, { transaction });
+    const created = await Evaluation.create({ bidId: bid.id, evaluatorId: req.currentUser.id, criteriaBreakdown: rated ? req.body.criteriaBreakdown : { verdict: req.body.verdict, requirementsExamined: req.body.criteriaBreakdown }, score, blindFlag, remarks: req.body.remarks ?? null, noConflictDeclared: true, declaredAt: declaration.declaredAt, submittedAt: new Date(), status: "submitted", failureReason: req.body.verdict === "failed" ? req.body.failureReason : (!rated || (score >= Number(plan.passingScore) && consultingMinimumsMet(req.body.criteriaBreakdown, plan))) ? "none" : "failedVerification", failureExplanation: req.body.verdict === "failed" ? req.body.failureExplanation ?? req.body.remarks : null, requirementRemarks: req.body.requirementRemarks ?? {}, recommendation: req.body.recommendation.trim(), supportingDocuments, evaluationPlanId: plan?.id ?? null }, { transaction });
     if (previous) {
       const correction = await EvaluationReturn.findOne({ where: { targetType: "evaluation", targetId: previous.id, correctedAt: null }, transaction });
       if (!correction) throw workflowError("The authorized correction record is missing; resubmission cannot proceed.");
@@ -62,7 +62,7 @@ export const submitEvaluation = async (req, res) => {
     await audit(actorAudit(req, { actionType: "evaluation.submitted", entityRef: "bid", entityId: bid.id, summary: "BAC evaluation submitted after review of the TWG assessment.", afterState: { ...created.toJSON(), rfqId: rfq.id, attemptId: attempt.id, attemptNumber: attempt.attemptNumber, evaluationId: created.id, reviewedTwgIds: twg.map((row) => row.id), declarationId: declaration.id, declarationRole: declaration.role } }));
     return created;
   });
-  res.status(201).json({ id: evaluation.id, score: Number(evaluation.score), blindFlag: evaluation.blindFlag, message: evaluation.failureReason ? "Evaluation submitted. The bid was marked as failed with its non-compliance reason. The BAC will review the completed evaluations." : "Evaluation submitted successfully and locked. The BAC may finalize the evaluation after all required reviews and quorum are complete." });
+  res.status(201).json({ id: evaluation.id, score: Number(evaluation.score), blindFlag: evaluation.blindFlag, message: evaluation.failureReason && evaluation.failureReason !== "none" ? "Evaluation submitted. The bid was marked as failed with its non-compliance reason. The BAC will review the completed evaluations." : "Evaluation submitted successfully and locked. The BAC may finalize the evaluation after all required reviews and quorum are complete." });
 };
 
 export const closeEvaluation = async (req, res) => {
@@ -97,7 +97,7 @@ export const closeEvaluation = async (req, res) => {
     for (const bid of bids) {
       const passed = responsive.some((row) => row.id === bid.id);
       const failureReasons = passed ? [] : [
-        ...bid.evaluations.filter((row) => row.failureReason).map((row) => `${row.failureReason}: ${row.failureExplanation || row.remarks || "Non-compliance recorded"}`),
+        ...bid.evaluations.filter((row) => row.failureReason && row.failureReason !== "none").map((row) => `${row.failureReason}: ${row.failureExplanation || row.remarks || "Non-compliance recorded"}`),
         ...(Number(bid.totalBidPrice) <= 0 || Number(bid.totalBidPrice) > Number(rfq.abc) ? ["Bid price is invalid or exceeds the approved budget."] : []),
         ...(rfq.twgRequired && bid.twgAssessments.some((row) => row.status === "submitted" && !row.excludedForConflict && !assessmentCompliant(row)) ? ["The bid did not satisfy mandatory TWG technical requirements."] : []),
         ...(plan && (technicalAverage(bid.evaluations) < Number(plan.passingScore) || bid.evaluations.some((row) => !consultingMinimumsMet(row.criteriaBreakdown, plan))) ? ["The bid did not meet the approved quality passing score or criterion minimum."] : []),

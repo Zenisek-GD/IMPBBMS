@@ -30,16 +30,18 @@ import NextStep, { NextInline } from '../../components/ui/NextStep'
 import { prNext } from '../../config/nextSteps'
 import { useServerTable } from '../../components/ui/useServerTable'
 import useDraftRecovery from '../../hooks/useDraftRecovery'
+import YesNoSelect from '../../components/ui/YesNoSelect'
 
 const peso = (value) =>
   `₱${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 const emptyLine = () => ({
   description: '',
+  technicalSpecifications: '',
   unit: '',
   quantity: '',
   unitCost: '',
-  hasUsefulLifeOverOneYear: false,
+  hasUsefulLifeOverOneYear: null,
 })
 
 // Mirrors classifyLineItem() on the server so the requester sees the
@@ -57,8 +59,9 @@ function PrFormModal({ existing, onClose, onSaved }) {
   const [appEntryId, setAppEntryId] = useState(existing?.appEntryId ?? '')
   const [purpose, setPurpose] = useState(existing?.purpose ?? '')
   const [dateRequired, setDateRequired] = useState(existing?.dateRequired ?? '')
-  const [isEmergency, setIsEmergency] = useState(existing?.isEmergency ?? false)
+  const [isEmergency, setIsEmergency] = useState(existing?.isEmergency ?? null)
   const [justification, setJustification] = useState(existing?.justification ?? '')
+  const [justificationStatus, setJustificationStatus] = useState(existing?.justificationStatus ?? (existing?.justification ? 'provided' : ''))
   const [lines, setLines] = useState(
     existing?.lineItems?.length ? existing.lineItems.map((l) => ({ ...l })) : [emptyLine()]
   )
@@ -68,14 +71,15 @@ function PrFormModal({ existing, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const draft = useDraftRecovery({
     key: existing ? `purchase-requisition-${existing.id}` : 'purchase-requisition-new',
-    value: { appEntryId, purpose, dateRequired, isEmergency, justification, lines, formYear },
+    value: { appEntryId, purpose, dateRequired, isEmergency, justification, justificationStatus, lines, formYear },
     onRestore: (saved) => {
       setFormYear(String(existing?.fiscalYear ?? saved.formYear ?? appEntries.find((entry) => String(entry.id) === String(saved.appEntryId))?.fiscalYear ?? fiscalYear))
       setAppEntryId(saved.appEntryId ?? '')
       setPurpose(saved.purpose ?? '')
       setDateRequired(saved.dateRequired ?? '')
-      setIsEmergency(Boolean(saved.isEmergency))
+      setIsEmergency(saved.isEmergency ?? null)
       setJustification(saved.justification ?? '')
+      setJustificationStatus(saved.justificationStatus ?? '')
       setLines(Array.isArray(saved.lines) && saved.lines.length ? saved.lines : [emptyLine()])
     },
   })
@@ -151,14 +155,16 @@ function PrFormModal({ existing, onClose, onSaved }) {
         dateRequired,
         isEmergency,
         justification,
+        justificationStatus: justificationStatus || null,
         lineItems: lines.map((line) => ({
           description: line.description,
+          technicalSpecifications: line.technicalSpecifications ?? '',
           unit: line.unit,
           quantity: Number(line.quantity),
           unitCost: Number(line.unitCost),
           // The classification itself is derived server-side; what the form
           // sends is the only part it can know — whether the item lasts.
-          hasUsefulLifeOverOneYear: Boolean(line.hasUsefulLifeOverOneYear),
+          hasUsefulLifeOverOneYear: line.hasUsefulLifeOverOneYear,
         })),
       }
       if (existing) await prApi.updatePr(existing.id, payload)
@@ -277,27 +283,21 @@ function PrFormModal({ existing, onClose, onSaved }) {
                 className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
               />
             </div>
-            <label className="flex items-center gap-2 pb-3 text-[13px] text-text-secondary">
-              <input
-                type="checkbox"
-                checked={isEmergency}
-                onChange={(event) => setIsEmergency(event.target.checked)}
-              />
-              Emergency requisition
-            </label>
+            <YesNoSelect label="Emergency purchase" value={isEmergency} onChange={(value) => { setIsEmergency(value); setJustificationStatus(value === true ? 'provided' : ''); setJustification('') }} />
           </div>
 
-          {!isEmergency && (
+          {isEmergency === false && (
             <p className="flex items-start gap-2 text-xs text-text-faint">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               Non-emergency requisitions must be dated at least 15 days out. Checked at submission, not while drafting.
             </p>
           )}
+          {isEmergency === false && <label className="block text-xs font-medium text-text-secondary">Emergency justification response<select aria-label="Emergency justification response" value={justificationStatus} onChange={(event) => { setJustificationStatus(event.target.value); if (event.target.value === 'notApplicable') setJustification('') }} className="mt-1 min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy"><option value="">Select a response (optional)</option><option value="notApplicable">Not Applicable</option><option value="provided">Provide optional notes</option></select></label>}
 
-          {isEmergency && (
+          {(isEmergency === true || justificationStatus === 'provided') && (
             <div>
               <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
-                Emergency justification (minimum 30 characters)
+                {isEmergency === true ? 'Emergency justification (minimum 30 characters)' : 'Optional emergency notes'}
               </label>
               <textarea
                 rows={2}
@@ -305,7 +305,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
                 onChange={(event) => setJustification(event.target.value)}
                 className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
               />
-              <p className="mt-1 text-xs text-text-faint">{justification.trim().length} / 30 characters</p>
+              {isEmergency === true && <p className="mt-1 text-xs text-text-faint">{justification.trim().length} / 30 characters</p>}
             </div>
           )}
         </div>
@@ -313,7 +313,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
 
       <LargeFormPage.Section
         title="Line items"
-        description="What is being bought. Tick whether each item lasts over one year — that decides how it is charged."
+        description="What is being bought. Answer Yes or No for each item's useful life before submitting the requisition."
       >
         <div>
           <div className="mb-2 flex items-center justify-between">
@@ -377,17 +377,8 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       ticked, so nobody discovers the classification at
                       certification. */}
                   <div className="mt-2 flex flex-wrap items-center gap-3 pl-1">
-                    <label className="flex min-h-[44px] items-center gap-2 text-xs text-text-secondary">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(line.hasUsefulLifeOverOneYear)}
-                        onChange={(event) =>
-                          updateLine(index, 'hasUsefulLifeOverOneYear', event.target.checked)
-                        }
-                      />
-                      Useful life over one year
-                    </label>
-                    <Badge tone={ASSET_CLASS_TONES[assetClass]}>{ASSET_CLASS_LABELS[assetClass]}</Badge>
+                    <YesNoSelect label="Useful life exceeds one year" value={line.hasUsefulLifeOverOneYear} onChange={(value) => updateLine(index, 'hasUsefulLifeOverOneYear', value)} />
+                    {line.hasUsefulLifeOverOneYear == null ? <span className="text-xs text-text-faint">Useful life not answered</span> : <Badge tone={ASSET_CLASS_TONES[assetClass]}>{ASSET_CLASS_LABELS[assetClass]}</Badge>}
                     {assetClass === 'capitalOutlay' && (
                       <span className="text-[11px] text-text-faint">
                         At or above {peso(threshold)} per item — must be charged to a Capital Outlay
@@ -395,6 +386,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       </span>
                     )}
                   </div>
+                  <label className="mt-3 block text-xs font-medium text-text-secondary">Technical specifications (optional)<textarea rows={3} maxLength={8000} value={line.technicalSpecifications ?? ''} onChange={(event) => updateLine(index, 'technicalSpecifications', event.target.value)} className="mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy" /></label>
                 </div>
               )
             })}
@@ -419,6 +411,7 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
   const [suggestion, setSuggestion] = useState(null)
   const [modeKey, setModeKey] = useState('')
   const [justification, setJustification] = useState('')
+  const [justificationStatus, setJustificationStatus] = useState('')
   const [hopeApprovalReference, setHopeApprovalReference] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -430,7 +423,8 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
       .then((data) => {
         if (cancelled) return
         setSuggestion(data)
-        setModeKey(data.suggested)
+        setModeKey(data.plannedMode ?? data.suggested)
+        setJustification(data.plannedJustification ?? '')
       })
       .catch((err) => {
         if (!cancelled) setError(err.response?.data?.message ?? 'Could not load the thresholds.')
@@ -441,7 +435,7 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
   }, [pr.id])
 
   const chosen = suggestion?.modes?.find((mode) => mode.key === modeKey)
-  const departing = Boolean(suggestion && modeKey && modeKey !== suggestion.suggested)
+  const departing = Boolean(chosen?.requiresJustification || (suggestion && modeKey && ((modeKey !== 'competitiveBidding' && modeKey !== suggestion.suggested) || (suggestion.plannedMode && modeKey !== suggestion.plannedMode))))
 
   // Item 12: mode determination is a complex approval screen (threshold
   // guidance + committee decision + attendance) — a full page, not a modal.
@@ -467,6 +461,7 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
                   ...attendance,
                   procurementModeKey: modeKey,
                   justification: justification.trim() || undefined,
+                  justificationStatus: departing ? 'provided' : justificationStatus || undefined,
                   hopeApprovalReference: hopeApprovalReference.trim() || undefined,
                 })
                 onClose()
@@ -520,7 +515,7 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
                 </label>
                 <select
                   value={modeKey}
-                  onChange={(event) => setModeKey(event.target.value)}
+                  onChange={(event) => { setModeKey(event.target.value); setJustificationStatus(''); setJustification('') }}
                   className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
                 >
                   {suggestion.modes.map((mode) => (
@@ -545,6 +540,7 @@ function ModeDeterminationModal({ pr, onClose, onConfirm }) {
                   />
                 </div>
               )}
+              {!departing && <label className="block text-xs font-medium text-text-secondary">Alternative mode justification response<select value={justificationStatus} onChange={(event) => { setJustificationStatus(event.target.value); if (event.target.value === 'notApplicable') setJustification('') }} className="mt-1 min-h-11 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy"><option value="">No additional explanation</option><option value="notApplicable">Not Applicable — no alternative-mode justification needed</option></select></label>}
 
               {chosen?.requiresHopeApproval && (
                 <div>
@@ -716,10 +712,13 @@ function RequisitionDetail({ pr, onClose }) {
 
         <section className="grid gap-5 border-t border-border-muted pt-5 sm:grid-cols-3">
           <Fact label="Requested by" value={pr.requesterName} />
-          <Fact label="Office" value={pr.departmentCode} />
+          <Fact label="Office" value={pr.departmentName ?? pr.departmentCode} />
+          <Fact label="Emergency purchase" value={pr.isEmergency == null ? 'Not answered' : pr.isEmergency ? 'Yes' : 'No'} />
+          <Fact label="Emergency justification" value={pr.justificationStatus === 'notApplicable' ? 'Not Applicable' : pr.justification || 'Not answered'} />
           <Fact label="Date required" value={pr.dateRequired} />
           <Fact label="Total" value={peso(pr.totalAmount)} />
           <Fact label="Fund source" value={pr.fundSourceLabel} />
+          <Fact label="Planned fund source" value={pr.plannedFundSource} />
           <Fact label="Annual Procurement Plan (APP) entry budget (ABC)" value={pr.appEntryAbc == null ? null : peso(pr.appEntryAbc)} />
         </section>
 
@@ -740,6 +739,7 @@ function RequisitionDetail({ pr, onClose }) {
                 {pr.modeJustification}
               </p>
             )}
+            {pr.modeJustificationStatus === 'notApplicable' && <p className="mt-2 text-xs text-text-secondary">Alternative mode justification: Not Applicable</p>}
             {pr.modeDeterminedByName && (
               <p className="mt-2 text-[11.5px] text-text-faint">
                 Determined by {pr.modeDeterminedByName}
@@ -776,6 +776,8 @@ function RequisitionDetail({ pr, onClose }) {
                     <tr key={item.id} className="border-t border-border-muted">
                       <td className="px-4 py-2.5 text-[13px] text-navy">
                         {item.description}
+                        {item.technicalSpecifications && <p className="mt-1 whitespace-pre-wrap text-xs text-text-secondary">{item.technicalSpecifications}</p>}
+                        <p className="mt-1 text-xs text-text-faint">Useful life over one year: {item.hasUsefulLifeOverOneYear == null ? 'Not answered' : item.hasUsefulLifeOverOneYear ? 'Yes' : 'No'}</p>
                         {item.unit && (
                           <span className="ml-1.5 text-[11.5px] text-text-faint">({item.unit})</span>
                         )}

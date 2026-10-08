@@ -43,6 +43,7 @@ const findLocalChiefExecutive = async () => {
 };
 
 const personName = (user) => user?.name ?? "";
+const formatDateTime = (value) => value ? new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Manila" }).format(new Date(value)) : "";
 
 const lineItemsTable = (items = []) => {
   if (items.length === 0) return "";
@@ -51,7 +52,7 @@ const lineItemsTable = (items = []) => {
       (item, index) => `
       <tr>
         <td style="text-align:center">${index + 1}</td>
-        <td>${escapeHtml(item.description)}</td>
+        <td>${escapeHtml(item.description)}${item.technicalSpecifications ? `<br><span>${escapeHtml(item.technicalSpecifications)}</span>` : ""}</td>
         <td style="text-align:center">${escapeHtml(item.unit ?? "")}</td>
         <td style="text-align:right">${Number(item.quantity).toLocaleString("en-PH")}</td>
         <td style="text-align:right">${formatPeso(item.unitCost)}</td>
@@ -163,6 +164,7 @@ const loadPr = (id) =>
 
 const supplierContext = (vendor) => ({
   supplier_name: vendor?.businessName ?? "",
+  supplier_category: vendor?.supplierCategory ?? "",
   supplier_address: vendor?.address ?? "",
   supplier_tin: vendor?.tin ?? "",
   supplier_contact_person: vendor?.contactPerson ?? "",
@@ -182,10 +184,16 @@ const procurementContext = (rfq) => ({
   implementing_office:
     rfq?.appEntry?.implementingUnit?.name ?? rfq?.purchaseRequisition?.department?.name ?? "",
   pr_number: rfq?.purchaseRequisition?.prNumber ?? "",
+  bid_opening_venue: rfq?.openingVenue ?? "",
+  procurement_contact_person: rfq?.procurementContactPerson ?? "",
+  procurement_contact_email: rfq?.procurementContactEmail ?? "",
+  required_supplier_documents: rfq?.requiredSupplierDocuments ?? "",
 });
 
 const awardContext = (award) => ({
   noa_number: award?.noaNumber ?? "",
+  existing_noa_number: award?.externalNoaNumber ?? "",
+  supplier_receipt_date: formatDate(award?.supplierReceivedAt),
   award_date: formatDate(award?.noaDate),
   award_date_long: formatLongDate(award?.noaDate),
   award_amount: award ? formatPeso(award.amount) : "",
@@ -310,9 +318,9 @@ export const resolvePlaceholders = async ({
       publish_date: formatDate(record.publishDate),
       prebid_date: record.prebidAt ? formatDate(record.prebidAt) : "Not applicable",
       submission_deadline: formatDate(record.closingDate),
-      // Bid opening follows the deadline unless the office says otherwise —
-      // the usual practice, and better than printing a blank.
-      bid_opening_date: formatDate(record.closingDate),
+      bid_opening_date: formatDate(record.openingDate),
+      bid_opening_datetime: formatDateTime(record.openingDate),
+      submission_deadline_datetime: formatDateTime(record.closingDate),
       bid_security_note: record.mode?.requiresBidSecurity
         ? "A bid security in the form and amount prescribed by the IRR is required."
         : "No bid security is required for this mode of procurement.",
@@ -362,6 +370,8 @@ export const resolvePlaceholders = async ({
       ...context,
       pr_number: record.prNumber,
       pr_purpose: record.purpose ?? "",
+      emergency_purchase: record.isEmergency == null ? "Not answered" : record.isEmergency ? "Yes" : "No",
+      emergency_justification: record.justificationStatus === "notApplicable" ? "Not Applicable" : record.justification ?? "",
       pr_total: formatPeso(record.totalAmount),
       pr_total_in_words: amountInWords(record.totalAmount),
       pr_date_required: formatDate(record.dateRequired),

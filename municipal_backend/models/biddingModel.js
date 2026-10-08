@@ -11,6 +11,10 @@ import { AppEntry } from "./appEntryModel.js";
 export const Rfq = sequelize.define("Rfq", {
   referenceNo: { type: DataTypes.STRING, allowNull: false, unique: true },
   title: { type: DataTypes.STRING, allowNull: false },
+  openingVenue: { type: DataTypes.STRING, allowNull: true },
+  procurementContactPerson: { type: DataTypes.STRING, allowNull: true },
+  procurementContactEmail: { type: DataTypes.STRING, allowNull: true },
+  requiredSupplierDocuments: { type: DataTypes.TEXT, allowNull: true },
   abc: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
   // Fixed when an SVP request is created; suppliers price against these terms.
   svpTechnicalSpecifications: { type: DataTypes.TEXT, allowNull: true },
@@ -173,12 +177,17 @@ export const PostQualification = sequelize.define("PostQualification", {
 });
 
 PostQualification.belongsTo(Bid, { as: "bid", foreignKey: "bidId" });
+Bid.hasMany(PostQualification, { as: "postQualifications", foreignKey: "bidId" });
 PostQualification.belongsTo(User, { as: "verifiedBy", foreignKey: "verifiedById" });
 
 // ── Award ───────────────────────────────────────────────────────────────────
 export const Award = sequelize.define("Award", {
   noaNumber: { type: DataTypes.STRING, allowNull: false, unique: true },
   noaDate: { type: DataTypes.DATEONLY, allowNull: false },
+  externalNoaNumber: { type: DataTypes.STRING, allowNull: true },
+  supplierReceivedAt: { type: DataTypes.DATEONLY, allowNull: true },
+  receiptRecordedById: { type: DataTypes.INTEGER, allowNull: true },
+  receiptRecordedAt: { type: DataTypes.DATE, allowNull: true },
   amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
 
   // RA 12009 Sec. 65 — Goods and Infrastructure Projects go to the Lowest

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../api/procurementSchedule'
-import { updateRfqSchedule, updateSvpTerms } from '../../api/bidding'
+import { updateRfqSchedule, updateSvpTerms, updateRfqInformation } from '../../api/bidding'
 import { fetchDocuments, uploadDocument, downloadDocument, ACCEPTED_EXTENSIONS } from '../../api/documents'
 import { usePermissions } from '../../context/usePermissions'
 import { useAuth } from '../../context/useAuth'
@@ -8,6 +8,7 @@ import LargeFormPage from '../../components/ui/LargeFormPage'
 import Button from '../../components/ui/Button'
 import ScheduleFields from './ScheduleFields'
 import ApprovedEvaluationCriteria from './ApprovedEvaluationCriteria'
+import SolicitationInformationFields from './SolicitationInformationFields'
 import { localDateTime, schedulePayload } from './schedulePayload'
 
 const dateKeys = ['closingDate', 'openingDate', 'prebidAt', 'procurementStartAt', 'publicationStartAt', 'publicationEndAt', 'evaluationStartAt', 'evaluationEndAt', 'postQualificationStartAt', 'postQualificationEndAt', 'expectedAwardAt']
@@ -23,6 +24,7 @@ export default function ScheduleWorkspace({ rfq, onClose, onChanged }) {
   const [data, setData] = useState(null)
   const [form, setForm] = useState({})
   const [svpForm, setSvpForm] = useState({ svpTechnicalSpecifications: rfq.svpTechnicalSpecifications ?? '', svpEligibilityDueStage: rfq.svpEligibilityDueStage ?? '' })
+  const [information, setInformation] = useState({ openingVenue: rfq.openingVenue ?? '', procurementContactPerson: rfq.procurementContactPerson ?? '', procurementContactEmail: rfq.procurementContactEmail ?? '', requiredSupplierDocuments: rfq.requiredSupplierDocuments ?? '' })
   const [documents, setDocuments] = useState([])
   const [documentId, setDocumentId] = useState('')
   const [reason, setReason] = useState('')
@@ -51,6 +53,7 @@ export default function ScheduleWorkspace({ rfq, onClose, onChanged }) {
   return <LargeFormPage title={`Schedule / Criteria — ${rfq.referenceNo}`} purpose="Approve the official dates before publication. Published dates change through a documented amendment and independent BAC approval." onBack={onClose} backLabel="Back to procurements" error={error} actions={<Button variant="secondary" onClick={onClose}>Close</Button>}>
     {message && <p role="status" className="rounded border border-success/30 p-3 text-sm text-success">{message}</p>}
     {!data ? <p>Loading official schedule…</p> : <>
+      <LargeFormPage.Section title="Venue, contact and document requirements"><SolicitationInformationFields form={information} setForm={setInformation} disabled={!canPrepare || data.locked || busy} />{canPrepare && !data.locked && <Button className="mt-3" disabled={busy} onClick={() => run(() => updateRfqInformation(rfq.id, information))}>Save solicitation details</Button>}</LargeFormPage.Section>
       {rfq.modeKey === 'smallValueProcurement' && <LargeFormPage.Section title="RFQ technical terms and document timing" description="Suppliers see these terms before quoting. The published RFQ locks them for this attempt.">
         <label className="block text-xs text-text-secondary">Technical specifications, quantity, delivery terms and required eligibility documents<textarea required rows={5} minLength={20} disabled={!canPrepare || rfq.status !== 'draft' || busy} value={svpForm.svpTechnicalSpecifications} onChange={(event) => setSvpForm({ ...svpForm, svpTechnicalSpecifications: event.target.value })} className={input} /></label>
         <label className="mt-3 block text-xs text-text-secondary">When are eligibility documents due?<select required disabled={!canPrepare || rfq.status !== 'draft' || busy} value={svpForm.svpEligibilityDueStage} onChange={(event) => setSvpForm({ ...svpForm, svpEligibilityDueStage: event.target.value })} className={input}><option value="">Choose a stage</option><option value="offer">With the quotation</option><option value="evaluation">During evaluation</option><option value="beforeAward">Before award notice</option></select></label>

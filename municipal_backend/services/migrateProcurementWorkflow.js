@@ -8,6 +8,7 @@ import { backfillProcurementAttempts } from "./backfillProcurementAttempts.js";
 import { migrateProcurementSchedule } from "./migrateProcurementSchedule.js";
 import { migrateEvaluationWorkflow } from "./migrateEvaluationWorkflow.js";
 import { migrateFailureGovernance } from "./migrateFailureGovernance.js";
+import { migrateProcurementInformation } from "./migrateProcurementInformation.js";
 
 // Additive and resumable: never sync({alter:true}), drop, rename, or rewrite an
 // existing evaluation, resolution, award, bid, attachment, or audit record.
@@ -38,7 +39,7 @@ export const migrateProcurementWorkflow = async () => {
   }
   // Add all new columns before reading historical RFQs through current models.
   // Each migration is resumable and retains original approvals and submissions.
-  for (const migrate of [migrateProcurementSchedule, migrateEvaluationWorkflow, migrateFailureGovernance]) {
+  for (const migrate of [migrateProcurementSchedule, migrateEvaluationWorkflow, migrateFailureGovernance, migrateProcurementInformation]) {
     const result = await migrate();
     added.push(...result.added);
   }
