@@ -10,6 +10,9 @@
 !municipal-frontend/.env.production
 **/backup-*.sql
 **/*.dump
+**/*-pre-restore-*.sql
+**/*.tar.gz
+impbbms-backups/
 security-artifacts/
 
 # Local agent/tool caches and raw guide-production workspace. These are not

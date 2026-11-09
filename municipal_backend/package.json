@@ -16,6 +16,8 @@
     "seed:completed": "node seedDemo.js --completed-project",
     "reset:workflow": "node resetDemoData.js",
     "reset:v2": "node resetV2.js",
+    "backup:system": "node scripts/backupSystem.mjs",
+    "restore:system": "node scripts/restoreSystem.mjs",
     "backup:database": "node backupDatabase.js",
     "restore:procurement": "node scripts/restoreProcurement.mjs",
     "verify:procurement-recovery-backup": "node scripts/verifyProcurementRecoveryBackup.mjs",

@@ -20,6 +20,7 @@ const AdminUsers = lazy(() => import('./pages/dashboards/AdminUsers'))
 const AdminDepartments = lazy(() => import('./pages/dashboards/AdminDepartments'))
 const AdminSettings = lazy(() => import('./pages/dashboards/AdminSettings'))
 const AdminSecuritySettings = lazy(() => import('./pages/dashboards/AdminSecuritySettings'))
+const AdminBackupRestore = lazy(() => import('./pages/dashboards/AdminBackupRestore'))
 const AdminThresholds = lazy(() => import('./pages/dashboards/ProcurementLimitsPage'))
 const BidOpportunities = lazy(() => import('./pages/supplier/BidOpportunities'))
 const DevelopmentPlanning = lazy(() => import('./pages/planning/DevelopmentPlanning'))
@@ -264,6 +265,7 @@ function App() {
             <Route path="/admin/users" element={<AdminUsers />} />
             <Route path="/admin/departments" element={<AdminDepartments />} />
             <Route path="/admin/settings" element={<AdminSettings />} />
+            <Route path="/admin/backup-restore" element={<AdminBackupRestore />} />
             {/* Was <AdminSettings /> as well, which made the "Thresholds"
                 sidebar entry a second link to the settings page. */}
             <Route path="/admin/thresholds" element={<AdminThresholds />} />

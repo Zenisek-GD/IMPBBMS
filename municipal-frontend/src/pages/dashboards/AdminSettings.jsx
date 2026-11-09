@@ -266,6 +266,19 @@ export default function AdminSettings() {
         subtitle="Configure the system identity, branding, and keyboard shortcuts for all users."
       />
 
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-navy/20 bg-navy/5 p-4">
+        <div>
+          <p className="text-sm font-semibold text-text-primary">System Backup & Deployment Migration</p>
+          <p className="text-xs text-text-secondary">Export system data, restore across hosting environments, or configure automated schedules.</p>
+        </div>
+        <Link
+          to="/admin/backup-restore"
+          className="inline-flex items-center gap-1.5 rounded-md bg-navy px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-navy/90"
+        >
+          Manage Backups <ArrowRight size={14} />
+        </Link>
+      </div>
+
       {/* ── LGU IDENTITY ──────────────────────────────────────────────────── */}
       <div className="grid gap-5 lg:grid-cols-3">
         <Card title="Local Government Unit" icon={Building2} className="lg:col-span-2">

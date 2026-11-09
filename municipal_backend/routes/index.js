@@ -50,6 +50,7 @@ import announcementRoutes from "./announcementRoutes.js";
 import securityRoutes from "./securityRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import reportRoutes from "./reportRoutes.js";
+import backupRoutes, { checkMaintenanceMode } from "./backupRoutes.js";
 import governanceRoutes from "./procurementGovernanceRoutes.js";
 import procurementScheduleRoutes from "./procurementScheduleRoutes.js";
 import { sessionSecurity, requireSameOrigin } from "../middleware/sessionSecurityMiddleware.js";
@@ -57,6 +58,7 @@ import { requireMfaEnrollment } from "../middleware/mfaMiddleware.js";
 import { protectRouterMutations } from "../middleware/mutationProtection.js";
 
 const router = express.Router();
+router.use(checkMaintenanceMode);
 router.use(requireSameOrigin, sessionSecurity, requireMfaEnrollment);
 
 // The scaffold's landing page used to live here. It was framework boilerplate
@@ -123,6 +125,7 @@ router.use("/api", insightRoutes);
 // Integrity monitoring and the alert console. Restricted to the administrator
 // and the internal auditor — see config/permissionMatrix.js for why both.
 router.use("/api/security", securityRoutes);
+router.use("/api/backup", backupRoutes);
 
 // No session required beyond this point — see publicRoutes.js.
 router.use("/api/public", publicRoutes);

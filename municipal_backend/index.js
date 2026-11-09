@@ -33,6 +33,8 @@ import session from "express-session";
 import { DatabaseSessionStore, startAuthExpirationSweep } from "./services/sessionStore.js";
 import { startDatabaseRateLimitSweep } from "./services/databaseRateLimiter.js";
 import { startProcurementDeadlineSweep } from "./services/procurementDeadlineSweep.js";
+import { startBackupScheduler } from "./services/backupScheduler.js";
+import { sequelize } from "./models/db.js";
 import cors from "cors";
 import { validateProductionConfig } from "./config/security.js";
 import { isAllowedFrontendOrigin } from "./config/frontendOrigins.js";
@@ -146,6 +148,7 @@ if (!process.env.ELECTRON && process.env.CLOUDFLARE_WORKER !== "true" && SCAN_MI
 if (process.env.CLOUDFLARE_WORKER !== "true") startAuthExpirationSweep();
 if (process.env.NODE_ENV === "production" && process.env.CLOUDFLARE_WORKER !== "true") startDatabaseRateLimitSweep();
 if (process.env.CLOUDFLARE_WORKER !== "true") startProcurementDeadlineSweep();
+if (process.env.CLOUDFLARE_WORKER !== "true") startBackupScheduler(sequelize.config);
 
 export default app;
 
