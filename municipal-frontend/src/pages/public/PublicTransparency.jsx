@@ -811,6 +811,7 @@ function ProjectCard({ project, query = '' }) {
       </div>
 
       <div className="flex flex-1 flex-col p-4">
+        {project.demonstration && <p className="mb-2 text-xs text-navy">Demonstration scenario · Actual client status: {project.demonstration.actualClientStatus}</p>}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             {project.referenceNo && (
@@ -933,6 +934,7 @@ function ProjectRecordsTable({ projects, query }) {
                 <td className="px-4 py-3.5 text-[13px]">
                   <p className={`flex items-center gap-1.5 font-medium ${style.text}`}>
                     <style.icon size={13} aria-hidden="true" /> {style.label}
+                    {project.demonstration && <span className="text-xs">Demonstration scenario</span>}
                   </p>
                   <p className="mt-1 text-[12px] text-text-secondary">{stage} of {LIFECYCLE_STAGE_COUNT} procurement steps</p>
                 </td>

@@ -32,6 +32,7 @@ import { AUDIT_ACTIONS } from "../services/auditLog.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { PR_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, hasCentralAccess, recordState } from "../services/requisitionRecords.js";
 import { procurementAnswer, justificationError, validDateOnly } from "../services/procurementInformation.js";
+import { assertRecoveryNotHeld, recoveryField } from "../services/procurementRecovery.js";
 
 // ── What a requester may actually write ──────────────────────────────────────
 // Everything else on the model — status, the four certification stamps, the
@@ -88,7 +89,7 @@ const serialize = (pr) => ({
   isEmergency: pr.isEmergency,
   justification: pr.justification,
   justificationStatus: pr.justificationStatus,
-  totalAmount: Number(pr.totalAmount),
+  totalAmount: pr.totalAmount == null ? null : Number(pr.totalAmount),
   status: pr.status,
   returnRemarks: pr.returnRemarks,
 
@@ -127,17 +128,18 @@ const serialize = (pr) => ({
   appEntryTitle: pr.appEntry?.projectTitle ?? null,
   appEntryAbc: pr.appEntry ? Number(pr.appEntry.abc) : null,
   departmentCode: pr.department?.code ?? null,
-  departmentName: pr.department?.name ?? null,
+  departmentName: recoveryField(pr.appEntry?.recoveryImport, "Requesting Office") ?? pr.department?.name ?? null,
   plannedFundSource: pr.appEntry?.fundSource ?? null,
-  requesterName: pr.requester?.name ?? null,
+  requesterName: pr.requester?.name ?? recoveryField(pr.appEntry?.recoveryImport, "Requested By"),
+  recoveryImport: pr.appEntry?.recoveryImport ?? null,
   lineItems: (pr.lineItems ?? []).map((item) => ({
     id: item.id,
     description: item.description,
     technicalSpecifications: item.technicalSpecifications,
     unit: item.unit,
-    quantity: Number(item.quantity),
-    unitCost: Number(item.unitCost),
-    lineTotal: Number(item.lineTotal),
+    quantity: item.quantity == null ? null : Number(item.quantity),
+    unitCost: item.unitCost == null ? null : Number(item.unitCost),
+    lineTotal: item.lineTotal == null ? null : Number(item.lineTotal),
     hasUsefulLifeOverOneYear: item.hasUsefulLifeOverOneYear,
     assetClass: item.assetClass,
     assetClassLabel: ASSET_CLASS_LABELS[item.assetClass],
@@ -147,12 +149,13 @@ const serialize = (pr) => ({
   // or must come out of Capital Outlay.
   assetSummary: (pr.lineItems ?? []).reduce(
     (summary, item) => {
+      if (item.assetClass == null || item.lineTotal == null) return summary;
       summary[item.assetClass] = (summary[item.assetClass] ?? 0) + Number(item.lineTotal);
       return summary;
     },
     { expense: 0, semiExpendable: 0, capitalOutlay: 0 }
   ),
-  editable: isEditable(pr.status),
+  editable: isEditable(pr.status) && !pr.appEntry?.recoveryImport?.hold,
 });
 
 // Section 5.3: "PR total cannot exceed the remaining ABC balance from the
@@ -373,6 +376,7 @@ export const listPrs = async (req, res) => {
 
 const prState = (pr) => ({ ...recordState(pr), lineItems: (pr.lineItems ?? []).map(recordState) });
 const approvedApp = (app) => {
+  assertRecoveryNotHeld(app);
   if (!app || !["approved", "locked"].includes(app.status)) throw workflowError("The linked APP entry must be approved first.", 400);
   if (app.planCycle === "indicative") throw workflowError("Finalise the indicative APP against the enacted appropriation before raising or submitting a requisition. Use the EPA workflow for authorized early procurement.");
 };
@@ -423,6 +427,7 @@ export const createPr = async (req, res) => {
 export const updatePr = async (req, res) => {
   const observed = await PrHeader.findByPk(req.params.id, withIncludes);
   if (!observed) throw workflowError("Requisition not found.", 404);
+  assertRecoveryNotHeld(observed.appEntry);
   const header = editableHeader(req.body);
   let computed;
   if (Object.hasOwn(req.body, "lineItems")) {
@@ -453,6 +458,7 @@ export const transitionPr = async (req, res) => {
   const { action, remarks } = req.body;
   const observed = await PrHeader.findByPk(req.params.id, withIncludes);
   if (!observed) throw workflowError("Requisition not found.", 404);
+  assertRecoveryNotHeld(observed.appEntry);
   const { pr, result, modeRecord } = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
     const app = await lockedApp(observed.appEntry, transaction);
     const current = await PrHeader.findByPk(observed.id, { transaction, lock: transaction.LOCK.UPDATE });

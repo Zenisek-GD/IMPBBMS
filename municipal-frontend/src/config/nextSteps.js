@@ -72,6 +72,7 @@ const ownerOf = (permission, fallback = 'Responsible office') =>
 // completes. Drafts and returned records re-enter at endorsement.
 export const prNext = (pr) => {
   if (!pr) return null
+  if (pr.recoveryImport?.hold) return { status: 'Draft', action: 'Verify missing supporting information', owner: 'Planning, Budget and requesting office', dueAt: null, after: null }
   const next = PR_TRANSITION_FOR_STATUS[pr.status]
   if (!next) return { terminal: true, status: PR_STATUS_LABELS[pr.status] ?? pr.status }
   const position = PR_STAGE_SEQUENCE.indexOf(pr.status)
@@ -90,6 +91,7 @@ const APP_ORDER = ['draft', 'pendingConsolidation', 'pendingBudgetCertification'
 
 export const appNext = (entry) => {
   if (!entry) return null
+  if (entry.recoveryImport?.hold) return { status: 'Draft', action: 'Verify AIP and appropriation references', owner: 'Planning and Budget offices', dueAt: null, after: null }
   const next = APP_TRANSITION_FOR_STATUS[entry.status]
   if (!next) return { terminal: true, status: APP_STATUS_LABELS[entry.status] ?? entry.status }
   const afterKey = APP_ORDER[APP_ORDER.indexOf(entry.status) + 1]

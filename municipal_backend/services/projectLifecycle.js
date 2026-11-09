@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { applyProjectDemonstration } from './projectDemonstration.js';
 import { Appropriation } from "../models/appropriationModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
@@ -364,7 +365,7 @@ export const listPublicProjects = async ({ search, category, fiscalYear, departm
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
   const projects = entries.map((entry) =>
-    buildProject(entry, chainFor(entry.id, grouped), { detailed, modeNames, financialPosition: positions.get(Number(entry.id)) })
+    applyProjectDemonstration(buildProject(entry, chainFor(entry.id, grouped), { detailed, modeNames, financialPosition: positions.get(Number(entry.id)) }))
   );
 
   // Completed projects lead the list: a finished procurement is the one with a
@@ -399,7 +400,7 @@ export const getPublicProject = async (id) => {
   const [chain, modeNames, positions] = await Promise.all([loadChain([entry.id]), loadModeNames(), projectFinancialPositions([entry.id])]);
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
-  return buildProject(entry, chainFor(entry.id, grouped), { detailed: true, modeNames, financialPosition: positions.get(Number(entry.id)) });
+  return applyProjectDemonstration(buildProject(entry, chainFor(entry.id, grouped), { detailed: true, modeNames, financialPosition: positions.get(Number(entry.id)) }));
 };
 
 // Aggregate figures for the portal header, computed over the same published set

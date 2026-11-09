@@ -23,6 +23,7 @@ import { actorAudit, workflowError } from "../services/workflowSupport.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { APP_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, recordState } from "../services/requisitionRecords.js";
 import { justificationError } from "../services/procurementInformation.js";
+import { assertRecoveryNotHeld, recoveryField } from "../services/procurementRecovery.js";
 
 // IRR Sec. 7.7 — the lump sum for foreseeable emergencies "shall not be more
 // than four percent (4%) of the Procuring Entity's total appropriations for
@@ -70,7 +71,8 @@ const serialize = (entry) => ({
   implementingUnitName: entry.implementingUnit?.name ?? null,
   implementingUnitCode: entry.implementingUnit?.code ?? null,
   createdByName: entry.createdBy?.name ?? null,
-  editable: isEditable(entry.status),
+  recoveryImport: entry.recoveryImport ?? null,
+  editable: isEditable(entry.status) && !entry.recoveryImport?.hold,
   // The budget line this plan is charged against.
   appropriationId: entry.appropriationId ?? null,
   appropriationOrdinanceNo: entry.appropriation?.ordinanceNo ?? null,
@@ -81,7 +83,7 @@ const serialize = (entry) => ({
   // programmed for this purpose.
   aipEntryId: entry.aipEntryId ?? null,
   aipEntryTitle: entry.aipEntry?.title ?? null,
-  expectedOutput: entry.aipEntry?.expectedOutput ?? null,
+  expectedOutput: entry.aipEntry?.expectedOutput ?? recoveryField(entry.recoveryImport, "Expected Output"),
   revisionRemarks: entry.revisionRemarks,
   revisedAt: entry.revisedAt,
   cancelledAt: entry.cancelledAt,
@@ -466,6 +468,7 @@ export const createAppEntry = async (req, res) => {
 export const updateAppEntry = async (req, res) => {
   const initial = await AppEntry.findByPk(req.params.id);
   if (!initial) throw workflowError("APP entry not found.", 404);
+  assertRecoveryNotHeld(initial);
   const body = pickEditable(req.body, EDITABLE_APP_FIELDS);
   if (body.justificationStatus === "") body.justificationStatus = null;
   const entry = await withAuditTransaction(async (transaction, audit) => {
@@ -492,6 +495,7 @@ export const transitionAppEntry = async (req, res) => {
   const { action, remarks } = req.body;
   const entry = await AppEntry.findByPk(req.params.id, withIncludes);
   if (!entry) return res.status(404).json({ message: "APP entry not found." });
+  assertRecoveryNotHeld(entry);
 
   const requiredPermission = permissionForTransition(action, entry.status);
   if (!requiredPermission || !req.permissions.has(requiredPermission)) {

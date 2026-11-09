@@ -17,6 +17,8 @@
     "reset:workflow": "node resetDemoData.js",
     "reset:v2": "node resetV2.js",
     "backup:database": "node backupDatabase.js",
+    "restore:procurement": "node scripts/restoreProcurement.mjs",
+    "verify:procurement-recovery-backup": "node scripts/verifyProcurementRecoveryBackup.mjs",
     "create:model": "node create.js model",
     "create:controller": "node create.js controller",
     "migrate:auth": "node migrateAuthSecurity.js",

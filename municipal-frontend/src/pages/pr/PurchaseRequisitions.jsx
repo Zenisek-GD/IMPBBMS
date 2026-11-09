@@ -19,6 +19,7 @@ import { usePermissions } from '../../context/usePermissions'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
+import RecoveryProvenance from '../../components/ui/RecoveryProvenance'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
@@ -668,6 +669,7 @@ function RequisitionDetail({ pr, onClose }) {
         )}
 
         <NextStep next={prNext(pr)} tone={PR_STATUS_TONES[pr.status]} />
+        {pr.recoveryImport && <RecoveryProvenance recovery={pr.recoveryImport} showFields={false} />}
 
         {/* ── Where it is in the chain ──────────────────────────────────── */}
         <section>
@@ -716,7 +718,7 @@ function RequisitionDetail({ pr, onClose }) {
           <Fact label="Emergency purchase" value={pr.isEmergency == null ? 'Not answered' : pr.isEmergency ? 'Yes' : 'No'} />
           <Fact label="Emergency justification" value={pr.justificationStatus === 'notApplicable' ? 'Not Applicable' : pr.justification || 'Not answered'} />
           <Fact label="Date required" value={pr.dateRequired} />
-          <Fact label="Total" value={peso(pr.totalAmount)} />
+          <Fact label="Total" value={pr.totalAmount == null ? 'Pending item costing' : peso(pr.totalAmount)} />
           <Fact label="Fund source" value={pr.fundSourceLabel} />
           <Fact label="Planned fund source" value={pr.plannedFundSource} />
           <Fact label="Annual Procurement Plan (APP) entry budget (ABC)" value={pr.appEntryAbc == null ? null : peso(pr.appEntryAbc)} />
@@ -783,17 +785,17 @@ function RequisitionDetail({ pr, onClose }) {
                         )}
                       </td>
                       <td className="px-4 py-2.5 text-[13px] text-text-secondary tabular-nums">
-                        {item.quantity}
+                        {item.quantity ?? '—'}
                       </td>
                       <td className="px-4 py-2.5 text-[13px] whitespace-nowrap text-text-secondary tabular-nums">
-                        {peso(item.unitCost)}
+                        {item.unitCost == null ? '—' : peso(item.unitCost)}
                       </td>
                       <td className="px-4 py-2.5 text-[13px] whitespace-nowrap text-navy tabular-nums">
-                        {peso(item.lineTotal)}
+                        {item.lineTotal == null ? '—' : peso(item.lineTotal)}
                       </td>
                       <td className="px-4 py-2.5">
                         <Badge tone={ASSET_CLASS_TONES[item.assetClass]}>
-                          {ASSET_CLASS_LABELS[item.assetClass]}
+                          {item.assetClass == null ? 'Unanswered' : ASSET_CLASS_LABELS[item.assetClass]}
                         </Badge>
                       </td>
                     </tr>
@@ -991,7 +993,7 @@ export default function PurchaseRequisitions() {
                 {pageRows.map((pr) => {
                   const next = PR_TRANSITION_FOR_STATUS[pr.status]
                   // A null permission means the server decides (endorsement).
-                  const canAdvance = next && (next.permission === null || permissions.has(next.permission))
+                  const canAdvance = !pr.recoveryImport?.hold && next && (next.permission === null || permissions.has(next.permission))
                   const returnPermission = PR_RETURN_PERMISSION_FOR_STATUS[pr.status]
                   const canReturn = returnPermission && permissions.has(returnPermission)
 
@@ -1028,7 +1030,7 @@ export default function PurchaseRequisitions() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">
-                        {peso(pr.totalAmount)}
+                        {pr.totalAmount == null ? 'Pending item costing' : peso(pr.totalAmount)}
                         {pr.assetSummary?.capitalOutlay > 0 && (
                           <p className="mt-1 text-[11px] font-normal text-text-faint">
                             incl. {peso(pr.assetSummary.capitalOutlay)} capital outlay

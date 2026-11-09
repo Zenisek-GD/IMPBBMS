@@ -287,6 +287,16 @@ export default function PublicProjectDetail() {
         </Link>
 
         <header className="mt-4">
+          {project.demonstration && (
+            <section className="mb-4 rounded-lg border border-border-strong bg-surface p-4" aria-label="Completed demonstration scenario">
+              <h2 className="font-bold text-navy">Completed demonstration</h2>
+              <p className="mt-2 text-sm text-navy">{project.demonstration.notice}</p>
+              <p className="mt-2 text-sm text-navy">Source: {project.demonstration.source}</p>
+              <ol className="mt-3 space-y-2 text-sm text-navy">
+                {project.demonstration.milestones.map((milestone) => <li key={milestone.stage}><strong>{milestone.stage} — {milestone.status}:</strong> {milestone.detail}</li>)}
+              </ol>
+            </section>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -328,6 +338,7 @@ export default function PublicProjectDetail() {
             </span>
           </div>
           <ol className="grid gap-x-4 gap-y-5 px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
+            {project.demonstration && <p className="mb-3 text-sm text-navy">Official record progress below is separate from the completed demonstration milestones above.</p>}
             {project.phases.map((phase) => (
               <li key={phase.key} className="flex items-start gap-3">
                 <span

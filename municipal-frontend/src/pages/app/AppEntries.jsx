@@ -23,6 +23,7 @@ import { useAuth } from '../../context/useAuth'
 import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
+import RecoveryProvenance from '../../components/ui/RecoveryProvenance'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
@@ -638,6 +639,7 @@ export default function AppEntries() {
   const permissions = usePermissions()
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [recoveryDetail, setRecoveryDetail] = useState(null)
   const [returning, setReturning] = useState(null)
   const [committeeEntry, setCommitteeEntry] = useState(null)
   const [message, setMessage] = useState('')
@@ -691,6 +693,15 @@ export default function AppEntries() {
     },
   })
   const { pageRows, paginationProps, refresh, loading } = table
+
+  if (recoveryDetail) {
+    return (
+      <DashboardPage>
+        <PageHeader title={recoveryDetail.projectTitle} subtitle="Procurement plan details" actions={<Button variant="secondary" onClick={() => setRecoveryDetail(null)}>Back to procurement plans</Button>} />
+        <Card bodyClassName="p-5"><RecoveryProvenance recovery={recoveryDetail.recoveryImport} /></Card>
+      </DashboardPage>
+    )
+  }
 
   // Item 12: the fifteen-field entry form renders as a full page, not as a
   // modal over the list. The short return-reason modal stays a modal.
@@ -821,7 +832,7 @@ export default function AppEntries() {
               <tbody>
                 {pageRows.map((entry) => {
                   const next = TRANSITION_FOR_STATUS[entry.status]
-                  const canAdvance = next && permissions.has(next.permission) && (!['consolidate', 'certify', 'approve'].includes(next.action) || entry.createdById !== user?.id)
+                  const canAdvance = !entry.recoveryImport?.hold && next && permissions.has(next.permission) && (!['consolidate', 'certify', 'approve'].includes(next.action) || entry.createdById !== user?.id)
                   const returnPermission = RETURN_PERMISSION_FOR_STATUS[entry.status]
                   const canReturn = returnPermission && permissions.has(returnPermission)
 
@@ -851,6 +862,7 @@ export default function AppEntries() {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex w-max items-center gap-2">
+                          {entry.recoveryImport && <Button size="table" variant="secondary" onClick={() => setRecoveryDetail(entry)}>View details</Button>}
                           {entry.editable && canCreate && (
                             <Button
                               size="table"

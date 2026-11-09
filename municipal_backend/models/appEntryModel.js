@@ -84,6 +84,11 @@ export const AppEntry = sequelize.define(
     description: { type: DataTypes.TEXT, allowNull: true },
     categoryDetails: { type: DataTypes.STRING, allowNull: true },
 
+    // Recovery provenance is separate from business dates and original user
+    // actions. Only the controlled importer writes these fields.
+    recoveryKey: { type: DataTypes.STRING, allowNull: true, unique: true },
+    recoveryImport: { type: DataTypes.JSON, allowNull: true },
+
     // Section 4.4 reference codes.
     mfoId: { type: DataTypes.STRING, allowNull: true },
     papCode: { type: DataTypes.STRING, allowNull: true },
@@ -126,7 +131,7 @@ export const AppEntry = sequelize.define(
     // procurement short of award before the ordinance is enacted, which is one
     // of the substantive changes RA 12009 made and the reason the indicative
     // APP matters operationally rather than only on paper.
-    earlyProcurement: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    earlyProcurement: { type: DataTypes.BOOLEAN, allowNull: true, defaultValue: false },
 
     // Sec. 7.7.2(e) and (j) — fields the Indicative APP is required to carry
     // and which had no representation at all.

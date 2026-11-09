@@ -48,7 +48,7 @@ export const PrHeader = sequelize.define(
 
     // Denormalised sum of the line items, recomputed on every write so it can
     // be compared against the linked APP entry's remaining balance.
-    totalAmount: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 },
+    totalAmount: { type: DataTypes.DECIMAL(15, 2), allowNull: true, defaultValue: 0 },
 
     status: { type: DataTypes.ENUM(...PR_STATES), allowNull: false, defaultValue: "draft" },
     returnRemarks: { type: DataTypes.TEXT, allowNull: true },
@@ -134,9 +134,9 @@ export const PrLineItem = sequelize.define("PrLineItem", {
   description: { type: DataTypes.STRING, allowNull: false },
   technicalSpecifications: { type: DataTypes.TEXT, allowNull: true },
   unit: { type: DataTypes.STRING, allowNull: true },
-  quantity: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
-  unitCost: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
-  lineTotal: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
+  quantity: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
+  unitCost: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
+  lineTotal: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
 
   // Whether the item lasts beyond one accounting period. This is the requester's
   // to state — the system cannot infer it from a description — and it is what
@@ -148,7 +148,7 @@ export const PrLineItem = sequelize.define("PrLineItem", {
   // ten semi-expendable items, not one capital asset.
   assetClass: {
     type: DataTypes.ENUM(...ASSET_CLASSES),
-    allowNull: false,
+    allowNull: true,
     defaultValue: "expense",
   },
 });
@@ -186,6 +186,25 @@ PrHeader.belongsTo(ProcurementMode, { as: "procurementMode", foreignKey: "procur
 
 PrHeader.hasMany(PrLineItem, { as: "lineItems", foreignKey: "prHeaderId", onDelete: "CASCADE" });
 PrLineItem.belongsTo(PrHeader, { foreignKey: "prHeaderId" });
+
+// A recovery that stops at Item Description cannot invent later item amounts
+// or an asset classification. NULL is supported only on a held recovery draft;
+// ordinary controller creation and submission still require complete items.
+const assertRecoveryDraft = async (header, transaction) => {
+  const app = header?.appEntryId ? await AppEntry.findByPk(header.appEntryId, { transaction }) : null;
+  if (header?.status !== "draft" || app?.recoveryImport?.hold !== true) {
+    throw new Error("Incomplete amounts are permitted only on a held procurement recovery draft.");
+  }
+};
+PrHeader.beforeValidate(async (header, options) => {
+  if (header.totalAmount == null) await assertRecoveryDraft(header, options.transaction);
+});
+PrLineItem.beforeValidate(async (item, options) => {
+  if ([item.quantity, item.unitCost, item.lineTotal, item.assetClass].some((value) => value == null)) {
+    const header = item.prHeaderId ? await PrHeader.findByPk(item.prHeaderId, { transaction: options.transaction }) : null;
+    await assertRecoveryDraft(header, options.transaction);
+  }
+});
 
 // The Obligation Request raised when the Budget Officer certifies this
 // requisition. One per requisition: certifying again after a cancellation

@@ -29,7 +29,6 @@ import useFormRecovery from '../../hooks/useFormRecovery'
 import DraftRecoveryNotice from '../../components/ui/DraftRecoveryNotice'
 import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
 import { useActionQueue } from '../../context/useActionQueue'
-import { currentFiscalYear } from '../../utils/fiscalYear'
 
 // Steps 6 to 14: from an office asking for money to the Sanggunian granting it.
 //
@@ -903,17 +902,17 @@ export default function BudgetPreparation() {
           canOpen && (
             <Button
               icon={Plus}
-              disabled={working}
+              disabled={working || fiscalYear === 'all'}
               onClick={() =>
                 run(() =>
                   budgetApi.createBudget({
-                    fiscalYear: currentFiscalYear() + 1,
+                    fiscalYear: Number(fiscalYear),
                     ceilingGrowthPct: 5,
-                  }).then(result => { setFiscalYear(result.fiscalYear ?? currentFiscalYear() + 1); return result })
+                  }).then(result => { setFiscalYear(result.fiscalYear ?? Number(fiscalYear)); return result })
                 ).catch(() => {})
               }
             >
-              OPEN NEXT YEAR
+              {fiscalYear === 'all' ? 'SELECT A FISCAL YEAR' : `OPEN FY ${fiscalYear}`}
             </Button>
           )
         }

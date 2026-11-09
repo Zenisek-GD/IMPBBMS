@@ -19,3 +19,6 @@ security-artifacts/
 /.vite/
 /guide-preview/
 /impeccable/
+/docs/
+/outputs/
+/tmp/
