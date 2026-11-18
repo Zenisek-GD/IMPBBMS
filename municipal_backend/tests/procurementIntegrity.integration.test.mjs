@@ -10,7 +10,8 @@ test('conferences consume authoritative dates and preserve completed meeting his
   assert.throws(() => conferenceSchedule(rfq, { scheduledAt: '2028-01-11T01:00:00Z' }), /must match/);
   assert.throws(() => conferenceSchedule({ ...rfq, prebidRequired: false }), /not applicable/);
   assert.throws(() => conferenceSchedule({ ...rfq, prebidAt: rfq.closingDate }), /before/);
-  assert.throws(() => conferenceSchedule({ ...rfq, openingDate: rfq.closingDate }, { purpose: 'opening' }), /after/);
+  assert.equal(conferenceSchedule({ ...rfq, openingDate: rfq.closingDate }, { purpose: 'opening' }).scheduledAt.toISOString(), rfq.closingDate.replace('Z', '.000Z'));
+  assert.throws(() => conferenceSchedule({ ...rfq, openingDate: '2028-01-20T00:59:00Z' }, { purpose: 'opening' }), /before/);
   assert.throws(() => conferenceSchedule({ ...rfq, status: 'failed' }), /failed/);
   assert.throws(() => conferenceSchedule(rfq, { purpose: 'other', scheduledAt: 'invalid' }), /valid/);
   assert.equal(conferenceDisplayDate({ rfq, purpose: 'prebid', status: 'scheduled', scheduledAt: 'old' }), rfq.prebidAt);

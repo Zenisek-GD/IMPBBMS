@@ -7,7 +7,8 @@ import { negotiatedEligibility } from "../services/attemptPolicy.js";
 
 test("bid opening compares complete instants, allowing later time on the same day", () => {
   assert.equal(scheduleError("2026-09-15T10:00:00+08:00", "2026-09-15T13:00:00+08:00"), null);
-  for (const opening of ["2026-09-15T09:00:00+08:00", "2026-09-15T10:00:00+08:00", "2026-09-15T02:00:00Z"]) assert.equal(scheduleError("2026-09-15T10:00:00+08:00", opening), "Bid opening must be scheduled after the bid submission deadline.");
+  assert.equal(scheduleError("2026-09-15T10:00:00+08:00", "2026-09-15T02:00:00Z"), null);
+  assert.match(scheduleError("2026-09-15T10:00:00+08:00", "2026-09-15T09:59:00+08:00"), /before the bid submission deadline/);
   assert.ok(scheduleError("invalid", "2026-09-15T13:00:00+08:00"));
   assert.ok(scheduleError("2026-09-15T10:00:00+08:00", null));
 });

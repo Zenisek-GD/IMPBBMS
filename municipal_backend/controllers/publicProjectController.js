@@ -18,12 +18,14 @@ import {
   releaseScheduledAnnouncements,
 } from "../models/announcementModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
+import { ACADEMIC_IMPORT_ACTION, CLIENT_STATUS_CONFIRMATION_ACTION, canViewAcademicCase, solicitationVisibility } from "../services/academicCase.js";
 import {
   listPublicProjects,
   getPublicProject,
   getPublicSummary,
   LIFECYCLE_PHASES,
   PROJECT_CATEGORIES,
+  visibleProject,
 } from "../services/projectLifecycle.js";
 
 // ── PUBLIC PROJECT API ───────────────────────────────────────────────────────
@@ -44,7 +46,7 @@ export const getPublicFilters = async (req, res) => {
     getLguProfile(),
     Department.findAll({ where: { status: "active" }, order: [["name", "ASC"]] }),
     AppEntry.findAll({
-      where: { status: { [Op.in]: ["approved", "locked"] } },
+      where: visibleProject,
       attributes: ["fiscalYear"],
       group: ["fiscalYear"],
       order: [["fiscalYear", "DESC"]],
@@ -92,7 +94,7 @@ export const getProject = async (req, res) => {
 
   // The client never needs the internal id map; it is used server-side to scope
   // the timeline and document lookups and is stripped before the response.
-  const { entityRefs, ...publicView } = project;
+  const { entityRefs, demonstrationMilestones, historicalDates, ongoingDemonstrationEvents, reportedMilestones, timelineEvidence, ...publicView } = project;
   res.json(publicView);
 };
 
@@ -160,6 +162,8 @@ const ANONYMISED_ACTIONS = new Set(["evaluation.submitted"]);
 // Audit actions that never belong on a public project timeline, even if they
 // somehow carried a project entity reference.
 const EXCLUDED_ACTIONS = new Set([
+  ACADEMIC_IMPORT_ACTION,
+  CLIENT_STATUS_CONFIRMATION_ACTION,
   "auth.login.success",
   "auth.login.failed",
   "auth.logout",
@@ -210,7 +214,7 @@ export const getProjectTimeline = async (req, res) => {
     .filter(([, ids]) => ids.length > 0)
     .map(([entityRef, ids]) => ({ entityRef, entityId: { [Op.in]: ids } }));
 
-  const entries = conditions.length
+  const entries = conditions.length && !project.ongoingDemonstration
     ? await AuditLog.findAll({
         where: { [Op.or]: conditions, outcome: "success" },
         order: [["sequence", "ASC"]],
@@ -223,7 +227,8 @@ export const getProjectTimeline = async (req, res) => {
   const roleNames = new Map(roles.map((role) => [role.key, role.name]));
 
   const events = entries
-    .filter((entry) => isPublicAction(entry.actionType))
+    .filter((entry) => isPublicAction(entry.actionType)
+      && (!project.clientReportedStatus || !entry.actionType.startsWith("data.recovery.")))
     .map((entry) => {
       const anonymise = ANONYMISED_ACTIONS.has(entry.actionType);
       const after = entry.afterState ?? {};
@@ -257,7 +262,7 @@ export const getProjectTimeline = async (req, res) => {
   // audited *decision*, but a citizen reading a timeline still expects to see
   // when the contract was drafted or the delivery arrived.
   const milestones = [];
-  const addMilestone = (occurredAt, action, detail, stage) => {
+  const addMilestone = (occurredAt, action, detail, stage, source = "record") => {
     if (!occurredAt) return;
     milestones.push({
       id: `record-${milestones.length}`,
@@ -273,26 +278,55 @@ export const getProjectTimeline = async (req, res) => {
       statusFrom: null,
       statusTo: null,
       note: null,
-      source: "record",
+      source,
       recordHash: null,
     });
   };
 
-  for (const contract of project.records.contracts) {
-    addMilestone(contract.startDate, "Contract commenced", `${contract.contractNo} took effect`, "contract");
+  for (const event of project.ongoingDemonstrationEvents) {
+    addMilestone(event.occurredAt, event.action, `${event.status} · ${event.role}. ${event.detail}`, event.stage, "ongoingDemonstration");
   }
-  for (const delivery of project.records.deliveries) {
-    addMilestone(
-      delivery.deliveredAt,
-      "Delivery reported",
-      delivery.description ?? "Goods or works delivered",
-      "completion"
-    );
-  }
-  for (const payment of project.records.payments) {
-    addMilestone(payment.releasedAt, "Disbursement released", `${payment.disbursementNo}`, "completion");
+  for (const { date, action, stage } of project.reportedMilestones) {
+    addMilestone(date, action, "Date supplied in the reviewed client form", stage, "clientReported");
   }
 
+  if (project.historicalAward) {
+    const [solicitation] = project.records.solicitations;
+    const [award] = project.records.awards;
+    addMilestone(project.historicalDates["Pre-Bid Conference"] ?? solicitation?.prebidAt, "Pre-bid conference schedule", "Schedule recorded in the client form", "solicitation", "clientReported");
+    addMilestone(project.historicalDates["Submission Date"], "Bid submission reported", "Date recorded in the source form", "bidding", "clientReported");
+    addMilestone(solicitation?.closingDate, "Bid submission deadline", "Deadline recorded in the client form", "bidding", "clientReported");
+    addMilestone(solicitation?.openingDate, "Bid opening schedule", "Date and time recorded in the client form", "bidding", "clientReported");
+    addMilestone(award?.noaDate, "Notice of Award reported", award?.noaNumber, "award", "clientReported");
+    addMilestone(project.historicalAward.supplierReceivedAt, "Supplier receipt reported", "Supplier receipt date recorded in the source form", "award", "clientReported");
+  }
+  if (project.recordSource === "academic") {
+    const imported = entries.find((entry) => entry.actionType === ACADEMIC_IMPORT_ACTION && entry.entityId === project.id);
+    for (const { occurredAt, action, detail, stage } of imported?.afterState?.businessMilestones ?? []) {
+      addMilestone(occurredAt, action, detail, stage);
+    }
+  } else if (project.historicalDemonstration) {
+    for (const { occurredAt, action, entityRef } of project.demonstrationMilestones) {
+      addMilestone(occurredAt, action, "Historical demonstration", entityRef === "contract" ? "contract" : "completion", "historicalDemonstration");
+    }
+  } else {
+    for (const contract of project.records.contracts) {
+      addMilestone(contract.startDate, "Contract commenced", `${contract.contractNo} took effect`, "contract");
+    }
+    for (const delivery of project.records.deliveries) {
+      addMilestone(
+        delivery.deliveredAt,
+        "Delivery reported",
+        delivery.description ?? "Goods or works delivered",
+        "completion"
+      );
+    }
+    for (const payment of project.records.payments) {
+      addMilestone(payment.releasedAt, "Disbursement released", `${payment.disbursementNo}`, "completion");
+    }
+  }
+
+  // Stable sorting keeps audit sequence and milestone order for shared times.
   const timeline = [...events, ...milestones].sort(
     (a, b) => new Date(a.occurredAt) - new Date(b.occurredAt)
   );
@@ -311,12 +345,17 @@ export const getProjectTimeline = async (req, res) => {
   res.json({
     projectId: project.id,
     projectTitle: project.projectTitle,
-    phases: project.phases,
+    phases: project.phases.map((phase) => ({ ...phase, ...project.timelineEvidence?.[phase.key] })),
     events: timeline,
     // Stated plainly so a reader knows the trail is complete rather than curated.
     disclosure:
-      "Every entry below is drawn from the system's tamper-evident audit log. Evaluator identities and " +
-      "individual bid scores are withheld while blind evaluation rules apply; nothing else is filtered.",
+      project.ongoingDemonstration
+        ? "October 15–November 6, 2026. Demonstration events use Philippine time and represent simulated activity. The system audit records the actual import."
+        : project.clientReportedStatus
+        ? "Client-reported details are shown at each stage. Dates appear where supplied. Missing records are identified from the reviewed form. Import activity is retained in the system audit."
+        : project.historicalDemonstration
+        ? "Source dates and labeled demonstration milestones are shown together. The system audit retains the actual import time."
+        : "The timeline includes public audit events and milestones from procurement records. Blind evaluation details are withheld.",
   });
 };
 
@@ -338,12 +377,16 @@ export const getProjectTimeline = async (req, res) => {
 // Contract uploads may contain signatures and private supporting evidence.
 // Publish reviewed copies through the generated-document approval workflow.
 const PUBLIC_ENTITY_REFS = ["rfq"];
+const ACADEMIC_CASE_FILE_REFS = ["appEntry", "pr", "rfq", "award", "contract", "delivery", "invoice", "payment"];
 
-const publicDocumentScope = (project) =>
-  PUBLIC_ENTITY_REFS.map((entityRef) => ({
+const projectDocumentScope = async (project, req) => {
+  const academic = project.recordSource === "academic";
+  if (academic && !await canViewAcademicCase(req)) return [];
+  return (academic ? ACADEMIC_CASE_FILE_REFS : PUBLIC_ENTITY_REFS).map((entityRef) => ({
     entityRef,
     entityId: { [Op.in]: project.entityRefs[entityRef] ?? [] },
   })).filter((condition) => condition.entityId[Op.in].length > 0);
+};
 
 export const listProjectDocuments = async (req, res) => {
   const project = await getPublicProject(req.params.id);
@@ -351,7 +394,7 @@ export const listProjectDocuments = async (req, res) => {
     return res.status(404).json({ message: "That project is not published, or does not exist." });
   }
 
-  const scope = publicDocumentScope(project);
+  const scope = await projectDocumentScope(project, req);
   if (scope.length === 0) return res.json([]);
 
   const documents = await Document.findAll({
@@ -387,7 +430,7 @@ export const downloadProjectDocument = async (req, res) => {
     return res.status(400).json({ message: "Invalid document reference." });
   }
 
-  const scope = publicDocumentScope(project);
+  const scope = await projectDocumentScope(project, req);
   if (scope.length === 0) return res.status(404).json({ message: "Document not found." });
 
   // Scoped to this project's public attachment points, so a document id alone
@@ -498,6 +541,7 @@ export const publicAnnouncement = (source, now) => {
 
 export const listAnnouncements = async (req, res) => {
   const now = new Date();
+  const includeAcademic = await canViewAcademicCase(req);
 
   // A notice scheduled for today goes live on the first request after its time,
   // whether or not anyone wired up a scheduler. Doing it here rather than only
@@ -514,6 +558,7 @@ export const listAnnouncements = async (req, res) => {
       // must never be loaded here in the first place.
       where: {
         status: "published",
+        [Op.and]: [solicitationVisibility(includeAcademic)],
         [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: now } }],
       },
       include: [{ model: AppEntry, as: "project", attributes: ["id", "projectTitle"] }, { model: Rfq, as: 'officialProcurement' }],
@@ -524,6 +569,7 @@ export const listAnnouncements = async (req, res) => {
   const entries = authored.map((announcement) => publicAnnouncement(announcement, now));
 
   for (const project of projects) {
+    if (project.recordSource === "academic" && !includeAcademic) continue;
     if (project.category !== "ongoing") continue;
     for (const solicitation of project.records.solicitations) {
       if (solicitation.status !== "published") continue;
@@ -619,9 +665,11 @@ const applyPublicFilters = (entries, query = {}, now = new Date()) => {
 // citizen check what was advertised months later.
 export const listArchivedAnnouncements = async (req, res) => {
   const now = new Date();
+  const includeAcademic = await canViewAcademicCase(req);
 
   const rows = await Announcement.findAll({
     where: {
+      [Op.and]: [solicitationVisibility(includeAcademic)],
       [Op.or]: [
         // Archived by hand — but only if it was ever published. A draft that was
         // archived was never public and must not become public now.
@@ -640,8 +688,10 @@ export const listArchivedAnnouncements = async (req, res) => {
 // ── Attachments on a published notice ────────────────────────────────────────
 // The bidding documents, terms of reference and specifications a prospective
 // bidder needs. Unauthenticated by design — that is what "public posting" means.
-const publiclyReadableNotice = async (id, now) => {
-  const announcement = await Announcement.findByPk(Number(id));
+const publiclyReadableNotice = async (req, now) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return null;
+  const announcement = await Announcement.findOne({ where: { id, ...solicitationVisibility(await canViewAcademicCase(req)) } });
   if (!announcement) return null;
   // Readable if it is live *or* archived: the papers behind a closed
   // procurement remain part of the public record.
@@ -651,7 +701,7 @@ const publiclyReadableNotice = async (id, now) => {
 };
 
 export const listPublicAnnouncementAttachments = async (req, res) => {
-  const announcement = await publiclyReadableNotice(req.params.id, new Date());
+  const announcement = await publiclyReadableNotice(req, new Date());
   if (!announcement) {
     return res.status(404).json({ message: "That notice is not published, or does not exist." });
   }
@@ -678,7 +728,7 @@ export const listPublicAnnouncementAttachments = async (req, res) => {
 };
 
 export const downloadPublicAnnouncementAttachment = async (req, res) => {
-  const announcement = await publiclyReadableNotice(req.params.id, new Date());
+  const announcement = await publiclyReadableNotice(req, new Date());
   if (!announcement) {
     return res.status(404).json({ message: "That notice is not published, or does not exist." });
   }

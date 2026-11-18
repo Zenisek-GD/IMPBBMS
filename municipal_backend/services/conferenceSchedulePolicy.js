@@ -12,7 +12,7 @@ export const conferenceSchedule = (rfq, { purpose = "prebid", scheduledAt } = {}
   const date = new Date(official || scheduledAt);
   if (!Number.isFinite(date.getTime())) throw workflowError("A valid scheduled date and time is required.", 400);
   if (purpose === "prebid" && date >= new Date(rfq.closingDate)) throw workflowError("The pre-bid conference must be scheduled before the bid submission deadline.", 400);
-  if (purpose === "opening" && date <= new Date(rfq.closingDate)) throw workflowError("Bid opening must be scheduled after the bid submission deadline.", 400);
+  if (purpose === "opening" && date < new Date(rfq.closingDate)) throw workflowError("Bid opening cannot be scheduled before the bid submission deadline.", 400);
   return { purpose, scheduledAt: date };
 };
 

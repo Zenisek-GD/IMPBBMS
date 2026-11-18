@@ -104,10 +104,16 @@ export const login = async (req, res) => {
     });
   }
 
-  // The password was right, so this attempt was not an attack — release the
-  // budget it consumed.
+  // A correct password should release the login attempt budget even when the
+  // account holder still needs to set a personal password.
   clearRateLimit("login", req.ip);
   clearRateLimit("loginAccount", normalised);
+
+  if (process.env.REQUIRE_INITIAL_PASSWORD_RESET === "true" && !user.passwordChangedAt) {
+    await securityAudit(req, user, AUDIT_ACTIONS.LOGIN_FAILED,
+      "Sign-in requires the account holder to set a password", { reason: "initialPasswordReset" });
+    return res.status(403).json({ message: "Use Forgot password to set your password before signing in." });
+  }
 
   const enabled = roleRequiresTwoFactor(user.Role);
   const enrollment = enabled ? await MfaEnrollment.findOne({ where: { userId: user.id } }) : null;

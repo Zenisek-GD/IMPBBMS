@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { Package, Info } from 'lucide-react'
 import * as financeApi from '../../api/finance'
 import { PENDING_REASON_LABELS, PRIORITY_TONES } from '../../api/finance'
@@ -39,7 +40,7 @@ function ResolveModal({ item, onClose, onResolved }) {
       <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
         Notes {resolution === 'dropped' && <span className="text-danger">(required to drop)</span>}
       </label>
-      <textarea
+      <OptionalWorkflowInput as="textarea" required={resolution === 'dropped'}
         rows={3}
         value={notes}
         onChange={(event) => setNotes(event.target.value)}

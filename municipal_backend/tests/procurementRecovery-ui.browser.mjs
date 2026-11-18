@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import express from "express";
 import puppeteer from "puppeteer-core";
+import { procurementEvidence } from "../services/procurementEvidence.js";
 
 // The optional snapshot contains read-only output from real list controllers.
 // Authentication and shell endpoints are fixtures; no original user is
@@ -38,6 +39,7 @@ test("normal procurement screens render a scoped recovery on desktop and mobile"
     else if (key.includes("notifications")) data = [];
     else if (key === "/reports/pending-counts") data = { counts: {}, queues: {}, generatedAt: new Date().toISOString() };
     else if (key === "/app-entries") data = envelope([fixture.app]);
+    else if (key === `/app-entries/${fixture.app.id}/evidence`) data = procurementEvidence(fixture.app);
     else if (key === "/purchase-requisitions") data = envelope([fixture.pr]);
     await request.respond({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
   });
@@ -72,6 +74,11 @@ test("normal procurement screens render a scoped recovery on desktop and mobile"
       await page.$eval('section[aria-label="Recovery provenance"] details details > summary', (summary) => summary.click());
       const expanded = await page.$eval('section[aria-label="Recovery provenance"]', (section) => section.innerText);
       assert.match(expanded, /2026-09-25/); assert.match(expanded, /2026-10-09/); assert.match(expanded, /reconstructed dates, not verified historical activity/);
+      await click("Start historical walkthrough");
+      await click("Next stage");
+      const walkthrough = await page.$eval('section[aria-label="Historical walkthrough"]', (section) => section.innerText);
+      assert.match(walkthrough, /Client form excerpts/);
+      assert.ok(walkthrough.includes(fixture.pr.lineItems[0].description));
     });
     await t.test(`${name}: requisition displays No, N/A and the item description without invented costs`, async () => {
       await page.goto(origin + "/purchase-requisitions", { waitUntil: "networkidle0" });

@@ -287,7 +287,7 @@ const auditChainIntegrity = async () => {
     {
       type: "auditChainBroken",
       severity: "critical",
-      summary: `The audit log hash chain is broken at ${result.problems.length} point(s) — entries have been altered`,
+      summary: `The audit log failed verification at ${result.problems.length} point(s)`,
       detail: { entriesChecked: result.entriesChecked, problems: result.problems.slice(0, 10) },
       dedupeKey: `auditChain:${result.problems[0]?.sequence ?? "unknown"}`,
     },

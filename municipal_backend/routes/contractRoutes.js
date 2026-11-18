@@ -2,6 +2,7 @@ import express from "express";
 import {
   listContracts,
   createContract,
+  updateContractDraft,
   issueForSignature,
   signContract,
   postPerformanceSecurity,
@@ -23,6 +24,7 @@ router.get(
   listContracts
 );
 router.post("/", requirePermission("contract.draft"), createContract);
+router.patch("/:id", requirePermission("contract.draft"), updateContractDraft);
 router.post("/:id/issue", requirePermission("contract.draft"), issueForSignature);
 
 // RA 12009 Sec. 68 — posted before signing. The supplier posts it; the

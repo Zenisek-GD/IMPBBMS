@@ -7,10 +7,11 @@ import { Invoice, Payment } from "../models/paymentModel.js";
 import { Appropriation, Obligation } from "../models/appropriationModel.js";
 import { ProjectAllocation, BudgetControlRequest } from "../models/budgetControlModel.js";
 import { calculateFinancialPosition, sumMoney } from "./financialCalculations.js";
+import { isFy2025HistoricalAward } from "./historicalAwards.js";
 
 // Scope financial records by their funding project, not payment date. A prior
 // year's obligation paid this year still belongs to that prior appropriation.
-export async function projectFinancialPositions(appEntryIds, { transaction } = {}) {
+export async function projectFinancialPositions(appEntryIds, { transaction, includeDemonstrations = false } = {}) {
   const ids = [...new Set(appEntryIds.map(Number))];
   if (!ids.length) return new Map();
   const scope = (key, values) => ({ where: { [key]: { [Op.in]: values } }, transaction });
@@ -37,15 +38,18 @@ export async function projectFinancialPositions(appEntryIds, { transaction } = {
   const invoiceProject = new Map(invoices.map((row) => [Number(row.id), contractProject.get(Number(row.contractId))]));
   return new Map(entries.map((entry) => {
     const id = Number(entry.id);
+    const archived = entry.recoveryImport?.demonstrationCompletion;
+    const historical = isFy2025HistoricalAward(entry);
+    const includeSettlement = historical || includeDemonstrations || !archived;
     const position = calculateFinancialPosition({
       plannedAmount: entry.abc,
       allocations: allocations.filter((row) => Number(row.appEntryId) === id),
       obligations: obligations.filter((row) => prProject.get(Number(row.prHeaderId)) === id),
-      invoices: invoices.filter((row) => contractProject.get(Number(row.contractId)) === id),
-      payments: payments.filter((row) => invoiceProject.get(Number(row.invoiceId)) === id),
+      invoices: invoices.filter((row) => includeSettlement && (!historical || row.contractId !== archived?.contractId) && contractProject.get(Number(row.contractId)) === id),
+      payments: payments.filter((row) => includeSettlement && (!historical || (row.invoiceId !== archived?.invoiceId && row.id !== archived?.paymentId)) && invoiceProject.get(Number(row.invoiceId)) === id),
       closeouts: closeouts.filter((row) => Number(row.sourceProjectId) === id),
     });
-    const projectContracts = contracts.filter((row) => awardProject.get(Number(row.awardId)) === id);
+    const projectContracts = contracts.filter((row) => includeSettlement && (!historical || row.id !== archived?.contractId) && awardProject.get(Number(row.awardId)) === id);
     const funding = appropriationMap.get(Number(entry.appropriationId));
     return [id, { appEntryId: id, appropriationId: entry.appropriationId,
       fiscalYear: funding?.fiscalYear ?? entry.fiscalYear,

@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from 'react'
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
+import { useEffect, useState } from 'react'
 import * as api from '../../api/bidding'
 import { useAuth } from '../../context/useAuth'
 import { usePermissions } from '../../context/usePermissions'
@@ -51,9 +52,9 @@ export default function AwardQueue({ version, onChanged }) {
         <thead><tr>{['Notice of Award', 'Project', 'Recommended bidder', 'Amount', 'Status', ''].map((value) => <th className="p-3" key={value}>{value}</th>)}</tr></thead>
         <tbody>{table.pageRows.map((award) => <tr key={award.id} className="border-t border-border-muted">
           <td className="p-3">{award.noaNumber}{award.externalNoaNumber && <p className="text-xs text-text-secondary">Existing reference: {award.externalNoaNumber}</p>}<p className="text-xs text-text-faint">{award.status === 'pendingHopeApproval' ? 'Prepared' : 'NOA date'}: {award.noaDate ?? 'Not recorded'}</p><p className="text-xs text-text-faint">Supplier receipt: {award.supplierReceivedAt ?? 'Not recorded'}</p>{award.resolutionNo && <p className="text-xs text-text-secondary">{award.resolutionNo}</p>}</td>
-          <td className="p-3">{award.projectTitle}<p className="text-xs text-text-faint">Recommended by {award.recommendedByName}</p></td>
-          <td className="p-3">{award.vendorName}</td><td className="p-3 whitespace-nowrap">₱{Number(award.amount).toLocaleString('en-PH')}<p className="text-xs text-text-faint">{award.awardBasis}</p></td>
-          <td className="p-3"><Badge tone={award.status === 'issued' ? 'success' : award.status === 'disapproved' ? 'danger' : 'warning'}>{award.status}</Badge><NextInline next={awardNext(award)} /></td>
+          <td className="p-3">{award.projectTitle}{award.recommendedByName && <p className="text-xs text-text-faint">Recommended by {award.recommendedByName}</p>}</td>
+          <td className="p-3">{award.vendorName}{award.supplierMismatch && <p className="text-xs text-text-secondary">Registered as {award.registeredSupplier}. Supplier names differ in the source.</p>}</td><td className="p-3 whitespace-nowrap">₱{Number(award.amount).toLocaleString('en-PH')}<p className="text-xs text-text-faint">{award.awardBasis}</p></td>
+          <td className="p-3"><Badge tone={award.status === 'issued' ? 'success' : award.status === 'disapproved' ? 'danger' : 'warning'}>{award.status}</Badge>{!award.historical && <NextInline next={awardNext(award)} />}</td>
           <td className="p-3">{permissions.has('bidding.award') && award.status === 'pendingHopeApproval' && award.recommendedById !== user.id && <div className="flex gap-2"><Button size="sm" title="Approve and issue the Notice of Award (NOA)" onClick={() => open(award, 'approve')}>Approve / issue NOA</Button><Button size="sm" variant="danger" onClick={() => open(award, 'disapprove')}>Disapprove</Button></div>}{permissions.has('bidding.publish') && ['issued', 'accepted'].includes(award.status) && !award.supplierReceivedAt && <Button size="sm" variant="secondary" onClick={() => open(award, 'receipt')}>Record supplier receipt</Button>}</td>
         </tr>)}</tbody>
       </table></div>
@@ -66,7 +67,7 @@ export default function AwardQueue({ version, onChanged }) {
         {selection.action === 'disapprove' ? <label className="block text-sm">Written grounds furnished to the BAC<textarea required minLength={30} rows={4} className={inputClass} value={grounds} onChange={(event) => setGrounds(event.target.value)} /></label> : selection.action === 'receipt' ? <label className="block text-sm">Supplier receipt date<input required type="date" min={selection.award.noaDate} max={today()} value={notice.supplierReceivedAt} onChange={(event) => setNotice({ ...notice, supplierReceivedAt: event.target.value })} className={inputClass} /></label> : <>
           <p className="text-sm text-text-secondary">Confirm the BAC recommendation and required approval/signature process before issuing this Notice of Award.</p>
           <label className="block text-sm">Notice of Award date<input required type="date" max={today()} value={notice.noaDate} onChange={(event) => setNotice({ ...notice, noaDate: event.target.value })} className={inputClass} /></label>
-          <label className="block text-sm">Existing Notice of Award number (optional)<input maxLength={255} value={notice.externalNoaNumber} onChange={(event) => setNotice({ ...notice, externalNoaNumber: event.target.value })} className={inputClass} /><span className="text-xs text-text-faint">The system reference is retained alongside the official reference.</span></label>
+          <label className="block text-sm">Existing Notice of Award number (optional)<OptionalWorkflowInput maxLength={255} value={notice.externalNoaNumber} onChange={(event) => setNotice({ ...notice, externalNoaNumber: event.target.value })} className={inputClass} /><span className="text-xs text-text-faint">The system reference is retained alongside the official reference.</span></label>
         </>}
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}<Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Record award decision'}</Button>
       </form>

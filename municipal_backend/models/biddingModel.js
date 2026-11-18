@@ -28,7 +28,7 @@ export const Rfq = sequelize.define("Rfq", {
   },
 
   publishDate: { type: DataTypes.DATEONLY, allowNull: true },
-  closingDate: { type: DataTypes.DATE, allowNull: false },
+  closingDate: { type: DataTypes.DATE, allowNull: true },
   openingDate: { type: DataTypes.DATE, allowNull: true },
   procurementStartAt: { type: DataTypes.DATE, allowNull: true },
   publicationStartAt: { type: DataTypes.DATE, allowNull: true },

@@ -140,6 +140,7 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
         philgepsExpiry: values.philgepsExpiry,
         contactPerson: values.contactPerson,
         contactEmail: values.contactEmail,
+        returnedReferenceCode: values.returnedReferenceCode || null,
         contactPhone: values.contactPhone || null,
         address: values.address || null,
         announcementId: values.announcementId || null,
@@ -312,22 +313,26 @@ export default function CounterSubmissionModal({ onClose, onRecorded }) {
               who owns it is not the one at the keyboard. */}
           <div className="grid gap-3 sm:grid-cols-2">
             <FormField
-              label="Email address"
-              type="email"
+              label="Email address (if supplied)"
+              inputMode="email"
               error={errors.contactEmail?.message ?? fieldErrors.contactEmail}
               registration={register('contactEmail')}
             />
             <FormField
               label="Re-type email address"
-              type="email"
+              inputMode="email"
               error={errors.confirmEmail?.message}
               registration={register('confirmEmail')}
             />
           </div>
           <p className="text-[11px] leading-relaxed text-text-faint">
-            Read this back to the bidder before saving. The activation link and verification code go
-            here, and only this address can activate the account.
+            You can record the papers without an email address. Confirm the address with the bidder when supplied. The bidder will need it for accreditation and account activation.
           </p>
+          <FormField
+            label="Returned registration reference (if applicable)"
+            error={errors.returnedReferenceCode?.message ?? fieldErrors.returnedReferenceCode}
+            registration={register('returnedReferenceCode')}
+          />
 
           <div className="grid gap-3 sm:grid-cols-2">
             <FormField

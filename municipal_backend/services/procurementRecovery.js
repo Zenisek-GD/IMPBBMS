@@ -25,7 +25,11 @@ export const RECOVERY_LABELS = Object.freeze([
 
 export const recoveryField = (recovery, label) => recovery?.sourceFields?.find((field) => field.label === label)?.value ?? null;
 export const assertRecoveryNotHeld = (entry) => {
-  if (entry?.recoveryImport?.hold) throw workflowError("This recovered draft is held at Item Description. Verify its missing planning, funding and requisition information before proceeding.", 409);
+  if (entry?.recoveryImport?.historicalAward) throw workflowError("This historical project is documented through award. Verify the original planning and funding approvals before starting new procurement actions.", 409);
+  if (entry?.recoveryImport?.hold) {
+    const checkpoint = entry.recoveryImport.reviewedForm ? "is on hold" : "is held at Item Description";
+    throw workflowError(`This recovered draft ${checkpoint}. Verify the missing planning, funding and requisition approvals before proceeding.`, 409);
+  }
 };
 
 // All source wording remains in sourceFields; enums and business dates receive

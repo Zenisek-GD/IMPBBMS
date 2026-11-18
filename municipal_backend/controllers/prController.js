@@ -31,7 +31,7 @@ import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../service
 import { AUDIT_ACTIONS } from "../services/auditLog.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { PR_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, hasCentralAccess, recordState } from "../services/requisitionRecords.js";
-import { procurementAnswer, justificationError, validDateOnly } from "../services/procurementInformation.js";
+import { procurementAnswer, justificationError, missingOptionalValue, placeholderAnswer, validDateOnly } from "../services/procurementInformation.js";
 import { assertRecoveryNotHeld, recoveryField } from "../services/procurementRecovery.js";
 
 // ── What a requester may actually write ──────────────────────────────────────
@@ -49,7 +49,9 @@ const EDITABLE_PR_FIELDS = ["purpose", "dateRequired", "isEmergency", "justifica
 const editableHeader = (body, { creating = false } = {}) => {
   const header = pickEditable(body, EDITABLE_PR_FIELDS);
   if (creating || Object.hasOwn(header, "isEmergency")) header.isEmergency = procurementAnswer(header.isEmergency, "Emergency purchase");
-  if (header.justificationStatus === "") header.justificationStatus = null;
+  for (const key of ["dateRequired", "justification", "justificationStatus"]) {
+    if (Object.hasOwn(header, key) && missingOptionalValue(header[key])) header[key] = null;
+  }
   return header;
 };
 
@@ -126,6 +128,7 @@ const serialize = (pr) => ({
   submittedAt: pr.submittedAt,
   appEntryId: pr.appEntryId,
   appEntryTitle: pr.appEntry?.projectTitle ?? null,
+  appCategory: pr.appEntry?.category ?? null,
   appEntryAbc: pr.appEntry ? Number(pr.appEntry.abc) : null,
   departmentCode: pr.department?.code ?? null,
   departmentName: recoveryField(pr.appEntry?.recoveryImport, "Requesting Office") ?? pr.department?.name ?? null,
@@ -223,23 +226,21 @@ export const getAppBalance = async (req, res) => {
   res.json(balance);
 };
 
-const computeLineItems = (rawItems, { capitalizationThreshold }) => {
-  if (!Array.isArray(rawItems) || rawItems.length === 0) {
-    return { error: "At least one line item is required." };
-  }
+const computeLineItems = (rawItems = [], { capitalizationThreshold }) => {
+  if (!Array.isArray(rawItems)) return { error: "Enter requisition line items as a list." };
 
   const items = [];
   for (const raw of rawItems) {
-    if (typeof raw?.description !== "string" || !raw.description.trim()) return { error: "Every line item needs a description." };
+    if (typeof raw?.description !== "string" || !raw.description.trim() || placeholderAnswer(raw.description)) return { error: "Every saved line item needs a description." };
     if (raw.description.trim().length > 255) return { error: "Line item descriptions must be at most 255 characters; use technical specifications for longer details." };
     if (raw.technicalSpecifications != null && (typeof raw.technicalSpecifications !== "string" || raw.technicalSpecifications.length > 8000)) return { error: "Technical specifications must be text of at most 8000 characters." };
 
-    const quantity = Number(raw.quantity);
-    const unitCost = Number(raw.unitCost);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
+    const quantity = missingOptionalValue(raw.quantity) ? null : Number(raw.quantity);
+    const unitCost = missingOptionalValue(raw.unitCost) ? null : Number(raw.unitCost);
+    if (quantity != null && (!Number.isFinite(quantity) || quantity <= 0)) {
       return { error: `Quantity for "${raw.description}" must be greater than 0.` };
     }
-    if (!Number.isFinite(unitCost) || unitCost <= 0) {
+    if (unitCost != null && (!Number.isFinite(unitCost) || unitCost <= 0)) {
       return { error: `Unit cost for "${raw.description}" must be greater than 0.` };
     }
 
@@ -251,17 +252,18 @@ const computeLineItems = (rawItems, { capitalizationThreshold }) => {
     // purchase may be charged to, so it must not be assertable from the form.
     items.push({
       description: raw.description.trim(),
-      technicalSpecifications: raw.technicalSpecifications?.trim() || null,
-      unit: raw.unit ?? null,
+      technicalSpecifications: missingOptionalValue(raw.technicalSpecifications) ? null : raw.technicalSpecifications.trim(),
+      unit: missingOptionalValue(raw.unit) ? null : raw.unit,
       quantity,
       unitCost,
-      lineTotal: Number((quantity * unitCost).toFixed(2)),
+      lineTotal: quantity == null || unitCost == null ? null : Number((quantity * unitCost).toFixed(2)),
       hasUsefulLifeOverOneYear,
-      assetClass: classifyLineItem({ hasUsefulLifeOverOneYear, unitCost }, capitalizationThreshold),
+      assetClass: unitCost == null || hasUsefulLifeOverOneYear == null ? null : classifyLineItem({ hasUsefulLifeOverOneYear, unitCost }, capitalizationThreshold),
     });
   }
 
-  const total = Number(items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2));
+  const total = !items.length || items.some((item) => item.lineTotal == null)
+    ? null : Number(items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2));
   return { items, total };
 };
 
@@ -290,14 +292,15 @@ const EXPENSE_CLASS_HINT = {
 };
 
 const validateHeader = ({ purpose, dateRequired, isEmergency, justification, justificationStatus }, { submitting }) => {
-  if (!validDateOnly(dateRequired)) return "Enter a valid date required.";
-  if (submitting && (typeof purpose !== "string" || !purpose.trim())) return "Purchase requisition purpose is required before submission.";
+  if ((submitting || dateRequired != null) && !validDateOnly(dateRequired)) return "Enter a valid date required.";
+  if (purpose != null && typeof purpose !== "string") return "Purchase requisition purpose must be text.";
+  if (submitting && (!purpose?.trim() || placeholderAnswer(purpose))) return "Purchase requisition purpose is required before submission.";
   if (submitting && isEmergency == null) return "Select Yes or No for Emergency purchase before submission.";
   if (justification != null && typeof justification !== "string") return "Emergency justification must be text.";
-  const reasonError = justificationError({ status: justificationStatus, text: justification, applicable: isEmergency === true, label: "Emergency justification" });
+  const reasonError = justificationError({ status: justificationStatus, text: justification, applicable: isEmergency === true, label: "Emergency justification", draft: !submitting });
   if (reasonError) return reasonError;
 
-  if (isEmergency) {
+  if (isEmergency && submitting) {
     if (!justification || justification.trim().length < EMERGENCY_JUSTIFICATION_MIN_LENGTH) {
       return `An emergency requisition needs a justification of at least ${EMERGENCY_JUSTIFICATION_MIN_LENGTH} characters.`;
     }
@@ -393,7 +396,10 @@ const validateRequisition = async (header, app, items, total, { transaction, exc
   approvedApp(app);
   const error = validateHeader(header, { submitting });
   if (error) throw workflowError(error, 400);
-  if (!items.length || !Number.isFinite(Number(total)) || Number(total) <= 0) throw workflowError("At least one valid requisition line item is required.", 400);
+  if (submitting && (!items.length || !Number.isFinite(Number(total)) || Number(total) <= 0 ||
+    items.some((item) => !(Number(item.quantity) > 0) || !(Number(item.unitCost) > 0) || !(Number(item.lineTotal) > 0)))) {
+    throw workflowError("Enter a positive quantity and unit cost for each requisition line item before submitting.", 400);
+  }
   if (submitting && items.some((item) => item.hasUsefulLifeOverOneYear == null)) throw workflowError("Select Yes or No for useful life on every line item before submission.", 400);
   const appropriation = app.appropriationId ? await Appropriation.findByPk(app.appropriationId, { transaction }) : null;
   const classError = expenseClassMismatch(items, appropriation?.expenseClass);
@@ -443,7 +449,7 @@ export const updatePr = async (req, res) => {
     if (app) assertDepartmentScope(req, app.implementingUnitId, PR_CENTRAL_PERMISSIONS, "requisitions");
     pr.lineItems = await PrLineItem.findAll({ where: { prHeaderId: pr.id }, transaction });
     const beforeState = prState(pr), merged = { ...beforeState, ...header };
-    await validateRequisition(merged, app, computed?.items ?? pr.lineItems, computed?.total ?? pr.totalAmount, { transaction, excludePrId: pr.id });
+    await validateRequisition(merged, app, computed?.items ?? pr.lineItems, computed ? computed.total : pr.totalAmount, { transaction, excludePrId: pr.id });
     await pr.update({ ...header, departmentId: app.implementingUnitId, ...(computed ? { totalAmount: computed.total } : {}) }, { transaction });
     if (computed) {
       await PrLineItem.destroy({ where: { prHeaderId: pr.id }, transaction });

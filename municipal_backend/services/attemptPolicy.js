@@ -53,7 +53,7 @@ export const validateAttemptSchedule = ({ closingDate, openingDate, prebidAt }) 
   const opening = new Date(openingDate);
   if (!closingDate || !Number.isFinite(closing.getTime())) return "A valid bid submission deadline is required.";
   if (!openingDate || !Number.isFinite(opening.getTime())) return "A valid bid opening date and time is required.";
-  if (opening <= closing) return "Bid opening must be scheduled after the bid submission deadline.";
+  if (opening < closing) return "Bid opening cannot be scheduled before the bid submission deadline.";
   if (closing <= new Date()) return "The new procurement attempt's submission deadline must be in the future.";
   if (prebidAt && (!Number.isFinite(new Date(prebidAt).getTime()) || new Date(prebidAt) >= closing)) return "The pre-bid conference must be scheduled before the submission deadline.";
   return null;

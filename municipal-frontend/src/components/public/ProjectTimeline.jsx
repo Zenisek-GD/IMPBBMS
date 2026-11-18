@@ -9,43 +9,27 @@ import {
   Check,
 } from 'lucide-react'
 
-// The transparency timeline: who did what, when, and why.
-//
-// Two things are shown that a status list would not carry. The first is the
-// actor — a status change with no name attached is not accountability. The
-// second is the stated reason, verbatim, including reasons for returning or
-// revising something, because the decisions that go sideways are the ones the
-// public most needs to see.
-//
-// Events sourced from the audit log carry a hash. It is surfaced so a reader
-// can tie an entry back to the tamper-evident chain rather than take the page's
-// word for it.
-//
-// ── GROUPING ─────────────────────────────────────────────────────────────────
-// The entries are drawn exactly as before; what is new is that they are
-// collected under the same eight lifecycle stages the Overview's progress
-// stepper uses, and each stage folds. A finished project records twenty-five
-// steps, and as one flat run there was no way to tell the four planning steps
-// from the moment the contract was awarded.
-//
-// Only the most recent stage is open on arrival. Nothing is hidden: a collapsed
-// group still states its step count and date range, so a reader can see how
-// much is folded away and when it happened before deciding to open it.
+const timelineLabels = {
+  planning: 'Planning & Budget',
+  evaluation: 'Evaluation & Post-qualification',
+  contract: 'Contract & Implementation',
+  completion: 'Delivery & Financial Closeout',
+}
 
 const dateTime = (value) =>
   new Date(value).toLocaleString('en-PH', {
+    timeZone: 'Asia/Manila',
     year: 'numeric',
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(value) ? {} : { hour: '2-digit', minute: '2-digit' }),
   })
 
 const shortDay = (value) =>
-  new Date(value).toLocaleDateString('en-PH', { day: 'numeric', month: 'short' })
+  new Date(value).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', day: 'numeric', month: 'short' })
 
 const shortDayYear = (value) =>
-  new Date(value).toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' })
+  new Date(value).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', day: 'numeric', month: 'short', year: 'numeric' })
 
 // A group's date range, collapsed to a single date when every entry in it
 // landed on the same day — "8 Jan – 8 Jan 2026" reads like a mistake.
@@ -53,43 +37,36 @@ const groupRange = (events) => {
   if (!events.length) return null
   const first = events[0].occurredAt
   const last = events[events.length - 1].occurredAt
-  const sameDay = new Date(first).toDateString() === new Date(last).toDateString()
+  const sameDay = shortDayYear(first) === shortDayYear(last)
   return sameDay ? shortDayYear(first) : `${shortDay(first)} – ${shortDayYear(last)}`
 }
 
-// Events arrive in time order and stages advance monotonically, so walking the
-// list in order yields the groups in lifecycle order without a second sort.
+// Start with the lifecycle so stages without dates still appear in order.
 const buildGroups = (events, phases) => {
-  const byKey = new Map((phases ?? []).map((phase) => [phase.key, phase]))
-  const groups = []
-  const seen = new Map()
+  const groups = new Map(phases.map((phase) => [phase.key, {
+    key: phase.key,
+    label: timelineLabels[phase.key] ?? phase.label,
+    phase,
+    events: [],
+  }]))
 
   for (const event of events) {
-    const key = event.stage ?? 'other'
-    if (!seen.has(key)) {
-      const group = {
-        key,
-        label: byKey.get(key)?.label ?? 'Other activity',
-        phase: byKey.get(key) ?? null,
-        events: [],
-      }
-      seen.set(key, group)
-      groups.push(group)
-    }
-    seen.get(key).events.push(event)
+    const key = groups.has(event.stage) ? event.stage : 'other'
+    if (!groups.has(key)) groups.set(key, { key, label: 'Other activity', events: [] })
+    groups.get(key).events.push(event)
   }
 
-  return groups
+  return [...groups.values()]
 }
 
-export default function ProjectTimeline({ events, disclosure, phases }) {
-  // Open the last stage that has entries: it is the most recent thing to have
-  // happened, and it is what a reader checking on a project came for. Derived
-  // during render rather than synced in an effect, so the first paint is
-  // already correct.
+export default function ProjectTimeline({ events = [], disclosure, phases = [] }) {
   const [openKeys, setOpenKeys] = useState(null)
+  const groups = buildGroups(events, phases)
+  const hasReviewedEvidence = phases.some((phase) => phase.reportedDetails || phase.missingRecords)
+  const lastWithEvents = groups.findLast((group) => group.events.length)
+  const open = new Set(openKeys ?? (hasReviewedEvidence ? groups.map(({ key }) => key) : [lastWithEvents?.key]))
 
-  if (!events?.length) {
+  if (!groups.length) {
     return (
       <p className="px-4 py-10 text-center text-[13px] text-text-faint">
         No recorded activity for this project yet.
@@ -97,8 +74,6 @@ export default function ProjectTimeline({ events, disclosure, phases }) {
     )
   }
 
-  const groups = buildGroups(events, phases)
-  const open = new Set(openKeys ?? (groups.length ? [groups[groups.length - 1].key] : []))
   const allOpen = groups.every((group) => open.has(group.key))
 
   const toggle = (key) =>
@@ -208,8 +183,7 @@ export default function ProjectTimeline({ events, disclosure, phases }) {
           times to get it. */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-[12.5px] text-text-secondary">
-          {events.length} recorded {events.length === 1 ? 'step' : 'steps'} across {groups.length}{' '}
-          {groups.length === 1 ? 'stage' : 'stages'}
+          {phases.length || groups.length} {(phases.length || groups.length) === 1 ? 'stage' : 'stages'} · {events.length} dated {events.length === 1 ? 'event' : 'events'}
         </p>
         <button
           type="button"
@@ -225,6 +199,9 @@ export default function ProjectTimeline({ events, disclosure, phases }) {
           const isOpen = open.has(group.key)
           const reached = group.phase?.reached ?? true
           const current = group.phase?.current ?? false
+          const reportedDetails = group.phase?.reportedDetails ?? []
+          const missingRecords = group.phase?.missingRecords ?? []
+          const dateRange = groupRange(group.events)
 
           return (
             <section key={group.key}>
@@ -252,16 +229,12 @@ export default function ProjectTimeline({ events, disclosure, phases }) {
                       <span className="text-[14px] font-semibold text-navy">{group.label}</span>
                       {current && (
                         <span className="rounded-full bg-chip px-2 py-0.5 text-[10.5px] font-medium tracking-[0.03em] text-navy uppercase">
-                          Now
+                          {group.phase?.evidence === 'clientReported' ? 'Last reported stage' : 'Current stage'}
                         </span>
                       )}
                     </span>
-                    {/* The count and range are what make a collapsed group
-                        honest: the reader sees how much is folded away and when
-                        it happened without having to open it. */}
                     <span className="mt-0.5 block text-[12px] text-text-secondary">
-                      {group.events.length} {group.events.length === 1 ? 'step' : 'steps'} ·{' '}
-                      {groupRange(group.events)}
+                      {dateRange ?? (reportedDetails.length ? 'Event date unavailable' : missingRecords.length ? 'Supporting records unavailable' : 'No dated public events')}
                     </span>
                   </span>
 
@@ -274,12 +247,27 @@ export default function ProjectTimeline({ events, disclosure, phases }) {
                 </button>
               </h3>
 
-              {isOpen && (
-                <ol className="relative pt-1 pb-4 pl-9">
-                  {group.events.map((event, index) =>
-                    renderEntry(event, index === group.events.length - 1)
-                  )}
-                </ol>
+              {isOpen && (reportedDetails.length > 0 || missingRecords.length > 0 || group.events.length > 0) && (
+                <div className="space-y-4 pt-1 pb-4 pl-9">
+                  {reportedDetails.length > 0 && <div>
+                    <p className="text-[13px] font-semibold text-navy">Client-reported details</p>
+                    <dl className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+                      {reportedDetails.map(({ label, value }) => <div key={label} className="min-w-0 break-words">
+                        <dt className="text-xs text-text-secondary">{label}</dt>
+                        <dd className="text-[13px] text-navy">{value}</dd>
+                      </div>)}
+                    </dl>
+                  </div>}
+                  {group.events.length > 0 && <ol>
+                    {group.events.map((event, index) => renderEntry(event, index === group.events.length - 1))}
+                  </ol>}
+                  {missingRecords.length > 0 && <div className="rounded-md border border-border-muted bg-sidebar p-3 text-[13px] text-navy">
+                    <p className="font-semibold">Records unavailable in the reviewed form</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4 text-text-secondary">
+                      {missingRecords.map((record) => <li key={record}>{record}</li>)}
+                    </ul>
+                  </div>}
+                </div>
               )}
             </section>
           )

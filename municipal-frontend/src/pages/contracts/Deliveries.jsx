@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useEffect, useState, useCallback } from 'react'
 import { Truck, CheckCircle2, XCircle } from 'lucide-react'
 import * as contractsApi from '../../api/contracts'
@@ -48,7 +49,7 @@ function InspectModal({ delivery, onClose, onDecided }) {
       <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
         Quantity accepted (note)
       </label>
-      <input
+      <OptionalWorkflowInput
         type="text"
         value={note}
         onChange={(event) => setNote(event.target.value)}

@@ -44,6 +44,9 @@ test("Pure JavaScript fallback engine: independent export, inspection, and resto
 
   // 1. Insert multiple binary test documents (PDF + PNG binary header) with checksums into source DB
   const conn = await mysql.createConnection(config);
+  const [sourceTables] = await conn.query("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'");
+  const tableNames = (rows) => rows.map((row) => Object.values(row)[0]).sort();
+  const expectedTables = tableNames(sourceTables);
   const pdfBytes = Buffer.from("%PDF-1.4\nPure JS Fallback Engine Document Verification\n%%EOF");
   const pdfChecksum = crypto.createHash("sha256").update(pdfBytes).digest("hex");
 
@@ -81,13 +84,13 @@ test("Pure JavaScript fallback engine: independent export, inspection, and resto
   assert.ok(backup.filename.startsWith("impbbms-backup-"));
   assert.ok(backup.bytes > 0);
   assert.equal(backup.sha256.length, 64);
-  assert.equal(backup.manifest.statistics.tableCount, 69, "Pure JS dump must cover all 69 tables");
+  assert.equal(backup.manifest.statistics.tableCount, expectedTables.length, "Pure JS dump must cover every source table");
   assert.ok(backup.manifest.statistics.documentCount >= 2, "Expected at least 2 documents in dump");
 
   // 3. Inspect Backup Package
   const inspection = await inspectSystemBackup(backup.path, config);
   assert.equal(inspection.valid, true);
-  assert.equal(inspection.manifest.statistics.tableCount, 69);
+  assert.equal(inspection.manifest.statistics.tableCount, expectedTables.length);
   assert.equal(inspection.manifest.payload.sha256, backup.manifest.payload.sha256);
 
   // 4. Clean and prepare fresh target database
@@ -104,11 +107,13 @@ test("Pure JavaScript fallback engine: independent export, inspection, and resto
 
   assert.equal(report.success, true, "Pure JS restoration must succeed");
   assert.equal(report.mismatchCount, 0, "No row count mismatches allowed");
-  assert.equal(report.tablesRestored, 69, "All 69 tables must be restored");
+  assert.equal(report.tablesRestored, expectedTables.length, "All source tables must be restored");
   assert.ok(report.verifiedDocuments >= 2, "Both test documents must be verified");
 
   // 6. Direct In-Database Functional and Constraint Verification
   const restoredConn = await mysql.createConnection({ ...config, database: DISPOSABLE_JS_DB });
+  const [restoredTables] = await restoredConn.query("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'");
+  assert.deepEqual(tableNames(restoredTables), expectedTables);
 
   // A. Verify User Accounts & bcrypt Password Hashes
   const [users] = await restoredConn.query(

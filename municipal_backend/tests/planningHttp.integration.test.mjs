@@ -57,7 +57,7 @@ test("planning HTTP workflows use real authorization, durable receipts, and atom
     const response = await fetch(base + path, {
       method, signal: AbortSignal.timeout(15_000),
       headers: {
-        "content-type": "application/json", "x-requested-with": "XMLHttpRequest",
+        "content-type": "application/json", "x-requested-with": "XMLHttpRequest", "X-Confirm-Incomplete-Information": "true",
         cookie: [...jar].map(([name, value]) => `${name}=${value}`).join("; "),
         ...(key ? { "Idempotency-Key": key } : {}), ...headers,
       },
@@ -93,6 +93,16 @@ test("planning HTTP workflows use real authorization, durable receipts, and atom
     expectStatus(await request(viewer, "POST", "/planning/plans", planInput("Unauthorized"), crypto.randomUUID()), 403);
     assert.equal(await m.DevelopmentPlan.count(), 0);
     assert.equal(await m.MutationReceipt.count(), 0, "authorization runs before claiming a mutation");
+  });
+
+  await t.test("missing information challenges before receipts or records and lists nested fields", async () => {
+    const response = await request(planner, "POST", "/planning/plans", { ...planInput("Incomplete plan"), vision: "N/A" }, crypto.randomUUID(), { "X-Confirm-Incomplete-Information": "false" });
+    expectStatus(response, 409);
+    assert.equal(response.body.code, "INCOMPLETE_INFORMATION_CONFIRMATION_REQUIRED");
+    assert.ok(response.body.missingFields.some(field => field.field === "vision"));
+    assert.ok(response.body.missingFields.some(field => field.field === "goals.0.subsector"));
+    assert.equal(await m.DevelopmentPlan.count(), 0);
+    assert.equal(await m.MutationReceipt.count(), 0);
   });
 
   await t.test("concurrent double submission and later replay create one plan and one set of audit events", async () => {

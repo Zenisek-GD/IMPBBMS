@@ -282,7 +282,7 @@ const VENDORS = {
     philgepsRegistrationNo: "PG-2020-009823",
     isVatRegistered: true,
     taxClassification: "services",
-    contactEmail: "office@sierraverde.example",
+    contactEmail: "office@procurenance.online",
     contactPhone: "+63 43 286 1177",
     address: "Km. 12 National Highway, Roxas, Oriental Mindoro",
   },
@@ -294,7 +294,7 @@ const VENDORS = {
     // Not VAT-registered: no VAT is withheld and the EWT base is the gross.
     isVatRegistered: false,
     taxClassification: "goods",
-    contactEmail: "sales@pinnacleoffice.example",
+    contactEmail: "sales@procurenance.online",
     contactPhone: "+63 917 442 8890",
     address: "Unit 5, Mabini Commercial Center, Roxas, Oriental Mindoro",
   },

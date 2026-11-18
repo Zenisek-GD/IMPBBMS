@@ -101,7 +101,7 @@ export const resolvePendingItem = async (req, res) => {
   await item.update({
     resolution,
     resolvedAt: new Date(),
-    notes: notes?.trim() ?? item.notes,
+    notes: Object.hasOwn(req.body, 'notes') ? notes?.trim() || null : item.notes,
   });
 
   res.json(serialize(await PendingItem.findByPk(item.id, includes)));

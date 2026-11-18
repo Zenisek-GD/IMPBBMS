@@ -92,7 +92,7 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
         <div className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label="Ordinance number" registration={register('ordinanceNo')} placeholder="Ord. No. 2026-01" />
-            <FormField label="Ordinance date" type="date" registration={register('ordinanceDate')} />
+            <FormField allowUnavailable label="Ordinance date" type="date" registration={register('ordinanceDate')} />
           </div>
 
           <FormField label="Title" registration={register('title')} placeholder="e.g. Local Roads Outlay" />
@@ -173,8 +173,8 @@ function AppropriationForm({ options, departments, onSubmit, onClose }) {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="PAP code" registration={register('papCode')} />
-            <FormField label="UACS code" registration={register('uacsCode')} />
+            <FormField allowUnavailable label="PAP code" registration={register('papCode')} />
+            <FormField allowUnavailable label="UACS code" registration={register('uacsCode')} />
           </div>
         </div>
       </LargeFormPage.Section>

@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useEffect, useState, useCallback } from 'react'
 import { CalendarClock, Plus, Video, Users, Info } from 'lucide-react'
 import * as contractsApi from '../../api/contracts'
@@ -99,7 +100,7 @@ function ScheduleModal({ onClose, onScheduled }) {
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
             Meeting link
           </label>
-          <input
+          <OptionalWorkflowInput
             type="url"
             value={form.meetingUrl}
             onChange={(event) => setForm({ ...form, meetingUrl: event.target.value })}
@@ -366,7 +367,7 @@ function EndSessionForm({ session, onDone }) {
       <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
         Minutes (archived against the procurement record)
       </label>
-      <textarea
+      <OptionalWorkflowInput as="textarea"
         rows={3}
         value={minutes}
         onChange={(event) => setMinutes(event.target.value)}

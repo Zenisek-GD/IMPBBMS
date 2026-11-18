@@ -1,6 +1,7 @@
 import { fiscalYearFilter } from "../services/financialCalculations.js";
 import { Op } from "sequelize";
-import { AppEntry, QUARTERS, PLAN_STAGE_LABELS, PLAN_CYCLE_LABELS } from "../models/appEntryModel.js";
+import { outsideAcademicCase } from "../services/academicCase.js";
+import { AppEntry, AppEvidenceWorksheet, QUARTERS, PLAN_STAGE_LABELS, PLAN_CYCLE_LABELS } from "../models/appEntryModel.js";
 import { Department } from "../models/departmentModel.js";
 import { User } from "../models/userModel.js";
 import { getLguProfile } from "../models/systemSettingModel.js";
@@ -22,7 +23,9 @@ import { assertBacAction, committeeSnapshot } from "../services/procurementGover
 import { actorAudit, workflowError } from "../services/workflowSupport.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { APP_CENTRAL_PERMISSIONS, activeDepartment, assertDepartmentScope, recordState } from "../services/requisitionRecords.js";
-import { justificationError } from "../services/procurementInformation.js";
+import { justificationError, missingOptionalValue, placeholderAnswer } from "../services/procurementInformation.js";
+import { evidenceUpdate, procurementEvidence } from "../services/procurementEvidence.js";
+import { isFy2025HistoricalAward } from "../services/historicalAwards.js";
 import { assertRecoveryNotHeld, recoveryField } from "../services/procurementRecovery.js";
 
 // IRR Sec. 7.7 — the lump sum for foreseeable emergencies "shall not be more
@@ -40,7 +43,7 @@ const serialize = (entry) => ({
   uacsCode: entry.uacsCode,
   category: entry.category,
   procurementMode: entry.procurementMode,
-  abc: Number(entry.abc),
+  abc: entry.abc == null ? null : Number(entry.abc),
   unit: entry.unit,
   quantity: entry.quantity,
   fundSource: entry.fundSource,
@@ -242,31 +245,32 @@ const liveRequisitionsFor = (appEntryId, transaction) =>
   });
 
 // Section 4.3 validation rules, enforced server-side.
-const validateEntry = ({ fiscalYear, abc, targetStartQuarter, targetCompletionQuarter, procurementMode, justification, justificationStatus, projectTitle, category, categoryDetails }) => {
-  if (typeof projectTitle !== "string" || !projectTitle.trim()) return "Project title is required.";
-  if (!["goods", "infrastructure", "consulting"].includes(category)) return "Select a procurement category.";
+const validateEntry = ({ fiscalYear, abc, targetStartQuarter, targetCompletionQuarter, procurementMode, justification, justificationStatus, projectTitle, category, categoryDetails }, { draft }) => {
+  if (typeof projectTitle !== "string" || !projectTitle.trim() || placeholderAnswer(projectTitle)) return "Project title is required.";
+  if ((!draft || category != null) && !["goods", "infrastructure", "consulting"].includes(category)) return "Select a procurement category.";
+  if ((!draft || procurementMode != null) && (typeof procurementMode !== "string" || !procurementMode.trim() || placeholderAnswer(procurementMode))) return "Select a procurement mode.";
   if (categoryDetails != null && (typeof categoryDetails !== "string" || categoryDetails.length > 255)) return "Category details must be text of at most 255 characters.";
   if (justification != null && typeof justification !== "string") return "The procurement mode justification must be text.";
   if (fiscalYear !== undefined && (!Number.isInteger(Number(fiscalYear)) || Number(fiscalYear) < 2000 || Number(fiscalYear) > 2100)) {
     return "A valid fiscal year is required.";
   }
-  if (abc === undefined || abc === null || abc === "") return "ABC is required.";
+  if (!draft && abc == null) return "ABC is required.";
 
   const numericAbc = Number(abc);
-  if (!Number.isFinite(numericAbc)) return "ABC must be a finite number.";
+  if (abc != null && !Number.isFinite(numericAbc)) return "ABC must be a finite number.";
   // Section 4.3: "ABC must be greater than 0."
-  if (numericAbc <= 0) return "ABC must be greater than 0.";
+  if (abc != null && numericAbc <= 0) return "ABC must be greater than 0.";
 
-  if (!QUARTERS.includes(targetStartQuarter)) return "Target start quarter is invalid.";
-  if (!QUARTERS.includes(targetCompletionQuarter)) return "Target completion quarter is invalid.";
+  if ((!draft || targetStartQuarter != null) && !QUARTERS.includes(targetStartQuarter)) return "Select a valid target start quarter.";
+  if ((!draft || targetCompletionQuarter != null) && !QUARTERS.includes(targetCompletionQuarter)) return "Select a valid target completion quarter.";
 
   // Section 4.3: start quarter must not be after the completion quarter.
-  if (QUARTERS.indexOf(targetStartQuarter) > QUARTERS.indexOf(targetCompletionQuarter)) {
+  if (targetStartQuarter && targetCompletionQuarter && QUARTERS.indexOf(targetStartQuarter) > QUARTERS.indexOf(targetCompletionQuarter)) {
     return "Target start quarter must not be after the target completion quarter.";
   }
 
   // Section 4.3: alternative procurement modes require a justification.
-  const reasonError = justificationError({ status: justificationStatus, text: justification, applicable: procurementMode && procurementMode !== "competitiveBidding", label: "Alternative procurement mode justification" });
+  const reasonError = justificationError({ status: justificationStatus, text: justification, applicable: procurementMode && procurementMode !== "competitiveBidding", label: "Alternative procurement mode justification", draft });
   if (reasonError) return reasonError;
 
   return null;
@@ -322,6 +326,7 @@ export const listAppEntries = async (req, res) => {
   // Section 2.2: observers see approved/published entries only.
   if (!req.permissions.has("app.view") && req.permissions.has("app.viewPublished")) {
     where.status = { [Op.in]: ["approved", "locked"] };
+    where[Op.and] = [outsideAcademicCase];
   }
 
   // A requester without a wider view sees only their own department's entries.
@@ -422,18 +427,21 @@ const lockFundingLines = async (ids, transaction) => {
   for (const id of [...new Set(ids.filter(Boolean).map(Number))].sort((a, b) => a - b)) await Appropriation.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
 };
 
-const validatePlanLinks = async (payload, { excludeAppEntryId, transaction } = {}) => {
+const validatePlanLinks = async (payload, { excludeAppEntryId, transaction, draft = false } = {}) => {
   await activeDepartment(payload.implementingUnitId, { transaction });
-  if (!payload.projectTitle?.trim()) throw workflowError("Project title is required.", 400);
-  const error = validateEntry(payload);
+  const error = validateEntry(payload, { draft });
   if (error) throw workflowError(error, 400);
   if (!Number.isInteger(Number(payload.fiscalYear)) || Number(payload.fiscalYear) < 2000 || Number(payload.fiscalYear) > 2100) throw workflowError("A valid fiscal year is required.", 400);
   if (!["indicative", "final"].includes(payload.planCycle)) throw workflowError("Choose a valid procurement plan cycle.", 400);
-  const funding = await validateAppropriation(payload.appropriationId, payload.abc, { excludeAppEntryId, cycle: payload.planCycle, fiscalYear: payload.fiscalYear, transaction });
-  if (funding.error) throw workflowError(funding.error, 400, { balance: funding.balance });
-  const programmed = await validateAipLink(payload.aipEntryId, payload.fiscalYear, { transaction });
-  if (programmed.error) throw workflowError(programmed.error, 400);
-  if (programmed.aipEntry.implementingUnitId && Number(programmed.aipEntry.implementingUnitId) !== Number(payload.implementingUnitId)) throw workflowError("The investment program entry belongs to another implementing department.", 400);
+  if (!draft || payload.appropriationId) {
+    const funding = await validateAppropriation(payload.appropriationId, payload.abc, { excludeAppEntryId, cycle: payload.planCycle, fiscalYear: payload.fiscalYear, transaction });
+    if (funding.error) throw workflowError(funding.error, 400, { balance: funding.balance });
+  }
+  if (!draft || payload.aipEntryId) {
+    const programmed = await validateAipLink(payload.aipEntryId, payload.fiscalYear, { transaction });
+    if (programmed.error) throw workflowError(programmed.error, 400);
+    if (programmed.aipEntry.implementingUnitId && Number(programmed.aipEntry.implementingUnitId) !== Number(payload.implementingUnitId)) throw workflowError("The investment program entry belongs to another implementing department.", 400);
+  }
   if (payload.appropriationId) {
     const fundingLine = await Appropriation.findByPk(payload.appropriationId, { transaction });
     if (fundingLine.fiscalYear !== Number(payload.fiscalYear)) throw workflowError("The appropriation and procurement plan must use the same fiscal year.", 400);
@@ -443,22 +451,29 @@ const validatePlanLinks = async (payload, { excludeAppEntryId, transaction } = {
     const origin = await AppEntry.findByPk(payload.indicativeOriginId, { transaction });
     if (!origin || origin.planCycle !== "indicative" || origin.fiscalYear !== Number(payload.fiscalYear) || Number(origin.implementingUnitId) !== Number(payload.implementingUnitId)) throw workflowError("The indicative origin must be a plan for the same department and fiscal year.", 400);
   }
-  const modeError = await validateModeAgainstCeilings(payload);
+  const modeError = draft ? null : await validateModeAgainstCeilings(payload);
   if (modeError) throw workflowError(modeError, 400);
 };
 
+const editablePlan = (body) => {
+  const payload = pickEditable(body, EDITABLE_APP_FIELDS);
+  for (const key of ["abc", "category", "procurementMode", "targetStartQuarter", "targetCompletionQuarter", "aipEntryId", "appropriationId", "justificationStatus", "quantity", "justification"]) {
+    if (Object.hasOwn(payload, key) && missingOptionalValue(payload[key])) payload[key] = null;
+  }
+  return payload;
+};
+
 export const createAppEntry = async (req, res) => {
-  const payload = pickEditable(req.body, EDITABLE_APP_FIELDS);
-  if (payload.justificationStatus === "") payload.justificationStatus = null;
+  const payload = editablePlan(req.body);
   payload.implementingUnitId = Number(payload.implementingUnitId ?? req.currentUser.departmentId);
   payload.fiscalYear = Number(payload.fiscalYear ?? new Date().getFullYear());
   payload.planCycle = payload.planCycle ?? "final";
+  payload.procurementMode ??= null;
   assertDepartmentScope(req, payload.implementingUnitId, APP_CENTRAL_PERMISSIONS, "procurement plans");
   const entry = await withAuditTransaction(async (transaction, audit) => {
     await lockFundingLines([payload.appropriationId], transaction);
-    await validatePlanLinks(payload, { transaction });
-    const created = await AppEntry.create({ ...payload, abc: Number(payload.abc), appropriationId: payload.appropriationId ? Number(payload.appropriationId) : null,
-      aipEntryId: Number(payload.aipEntryId), createdById: req.currentUser.id, status: "draft" }, { transaction });
+    await validatePlanLinks(payload, { transaction, draft: true });
+    const created = await AppEntry.create({ ...payload, createdById: req.currentUser.id, status: "draft" }, { transaction });
     await audit(actorAudit(req, { actionType: "app.created", entityRef: "appEntry", entityId: created.id, summary: `${created.projectTitle}: procurement plan created`, beforeState: null, afterState: recordState(created) }));
     return created;
   });
@@ -469,8 +484,7 @@ export const updateAppEntry = async (req, res) => {
   const initial = await AppEntry.findByPk(req.params.id);
   if (!initial) throw workflowError("APP entry not found.", 404);
   assertRecoveryNotHeld(initial);
-  const body = pickEditable(req.body, EDITABLE_APP_FIELDS);
-  if (body.justificationStatus === "") body.justificationStatus = null;
+  const body = editablePlan(req.body);
   const entry = await withAuditTransaction(async (transaction, audit) => {
     await lockFundingLines([initial.appropriationId, body.appropriationId], transaction);
     const current = await AppEntry.findByPk(initial.id, { transaction, lock: transaction.LOCK.UPDATE });
@@ -481,13 +495,49 @@ export const updateAppEntry = async (req, res) => {
     const beforeState = recordState(current);
     const merged = { ...beforeState, ...body };
     assertDepartmentScope(req, merged.implementingUnitId, APP_CENTRAL_PERMISSIONS, "procurement plans");
-    await validatePlanLinks(merged, { excludeAppEntryId: current.id, transaction });
-    await current.update({ ...body, abc: Number(merged.abc), fiscalYear: Number(merged.fiscalYear), implementingUnitId: Number(merged.implementingUnitId),
-      appropriationId: merged.appropriationId ? Number(merged.appropriationId) : null, aipEntryId: Number(merged.aipEntryId) }, { transaction });
+    await validatePlanLinks(merged, { excludeAppEntryId: current.id, transaction, draft: true });
+    await current.update(body, { transaction });
     await audit(actorAudit(req, { actionType: "app.updated", entityRef: "appEntry", entityId: current.id, summary: `${current.projectTitle}: procurement plan updated`, beforeState, afterState: recordState(current) }));
     return current;
   });
   res.json(serialize(await AppEntry.findByPk(entry.id, withIncludes)));
+};
+
+export const getAppEvidence = async (req, res) => {
+  const entry = await AppEntry.findByPk(req.params.id);
+  if (!entry) throw workflowError("Procurement plan not found.", 404);
+  assertDepartmentScope(req, entry.implementingUnitId, [...APP_CENTRAL_PERMISSIONS, "audit.viewAll"], "procurement evidence");
+  const worksheet = await AppEvidenceWorksheet.findByPk(entry.id);
+  res.json(procurementEvidence(entry, worksheet?.entries));
+};
+
+export const updateAppEvidence = async (req, res) => {
+  const key = req.params.stage;
+  const evidence = await withAuditTransaction(async (transaction, audit) => {
+    const entry = await AppEntry.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!entry) throw workflowError("Procurement plan not found.", 404);
+    assertDepartmentScope(req, entry.implementingUnitId, APP_CENTRAL_PERMISSIONS, "procurement evidence");
+    const next = evidenceUpdate(key, req.body, { clientConfirmation: isFy2025HistoricalAward(entry) });
+    const worksheet = await AppEvidenceWorksheet.findByPk(entry.id, { transaction, lock: transaction.LOCK.UPDATE });
+    const entries = { ...worksheet?.entries };
+    const previous = entries[key] ?? null;
+    const previousContent = Object.fromEntries(Object.entries(previous ?? {})
+      .filter(([field]) => !["recordedAt", "recordedBy", "recordedById"].includes(field)));
+    const same = previous && next && Object.keys(previousContent).length === Object.keys(next).length
+      && Object.entries(next).every(([field, value]) => previousContent[field] === value);
+    if ((!previous && !next) || same) return procurementEvidence(entry, entries);
+    const saved = next?.status === "Client-confirmed" ? {
+      ...next, recordedAt: new Date().toISOString(), recordedBy: req.currentUser.name, recordedById: req.currentUser.id,
+    } : next;
+    if (saved) entries[key] = saved;
+    else delete entries[key];
+    if (worksheet) await worksheet.update({ entries }, { transaction });
+    else await AppEvidenceWorksheet.create({ appEntryId: entry.id, entries }, { transaction });
+    await audit(actorAudit(req, { actionType: "app.evidenceUpdated", entityRef: "appEntry", entityId: entry.id,
+      summary: "Procurement evidence worksheet updated.", beforeState: { stage: key, entry: previous }, afterState: { stage: key, entry: saved } }));
+    return procurementEvidence(entry, entries);
+  });
+  res.json(evidence);
 };
 
 // Every status change goes through the state machine — no direct status writes.

@@ -73,6 +73,11 @@ export const activationSetupSchema = z
 // and they are not sitting at the keyboard — so it is confirmed twice. That
 // double entry matters more here than it did on the old self-service form: the
 // person typing the address is not the person who owns it.
+const optionalCounterEmail = z.preprocess((value) => {
+  if (value == null || /^(?:none|n\/?a|not applicable|not available|not provided)?$/i.test(String(value).trim())) return ''
+  return value
+}, z.union([z.literal(''), emailSchema]))
+
 export const counterSubmissionSchema = z
   .object({
     businessName: z
@@ -99,8 +104,9 @@ export const counterSubmissionSchema = z
       .trim()
       .min(1, 'An authorized contact person is required')
       .max(190, 'That name is too long'),
-    contactEmail: emailSchema,
-    confirmEmail: z.string().trim().min(1, 'Please re-type the email address'),
+    contactEmail: optionalCounterEmail,
+    confirmEmail: optionalCounterEmail,
+    returnedReferenceCode: z.string().trim().max(24).optional(),
     contactPhone: z.string().trim().max(40, 'That number is too long').optional().or(z.literal('')),
     address: z.string().trim().max(255, 'That address is too long').optional().or(z.literal('')),
     // When the papers were handed over, which is what an announcement's

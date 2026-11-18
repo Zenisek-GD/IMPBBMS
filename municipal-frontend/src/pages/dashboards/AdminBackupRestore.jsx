@@ -1,16 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Database,
   Download,
   Upload,
-  Calendar,
-  ShieldCheck,
   AlertTriangle,
   CheckCircle2,
   Trash2,
   RefreshCw,
   FileArchive,
-  ArrowRight,
   Info,
   Clock,
   HardDrive,
@@ -67,14 +64,12 @@ export default function AdminBackupRestore() {
   })
   const [savingSchedule, setSavingSchedule] = useState(false)
 
-  const loadData = async () => {
-    try {
-      setLoading(true)
-      const [statusData, listData, schedData] = await Promise.all([
+  const loadData = useCallback(() =>
+    Promise.all([
         fetchBackupStatus(),
         fetchBackupList(),
         fetchScheduleConfig(),
-      ])
+    ]).then(([statusData, listData, schedData]) => {
       setStatus(statusData)
       setBackups(listData.backups ?? [])
       setSchedule(schedData.schedule ?? null)
@@ -85,16 +80,15 @@ export default function AdminBackupRestore() {
           maxRetention: schedData.schedule.maxRetention ?? 7,
         })
       }
-    } catch (err) {
+    }).catch((err) => {
       setError(err.response?.data?.message || 'Could not load backup system information.')
-    } finally {
+    }).finally(() => {
       setLoading(false)
-    }
-  }
+    }), [])
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [loadData])
 
   const handleCreateBackup = async (downloadImmediate = false) => {
     try {
@@ -221,6 +215,8 @@ export default function AdminBackupRestore() {
         subtitle="Create portable system backups, restore data across deployments, and schedule automated snapshots."
       />
 
+      {loading && <p role="status" className="mb-4 text-sm text-text-secondary">Loading backup information...</p>}
+
       {error && (
         <div className="mb-4 flex items-start gap-3 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
           <AlertTriangle className="mt-0.5 shrink-0" size={18} />
@@ -337,7 +333,7 @@ export default function AdminBackupRestore() {
             <div className="space-y-3 pt-2">
               {backups.length === 0 ? (
                 <div className="rounded-md border border-dashed border-border-muted p-6 text-center text-sm text-text-faint">
-                  No backup archives currently stored on the server. Create one above to preserve your deployment state.
+                  {loading ? 'Loading stored backups...' : 'No backup archives currently stored on the server. Create one above to preserve your deployment state.'}
                 </div>
               ) : (
                 <div className="overflow-x-auto">

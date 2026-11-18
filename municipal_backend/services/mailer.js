@@ -76,14 +76,14 @@ const deliver = async ({ to, subject, text, html }) => {
 
   try {
     const info = await smtp.sendMail({ from: from(), to, subject, text, html });
-    console.log(`[mail] sent "${subject}" to ${to} (${info.messageId})`);
+    console.log(`[mail] sent message (${info.messageId})`);
     return { transport: "smtp", messageId: info.messageId, accepted: info.accepted ?? [] };
   } catch (err) {
     // Reported, not thrown. A controller that has already created an account must
     // not fail the whole request because the mail server hiccuped — the officer
     // needs to see the account exist and be told the invitation did not go out,
     // so they can resend it.
-    console.error(`[mail] FAILED "${subject}" to ${to}: ${err.message}`);
+    console.error(`[mail] delivery failed (${err.code ?? err.name ?? "SMTP error"})`);
     return { transport: "smtp", error: err.message, messageId: null };
   }
 };

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeftRight, Plus, RefreshCw } from 'lucide-react'
 import * as financeApi from '../../api/finance'
@@ -121,7 +122,10 @@ function BudgetActionForm({ existing, defaults, data, fiscalYear, onClose, onSav
         setForm(current => ({ ...current, sourceAppropriationId: event.target.value, amount: line?.amount ?? '', payload: { ...current.payload, ...Object.fromEntries(['title', 'ordinanceNo', 'ordinanceDate', 'fund', 'expenseClass', 'type', 'departmentId', 'papCode', 'uacsCode', 'remarks'].map(key => [key, line?.[key] ?? ''])) } }))
       }}><option value="">Select an appropriation</option>{appropriations.map(line => <option key={line.id} value={line.id}>{line.ordinanceNo} — {line.title}</option>)}</select></Field>}
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        {['title', 'ordinanceNo', 'ordinanceDate', 'papCode', 'uacsCode'].map(key => <Field key={key} label={human(key)}><input className={fieldClass} type={key === 'ordinanceDate' ? 'date' : 'text'} value={form.payload[key] ?? ''} onChange={event => payload(key, event.target.value)} /></Field>)}
+        {['title', 'ordinanceNo', 'ordinanceDate', 'papCode', 'uacsCode'].map(key => {
+          const Input = ['papCode', 'uacsCode'].includes(key) ? OptionalWorkflowInput : 'input'
+          return <Field key={key} label={human(key)}><Input className={fieldClass} type={key === 'ordinanceDate' ? 'date' : 'text'} value={form.payload[key] ?? ''} onChange={event => payload(key, event.target.value)} /></Field>
+        })}
         <Field label="Fund"><select className={fieldClass} value={form.payload.fund} onChange={event => payload('fund', event.target.value)}>{(options.funds ?? []).map(row => <option key={row.key} value={row.key}>{row.label}</option>)}</select></Field>
         <Field label="Expense class"><select className={fieldClass} value={form.payload.expenseClass} onChange={event => payload('expenseClass', event.target.value)}>{(options.expenseClasses ?? []).map(row => <option key={row.key} value={row.key}>{row.label}</option>)}</select></Field>
         <Field label="Appropriation type"><select className={fieldClass} value={form.payload.type} onChange={event => payload('type', event.target.value)}>{(options.types ?? ['annual', 'supplemental']).filter(type => type !== 'reenacted').map(type => <option key={type} value={type}>{human(type)}</option>)}</select></Field>

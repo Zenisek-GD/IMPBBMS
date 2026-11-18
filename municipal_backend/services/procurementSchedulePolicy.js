@@ -1,3 +1,5 @@
+import { missingOptionalValue } from "./procurementInformation.js";
+
 // The RFQ is the authoritative schedule for one procurement attempt. Other
 // modules receive a projection; they never accept independent bidding dates.
 export const SCHEDULE_DATES = ['procurementStartAt', 'publicationStartAt', 'publicationEndAt', 'prebidAt', 'closingDate', 'openingDate', 'evaluationStartAt', 'evaluationEndAt', 'postQualificationStartAt', 'postQualificationEndAt', 'expectedAwardAt'];
@@ -6,37 +8,38 @@ export const SCHEDULE_LABELS = { procurementStartAt: 'Procurement start', public
 
 export const scheduleSnapshot = (row) => Object.fromEntries(SCHEDULE_FIELDS.map((key) => [key, SCHEDULE_DATES.includes(key) ? (row[key] ? new Date(row[key]).toISOString() : null) : row[key] ?? (key === 'prebidRequired' ? false : null)]));
 
-export const scheduleValidationError = (row) => {
+export const scheduleValidationError = (row, { draft = false } = {}) => {
   for (const key of SCHEDULE_DATES) if (row[key] && Number.isNaN(new Date(row[key]).getTime())) return `${SCHEDULE_LABELS[key]} must be a valid date and time.`;
-  if (!row.closingDate || !row.openingDate) return 'A bid submission deadline and bid opening date and time are required.';
-  if (row.prebidRequired && (!row.prebidAt || !String(row.prebidVenue ?? '').trim())) return 'A required pre-bid conference needs a date, time, and venue or online meeting details.';
-  if (row.prebidAt && new Date(row.prebidAt) >= new Date(row.closingDate)) return 'The pre-bid conference must be scheduled before the bid submission deadline.';
-  if (new Date(row.openingDate) <= new Date(row.closingDate)) return 'The new bid opening date cannot be applied because it is not after the bid submission deadline.';
+  if (!draft && (!row.closingDate || !row.openingDate)) return 'A bid submission deadline and bid opening date and time are required.';
+  if (!draft && row.prebidRequired && (!row.prebidAt || missingOptionalValue(row.prebidVenue))) return 'A required pre-bid conference needs a date, time, and venue or online meeting details.';
+  if (row.prebidAt && row.closingDate && new Date(row.prebidAt) >= new Date(row.closingDate)) return 'The pre-bid conference must be scheduled before the bid submission deadline.';
+  // Published schedules can share a minute. Opening bids still requires closed submissions and a passed deadline.
+  if (row.openingDate && row.closingDate && new Date(row.openingDate) < new Date(row.closingDate)) return 'Bid opening cannot be scheduled before the bid submission deadline.';
   const ordered = SCHEDULE_DATES.filter((key) => key !== 'prebidAt' && row[key]);
   for (let i = 1; i < ordered.length; i += 1) {
     const previous = ordered[i - 1]; const next = ordered[i];
     if (new Date(row[next]) < new Date(row[previous])) return `${SCHEDULE_LABELS[next]} cannot occur before ${SCHEDULE_LABELS[previous].toLowerCase()}.`;
   }
-  if (row.publicationEndAt && new Date(row.publicationEndAt) > new Date(row.closingDate)) return 'Publication end cannot occur after the bid submission deadline.';
+  if (row.publicationEndAt && row.closingDate && new Date(row.publicationEndAt) > new Date(row.closingDate)) return 'Publication end cannot occur after the bid submission deadline.';
   if (row.prebidAt && row.publicationStartAt && new Date(row.prebidAt) < new Date(row.publicationStartAt)) return 'The pre-bid conference cannot occur before publication starts.';
   if (row.prebidAt && row.procurementStartAt && new Date(row.prebidAt) < new Date(row.procurementStartAt)) return 'The pre-bid conference cannot occur before procurement starts.';
   return null;
 };
 
-export const normalizeSchedule = (payload, { base = {}, mandatoryPrebid = false } = {}) => {
+export const normalizeSchedule = (payload, { base = {}, mandatoryPrebid = false, draft = false } = {}) => {
   if (Object.hasOwn(payload, 'prebidRequired') && typeof payload.prebidRequired !== 'boolean') throw new Error('Choose Yes or No for whether a pre-bid conference is required.');
   if (mandatoryPrebid && payload.prebidRequired === false) throw new Error('The configured procurement rules require a pre-bid conference for this procurement.');
   const row = Object.fromEntries(SCHEDULE_FIELDS.map((key) => [key, Object.hasOwn(payload, key) ? payload[key] : base[key] ?? null]));
   row.prebidRequired = mandatoryPrebid || Boolean(row.prebidRequired);
   for (const key of SCHEDULE_DATES) {
-    if (!row[key]) { row[key] = null; continue; }
+    if (missingOptionalValue(row[key])) { row[key] = null; continue; }
     const value = new Date(row[key]);
     if (Number.isNaN(value.getTime())) throw new Error(`${SCHEDULE_LABELS[key]} must be a valid date and time.`);
     row[key] = value.toISOString();
   }
-  for (const key of ['prebidVenue', 'prebidRemarks']) row[key] = String(row[key] ?? '').trim() || null;
+  for (const key of ['prebidVenue', 'prebidRemarks']) row[key] = missingOptionalValue(row[key]) ? null : String(row[key]).trim();
   if (!row.prebidRequired) { row.prebidAt = null; row.prebidVenue = null; row.prebidRemarks = null; }
-  const issue = scheduleValidationError(row);
+  const issue = scheduleValidationError(row, { draft });
   if (issue) throw new Error(issue);
   return row;
 };

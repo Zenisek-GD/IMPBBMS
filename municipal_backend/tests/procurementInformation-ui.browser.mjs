@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { evidenceStages, evidenceUpdate } from "../services/procurementEvidence.js";
 import fs from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -17,7 +18,9 @@ test("procurement information forms retain explicit answers and conditional fiel
   t.after(async () => { await browser.close(); await new Promise((resolve) => server.close(resolve)); });
   const origin = `http://127.0.0.1:${server.address().port}`, page = await browser.newPage(), errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  let role = "departmentRequester", savedApp = null, savedPr = null, savedVendor = null, postQualification = null, appWrites = 0, informationWrites = 0, receiptWrites = 0;
+  let role = "departmentRequester", savedApp = null, savedPr = null, savedVendor = null, savedContract = null, postQualification = null, appWrites = 0, informationWrites = 0, receiptWrites = 0;
+  const worksheet = { stages: evidenceStages, entries: {}, officialStatus: "locked", sourceStatus: null, supplierMismatch: false };
+  let evidenceWrites = 0;
   const year = new Date(Date.now() + 8 * 3600000).getUTCFullYear(), today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
   const planned = { id: 10, fiscalYear: year, projectTitle: "Existing synthetic plan", category: "goods", abc: 1000, status: "locked", planCycle: "final", appropriationId: 1, procurementMode: "competitiveBidding", implementingUnitCode: "QA", editable: false };
   const rfq = { id: 1, referenceNo: "ITB-UI-QA", title: "Synthetic solicitation", category: "goods", status: "draft", abc: 1000, modeKey: "competitiveBidding", modeName: "Competitive Bidding", closingDate: new Date(Date.now() + 30 * 864e5).toISOString(), openingDate: new Date(Date.now() + 31 * 864e5).toISOString(), prebidRequired: false, openingVenue: "", procurementContactPerson: "", procurementContactEmail: "", requiredSupplierDocuments: "", scheduleApprovedAt: null, twgRequired: true };
@@ -29,7 +32,7 @@ test("procurement information forms retain explicit answers and conditional fiel
     if (!url.pathname.startsWith("/api/")) return url.origin === origin || url.protocol === "data:" ? request.continue() : request.abort();
     const key = url.pathname.slice(4), method = request.method();
     let data = {};
-    if (key === "/auth/me") data = { id: 9, name: "Test officer", email: "officer@example.test", departmentId: 1, role, roleName: role, permissions: ["app.view", "app.create", "app.submit", "pr.view", "pr.create", "bidding.view", "bidding.publish", "bidding.evaluate", "bidding.technicalInput", "vendor.view", "vendor.manage", "announcements.manage"], themePreference: "light", loginSessionExpiresAt: Date.now() + 600000, serverTime: Date.now(), mfaVerified: true, mfaEnrollmentRequired: false };
+    if (key === "/auth/me") data = { id: 9, name: "Test officer", email: "officer@example.test", departmentId: 1, role, roleName: role, permissions: ["app.view", "app.create", "app.submit", "pr.view", "pr.create", "bidding.view", "bidding.publish", "bidding.evaluate", "bidding.technicalInput", "vendor.view", "vendor.manage", "announcements.manage", "contract.view", "contract.draft"], themePreference: "light", loginSessionExpiresAt: Date.now() + 600000, serverTime: Date.now(), mfaVerified: true, mfaEnrollmentRequired: false };
     else if (key === "/settings") data = { lgu: { name: "Test municipality", lguType: "municipality", incomeClass: "1st", capitalizationThreshold: 50000 }, branding: { systemName: "ProcureNance" }, thresholds: {}, options: { lguTypes: ["municipality"], incomeClasses: ["1st"] } };
     else if (key === "/settings/shortcuts") data = {};
     else if (key === "/settings/procurement" || key === "/bidding/bac-committee") data = { committee: [], policy: { membershipCount: 5, quorumCount: 3, memberIds: [] }, committeeCandidates: [], compositionWarnings: [] };
@@ -38,6 +41,13 @@ test("procurement information forms retain explicit answers and conditional fiel
     else if (key === "/planning/aip-entries") data = [{ id: 1, fiscalYear: year, title: "Synthetic adopted project", goalTitle: "Test development goal", expectedOutput: "Test expected output", implementingUnitId: 1, status: "adopted" }];
     else if (key === "/finance/appropriations") data = [{ id: 1, fiscalYear: year, title: "Synthetic appropriation", ordinanceNo: "QA-ORD", fundLabel: "General fund", expenseClassLabel: "MOOE", amount: 20000, programmed: 1000, unprogrammed: 19000 }];
     else if (key === "/app-entries/mode-suggestion") data = { suggested: "directAcquisition", rationale: "Synthetic configured threshold", citation: "QA policy" };
+    else if (key === "/app-entries/10/evidence") data = worksheet;
+    else if (key.startsWith("/app-entries/10/evidence/") && method === "PATCH") {
+      const stage = key.split("/").at(-1);
+      worksheet.entries[stage] = evidenceUpdate(stage, JSON.parse(request.postData()));
+      evidenceWrites++;
+      data = worksheet;
+    }
     else if (key === "/app-entries" && method === "POST") { savedApp = { ...JSON.parse(request.postData()), id: 1, status: "draft", editable: true, implementingUnitCode: "QA" }; appWrites++; data = savedApp; }
     else if (key === "/app-entries") data = envelope([planned, ...(savedApp ? [savedApp] : [])], url);
     else if (key === "/purchase-requisitions/app-balance/10") data = { abc: 1000, committed: 0, remaining: 1000 };
@@ -53,6 +63,12 @@ test("procurement information forms retain explicit answers and conditional fiel
     else if (key === "/bidding/bids/1/post-qualification") { postQualification = { ...JSON.parse(request.postData()), id: 1 }; data = { message: "Verification recorded." }; }
     else if (key === "/bidding/awards/1/receipt") { assert.equal(award.status, "issued"); award.supplierReceivedAt = JSON.parse(request.postData()).supplierReceivedAt; receiptWrites++; data = { message: "Supplier receipt recorded." }; }
     else if (key === "/bidding/awards") data = envelope([award], url);
+    else if (key === "/contracts" && method === "POST") {
+      savedContract = { id: 15, contractNo: "CON-UI-QA", projectTitle: award.projectTitle, status: "draft", amount: award.amount, ...JSON.parse(request.postData()) };
+      data = savedContract;
+    }
+    else if (key === "/contracts/15" && method === "PATCH") { Object.assign(savedContract, JSON.parse(request.postData())); data = savedContract; }
+    else if (key === "/contracts") data = envelope(savedContract ? [savedContract] : [], url);
     else if (key === "/vendors" && method === "POST") { savedVendor = { ...JSON.parse(request.postData()), id: 1, referenceCode: "VENDOR-UI-QA", registrationStatus: "submitted", documents: [], hasAccount: false }; data = savedVendor; }
     else if (key === "/vendors") data = envelope(savedVendor ? [savedVendor] : [], url);
     else if (key === "/vendors/me") data = { ...savedVendor, canBid: false };
@@ -81,17 +97,49 @@ test("procurement information forms retain explicit answers and conditional fiel
     else await control.evaluate((element, value) => { Object.getOwnPropertyDescriptor(element.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); element.dispatchEvent(new Event("change", { bubbles: true })); }, value);
   };
   await page.setViewport({ width: 1280, height: 900 });
+  await t.test("evidence saves and reopens, and the walkthrough makes no procurement writes", async () => {
+    await page.goto(origin + "/app-entries", { waitUntil: "networkidle0" });
+    await click("View details");
+    await page.waitForSelector("summary");
+    await page.evaluate(() => [...document.querySelectorAll("summary")].find((element) => element.textContent.startsWith("Planning and funding")).click());
+    await page.select("details[open] select", "Pending");
+    await page.type("details[open] textarea", "Awaiting funding evidence");
+    await page.click('details[open] button[type="submit"]');
+    await page.waitForFunction(() => document.body.innerText.includes("Worksheet entry saved."));
+    await click("Back to procurement plans");
+    await click("View details");
+    await click("Start historical walkthrough");
+    assert.match(await body(), /Awaiting funding evidence/);
+    for (let index = 1; index < evidenceStages.length - 1; index += 1) await click("Next stage");
+    assert.match(await body(), /Payment and project closeout/);
+    await click("Finish walkthrough");
+    assert.equal(evidenceWrites, 1);
+    assert.equal(appWrites, 0);
+  });
+  await t.test("contract period can be left blank in a draft and entered when the draft is reopened", async () => {
+    await page.goto(origin + "/contracts", { waitUntil: "networkidle0" });
+    await click("DRAFT CONTRACT");
+    await page.waitForSelector('select option[value="1"]');
+    await setValue("Issued award", "1", "select");
+    await click("SAVE DRAFT");
+    await click("Edit draft");
+    assert.equal(savedContract.contractDays, "");
+    await setValue("Contract period in calendar days", "30");
+    await click("SAVE DRAFT");
+    await page.waitForSelector('[role="dialog"]', { hidden: true });
+    assert.equal(savedContract.contractDays, "30");
+  });
   await t.test("APP N/A clears the reason, saves explicitly, and reopens without inventing project details", async () => {
     await page.goto(origin + "/app-entries", { waitUntil: "networkidle0" }); await click("NEW PLAN LINE");
     await page.waitForSelector('input[name="projectTitle"]');
     assert.equal(await page.$eval('input[name="projectTitle"]', (element) => element.value), "");
     await page.select('select[name="aipEntryId"]', "1"); await page.select('select[name="appropriationId"]', "1");
     await setValue("Project title", "QA procurement plan"); await setValue("Category details", "QA equipment"); await setValue("ABC (", "1000");
+    await page.select('select[name="procurementMode"]', "competitiveBidding");
     await setValue("Reason for alternative procurement mode response", "notApplicable", "select");
     assert.equal(await page.$('textarea[name="justification"]'), null); assert.match(await body(), /Test expected output/);
     await page.select('select[name="procurementMode"]', "directAcquisition");
-    assert.ok(await page.$('textarea[name="justification"]')); await click("Save draft");
-    assert.equal(appWrites, 0, "Alternative procurement still requires a justification");
+    assert.ok(await page.$('textarea[name="justification"]'));
     await page.select('select[name="procurementMode"]', "competitiveBidding"); await setValue("Reason for alternative procurement mode response", "notApplicable", "select");
     await click("Save draft"); await page.waitForFunction(() => !document.querySelector('input[name="projectTitle"]'));
     assert.equal(savedApp.justificationStatus, "notApplicable"); assert.equal(savedApp.justification, ""); assert.equal(savedApp.categoryDetails, "QA equipment");

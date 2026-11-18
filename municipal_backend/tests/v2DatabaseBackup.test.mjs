@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -67,7 +67,7 @@ test('backup streams SQL, uses private file mode, and hashes the actual complete
   assert.equal(await readFile(result.path, 'utf8'), sql);
   assert.equal(result.bytes, Buffer.byteLength(sql));
   assert.equal(result.sha256, createHash('sha256').update(sql).digest('hex'));
-  assert.equal(path.dirname(result.path), backupDirectory);
+  assert.equal(path.dirname(result.path), await realpath(backupDirectory));
   if (process.platform !== 'win32') assert.equal((await stat(result.path)).mode & 0o777, 0o600);
 });
 

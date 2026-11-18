@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useCallback, useEffect, useState } from 'react'
 import { Megaphone, Plus, Inbox, Info, Table2 } from 'lucide-react'
 import * as biddingApi from '../../api/bidding'
@@ -86,7 +87,7 @@ function HopeWithdrawalModal({ rfq, onClose, onSaved, onOpenAbstract }) {
 
 function CreateRfqModal({ onClose, onCreated }) {
   const [prs, setPrs] = useState([])
-  const [form, setForm] = useState({ prHeaderId: '', title: '', category: 'goods', closingDate: '', openingDate: '', qualityWeight: '', financialWeight: '', consultingPassingScore: '', svpTechnicalSpecifications: '', svpEligibilityDueStage: 'offer' })
+  const [form, setForm] = useState({ prHeaderId: '', title: '', category: 'goods', closingDate: '', openingDate: '', qualityWeight: '', financialWeight: '', consultingPassingScore: '', svpTechnicalSpecifications: '', svpEligibilityDueStage: '' })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const selectedPr = prs.find((pr) => String(pr.id) === String(form.prHeaderId))
@@ -96,7 +97,7 @@ function CreateRfqModal({ onClose, onCreated }) {
     let cancelled = false
     fetchPrs({ status: 'approved' })
       .then((data) => {
-        if (!cancelled) setPrs(data)
+        if (!cancelled) setPrs(data.filter((pr) => !pr.recoveryImport?.hold && !pr.recoveryImport?.historicalAward))
       })
       .catch(() => {})
     return () => {
@@ -119,12 +120,12 @@ function CreateRfqModal({ onClose, onCreated }) {
             Cancel
           </Button>
           <Button
-            disabled={saving || !form.prHeaderId || !form.closingDate || !form.openingDate || (isSmallValue && form.svpTechnicalSpecifications.trim().length < 20)}
+            disabled={saving || !form.prHeaderId}
             onClick={async () => {
               setError('')
               setSaving(true)
               try {
-                await biddingApi.createRfq({ prHeaderId: Number(form.prHeaderId), title: form.title, category: form.category, openingVenue: form.openingVenue ?? '', procurementContactPerson: form.procurementContactPerson ?? '', procurementContactEmail: form.procurementContactEmail ?? '', requiredSupplierDocuments: form.requiredSupplierDocuments ?? '', ...(isSmallValue ? { svpTechnicalSpecifications: form.svpTechnicalSpecifications, svpEligibilityDueStage: form.svpEligibilityDueStage } : {}), ...schedulePayload(form) })
+                await biddingApi.createRfq({ prHeaderId: Number(form.prHeaderId), title: form.title, category: selectedPr?.appCategory ?? form.category, openingVenue: form.openingVenue ?? '', procurementContactPerson: form.procurementContactPerson ?? '', procurementContactEmail: form.procurementContactEmail ?? '', requiredSupplierDocuments: form.requiredSupplierDocuments ?? '', ...(isSmallValue ? { svpTechnicalSpecifications: form.svpTechnicalSpecifications, svpEligibilityDueStage: form.svpEligibilityDueStage } : {}), ...schedulePayload(form, { draft: true }) })
                 onCreated()
                 onClose()
               } catch (err) {
@@ -186,7 +187,8 @@ function CreateRfqModal({ onClose, onCreated }) {
               Category
             </label>
             <select
-              value={form.category}
+              value={selectedPr?.appCategory ?? form.category}
+              disabled={Boolean(selectedPr?.appCategory)}
               onChange={(event) => setForm({ ...form, category: event.target.value })}
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
             >
@@ -197,10 +199,11 @@ function CreateRfqModal({ onClose, onCreated }) {
           </div>
           {isSmallValue && <>
             <label className="block text-xs font-medium text-text-secondary">Technical specifications, quantities, delivery terms and required eligibility documents
-              <textarea required minLength={20} rows={5} value={form.svpTechnicalSpecifications} onChange={(event) => setForm({ ...form, svpTechnicalSpecifications: event.target.value })} className="mt-1 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none" />
+              <textarea rows={5} value={form.svpTechnicalSpecifications} onChange={(event) => setForm({ ...form, svpTechnicalSpecifications: event.target.value })} className="mt-1 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none" />
             </label>
             <label className="block text-xs font-medium text-text-secondary">When must suppliers submit eligibility documents?
               <select value={form.svpEligibilityDueStage} onChange={(event) => setForm({ ...form, svpEligibilityDueStage: event.target.value })} className="mt-1 min-h-11 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none">
+                <option value="">Pending</option>
                 <option value="offer">With the quotation</option>
                 <option value="evaluation">During evaluation</option>
                 <option value="beforeAward">Before the award notice</option>
@@ -507,7 +510,7 @@ export default function RfqManagement() {
                     <td className="px-4 py-3 text-[13px] text-text-secondary">{rfq.modeName}</td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">{peso(rfq.abc)}</td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">
-                      {new Date(rfq.closingDate).toLocaleString()}
+                      {rfq.closingDate ? new Date(rfq.closingDate).toLocaleString() : 'Pending'}
                     </td>
                     <td className="px-4 py-3 text-xs text-text-secondary">{rfq.openingDate ? new Date(rfq.openingDate).toLocaleString() : 'Schedule required before publication'}</td>
                     <td className="px-4 py-3">
@@ -604,7 +607,7 @@ export default function RfqManagement() {
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
             Witnesses present
           </label>
-          <input
+          <OptionalWorkflowInput
             type="text"
             value={witnesses}
             onChange={(event) => setWitnesses(event.target.value)}

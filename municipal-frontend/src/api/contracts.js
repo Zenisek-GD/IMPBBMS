@@ -6,6 +6,9 @@ export const fetchContracts = (params = {}) =>
 export const createContract = (payload) =>
   apiClient.post('/contracts', payload).then((res) => res.data)
 
+export const updateContractDraft = (id, payload) =>
+  apiClient.patch(`/contracts/${id}`, payload).then((res) => res.data)
+
 export const issueForSignature = (id) =>
   apiClient.post(`/contracts/${id}/issue`).then((res) => res.data)
 

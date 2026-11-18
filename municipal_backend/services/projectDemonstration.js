@@ -17,7 +17,6 @@ export function applyProjectDemonstration(project) {
   if (Number(project.id) !== 1 || project.projectTitle !== title || Number(project.fiscalYear) !== 2026 || Number(project.financials?.budget) !== 1500000) return project;
   return {
     ...project,
-    category: 'completed', phase: 'completion', phaseLabel: 'Completed demonstration', progressPercent: 100,
     demonstration: {
       reference: 'MDRRMO-2026-001-DEMONSTRATION',
       source: 'Procurement_Information_Form_New_Project_2026.docx',

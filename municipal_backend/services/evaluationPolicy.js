@@ -4,7 +4,7 @@ export const scheduleError = (closingDate, openingDate, { required = true } = {}
   if (!openingDate && !required) return null;
   const open = new Date(openingDate).getTime();
   if (!openingDate || !Number.isFinite(open)) return "Enter a valid bid opening date and time.";
-  return open > close ? null : "Bid opening must be scheduled after the bid submission deadline.";
+  return open >= close ? null : "Bid opening cannot be scheduled before the bid submission deadline.";
 };
 
 export const weightError = (qualityWeight, financialWeight) => {

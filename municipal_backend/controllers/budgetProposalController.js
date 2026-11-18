@@ -280,7 +280,7 @@ export const updateProposal = async (req, res) => {
       proposal.lines = saved;
     }
     await proposal.update({
-      justification: req.body.justification?.trim() ?? proposal.justification,
+      justification: Object.hasOwn(req.body, 'justification') ? req.body.justification?.trim() || null : proposal.justification,
       ...(computed ? { proposedTotal: computed.total } : {}),
     }, { transaction });
     await auditProposal(audit, req, proposal, 'budget.proposal.updated', before, `Draft proposal revised for FY ${proposal.fiscalYear}`);

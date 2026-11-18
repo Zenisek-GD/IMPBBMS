@@ -3,6 +3,8 @@ import {
   listAppEntries,
   createAppEntry,
   updateAppEntry,
+  getAppEvidence,
+  updateAppEvidence,
   transitionAppEntry,
   getModeSuggestion,
   recordGppbSubmission,
@@ -20,6 +22,8 @@ router.get("/mode-suggestion", requireAnyPermission("app.view", "app.create"), g
 
 router.post("/", requirePermission("app.create"), createAppEntry);
 router.patch("/:id", requirePermission("app.create"), updateAppEntry);
+router.get("/:id/evidence", requirePermission("app.view"), getAppEvidence);
+router.patch("/:id/evidence/:stage", requirePermission("app.create"), updateAppEvidence);
 
 // The specific permission depends on the action and the entry's current state,
 // so it is checked inside the controller against the state machine.

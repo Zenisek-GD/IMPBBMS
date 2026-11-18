@@ -2,6 +2,13 @@ import { DataTypes } from "sequelize";
 import { sequelize } from "./db.js";
 import { User } from "./userModel.js";
 import { Announcement } from "./announcementModel.js";
+import { missingOptionalValue } from "../services/procurementInformation.js";
+
+function optionalContact(field) {
+  return function setContact(value) {
+    this.setDataValue(field, missingOptionalValue(value) ? null : typeof value === "string" ? value.trim() : value);
+  };
+}
 
 // Design doc Section 2.2: vendors are onboarded through the controlled
 // procurement flow (registration + document submission), not open sign-up.
@@ -49,9 +56,9 @@ export const Vendor = sequelize.define("Vendor", {
   // binding is the mechanism behind the requirement that only the address
   // submitted and approved during accreditation can activate the account — there
   // is deliberately no second address anywhere that could compete with it.
-  contactEmail: { type: DataTypes.STRING, allowNull: true, validate: { isEmail: true } },
+  contactEmail: { type: DataTypes.STRING, allowNull: true, validate: { isEmail: true }, set: optionalContact("contactEmail") },
   contactPerson: { type: DataTypes.STRING, allowNull: true },
-  contactPhone: { type: DataTypes.STRING, allowNull: true },
+  contactPhone: { type: DataTypes.STRING, allowNull: true, set: optionalContact("contactPhone") },
   address: { type: DataTypes.STRING, allowNull: true },
 
   // Quoted back to the bidder on submission and in the acknowledgement email, so

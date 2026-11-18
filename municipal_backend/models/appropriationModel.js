@@ -155,7 +155,7 @@ export const Obligation = sequelize.define(
     cancellationReason: { type: DataTypes.TEXT, allowNull: true },
 
     // Free text carried onto the ORS.
-    particulars: { type: DataTypes.STRING, allowNull: true },
+    particulars: { type: DataTypes.TEXT, allowNull: true },
   },
   { indexes: [{ fields: ["status"] }] }
 );

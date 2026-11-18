@@ -9,6 +9,12 @@ export const createAppEntry = (payload) =>
 export const updateAppEntry = (id, payload) =>
   apiClient.patch(`/app-entries/${id}`, payload).then((res) => res.data)
 
+export const fetchAppEvidence = (id) =>
+  apiClient.get(`/app-entries/${id}/evidence`).then((res) => res.data)
+
+export const updateAppEvidence = (id, stage, payload) =>
+  apiClient.patch(`/app-entries/${id}/evidence/${stage}`, payload).then((res) => res.data)
+
 export const transitionAppEntry = (id, action, remarks, attendance = {}) =>
   apiClient.post(`/app-entries/${id}/transition`, { action, remarks, ...attendance }).then((res) => res.data)
 

@@ -95,19 +95,19 @@ export const AppEntry = sequelize.define(
     uacsCode: { type: DataTypes.STRING, allowNull: true },
 
     category: { type: DataTypes.STRING, allowNull: true },
-    procurementMode: { type: DataTypes.STRING, allowNull: false, defaultValue: "competitiveBidding" },
+    procurementMode: { type: DataTypes.STRING, allowNull: true, defaultValue: "competitiveBidding" },
 
     // Approved Budget for the Contract. DECIMAL rather than FLOAT so peso
     // amounts stay exact.
-    abc: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
+    abc: { type: DataTypes.DECIMAL(15, 2), allowNull: true },
     unit: { type: DataTypes.STRING, allowNull: true },
     quantity: { type: DataTypes.INTEGER, allowNull: true },
 
     fundSource: { type: DataTypes.STRING, allowNull: true },
     accountCode: { type: DataTypes.STRING, allowNull: true },
 
-    targetStartQuarter: { type: DataTypes.ENUM(...QUARTERS), allowNull: false },
-    targetCompletionQuarter: { type: DataTypes.ENUM(...QUARTERS), allowNull: false },
+    targetStartQuarter: { type: DataTypes.ENUM(...QUARTERS), allowNull: true },
+    targetCompletionQuarter: { type: DataTypes.ENUM(...QUARTERS), allowNull: true },
 
     // Section 4.3: alternative procurement modes require a justification.
     justification: { type: DataTypes.TEXT, allowNull: true },
@@ -165,6 +165,13 @@ export const AppEntry = sequelize.define(
     indexes: [{ fields: ["fiscalYear", "status"] }],
   }
 );
+
+export const AppEvidenceWorksheet = sequelize.define("AppEvidenceWorksheet", {
+  appEntryId: { type: DataTypes.INTEGER, primaryKey: true },
+  entries: { type: DataTypes.JSON, allowNull: false },
+});
+
+AppEvidenceWorksheet.belongsTo(AppEntry, { foreignKey: "appEntryId", onDelete: "CASCADE" });
 
 // The office the entry is for (Section 4.4 "Implementing unit").
 AppEntry.belongsTo(Department, { as: "implementingUnit", foreignKey: "implementingUnitId" });

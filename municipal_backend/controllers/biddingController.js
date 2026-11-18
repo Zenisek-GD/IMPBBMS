@@ -7,7 +7,7 @@ import { TwgAssessment } from "../models/twgModel.js";
 import { ProcurementAttempt } from "../models/procurementAttemptModel.js";
 import { failureStatusLabel } from "../services/attemptPolicy.js";
 import { serializeAssessment } from "./twgController.js";
-import { scheduleError, weightError, assessmentCompliant, activeEvaluations, technicalAverage, complianceRequirementsFor } from "../services/evaluationPolicy.js";
+import { weightError, assessmentCompliant, activeEvaluations, technicalAverage, complianceRequirementsFor } from "../services/evaluationPolicy.js";
 import { EvaluationPlan } from "../models/evaluationWorkflowModel.js";
 import { workflowError, actorAudit } from "../services/workflowSupport.js";
 import { solicitationInformation, postQualificationError, validDateOnly } from "../services/procurementInformation.js";
@@ -38,6 +38,7 @@ import {
 import { checkVendorEligibility } from "../services/vendorEligibility.js";
 import { svpQuotationsDisclosable } from "../services/svpDisclosure.js";
 import { svpRequirementsFrom, SVP_ELIGIBILITY_DUE_STAGES } from "../services/svpRequirements.js";
+import { assertRecoveryNotHeld } from "../services/procurementRecovery.js";
 import { checksumOf, safeFilename, validateFileContent } from "../services/documentStore.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
 import { unresolvedProtestsFor } from "./protestController.js";
@@ -152,8 +153,6 @@ const nextReference = (modeKey, transaction) => {
 const evaluationConfig = (body) => {
   const category = body.category ?? "goods";
   if (!["goods", "infrastructure", "consulting"].includes(category)) throw workflowError("Choose Goods, Infrastructure, or Consulting Services.", 400);
-  const error = scheduleError(body.closingDate, body.openingDate);
-  if (error) throw workflowError(error, 400);
   const qualityWeight = body.qualityWeight ?? 75;
   const financialWeight = body.financialWeight ?? 25;
   if (category === "consulting") {
@@ -164,7 +163,7 @@ const evaluationConfig = (body) => {
   }
   const consultingPassingScore = Number(body.consultingPassingScore ?? 60);
   if (!Number.isFinite(consultingPassingScore) || consultingPassingScore <= 0 || consultingPassingScore > 100) throw workflowError("The consulting technical passing score must be greater than zero and at most 100.", 400);
-  return { openingDate: body.openingDate, qualityWeight: category === "consulting" ? Number(qualityWeight) : 75, financialWeight: category === "consulting" ? Number(financialWeight) : 25, consultingPassingScore, twgRequired: true };
+  return { qualityWeight: category === "consulting" ? Number(qualityWeight) : 75, financialWeight: category === "consulting" ? Number(financialWeight) : 25, consultingPassingScore, twgRequired: true };
 };
 
 export const updateRfqSchedule = async (req, res) => {
@@ -174,7 +173,7 @@ export const updateRfqSchedule = async (req, res) => {
     if (scheduleIsLocked(row)) throw workflowError("Published procurement dates cannot be directly edited. Request a schedule amendment.");
     if (["qualityWeight", "financialWeight", "consultingPassingScore"].some((key) => Object.hasOwn(req.body, key) && Number(req.body[key]) !== Number(row[key]))) throw workflowError("Configure and approve Consulting evaluation criteria in the approved evaluation plan, separately from the schedule.");
     const before = scheduleSnapshot(row);
-    const values = readProcurementSchedule(req.body, { base: row, mandatoryPrebid: requiresPrebidConference(Number(row.abc), await getLguProfile(), row.category) });
+    const values = readProcurementSchedule(req.body, { base: row, mandatoryPrebid: requiresPrebidConference(Number(row.abc), await getLguProfile(), row.category), draft: true });
     await row.update({ ...values, scheduleApprovedAt: null, scheduleApprovedById: null, schedulePreparedById: req.currentUser.id }, { transaction });
     await synchronizeSchedule(row, { transaction });
     const attempt = await ProcurementAttempt.findOne({ where: { rfqId: row.id }, transaction });
@@ -190,7 +189,7 @@ export const updateSvpTerms = async (req, res) => {
     if (!row) throw workflowError("Procurement not found.", 404);
     if (row.status !== "draft" || row.mode?.key !== "smallValueProcurement") throw workflowError("Only draft Small Value Procurement terms can be updated.", 409);
     const before = { svpTechnicalSpecifications: row.svpTechnicalSpecifications, svpEligibilityDueStage: row.svpEligibilityDueStage };
-    const terms = svpRequirementsFrom(req.body, row.mode.key);
+    const terms = svpRequirementsFrom({ ...before, ...req.body }, row.mode.key, { draft: true });
     await row.update(terms, { transaction });
     await audit(actorAudit(req, { actionType: "rfq.svpTermsChanged", entityRef: "rfq", entityId: row.id, summary: "Draft RFQ technical terms and eligibility-document timing updated.", beforeState: before, afterState: terms }));
     return row;
@@ -235,9 +234,14 @@ export const listRfqs = async (req, res) => {
   res.json(pageEnvelope({ rows: rows.map(serialize), total: count, page: page.page, pageSize: page.pageSize }));
 };
 
+const solicitationCategory = (plan, requested) => {
+  const planned = plan?.category;
+  if (planned && requested && requested !== planned) throw workflowError("The solicitation category must match the approved procurement plan.", 400);
+  return planned ?? requested;
+};
+
 export const createRfq = async (req, res) => {
-  const { prHeaderId, appEntryId, title, category, closingDate, procurementModeKey } = req.body;
-  const config = evaluationConfig(req.body);
+  const { prHeaderId, appEntryId, title, procurementModeKey } = req.body;
 
   // ── Two ways a solicitation can arise ──────────────────────────────────────
   // The ordinary route is an approved requisition. The other is an Early
@@ -249,17 +253,19 @@ export const createRfq = async (req, res) => {
     return createEpaSolicitation(req, res);
   }
 
-  const pr = await PrHeader.findByPk(prHeaderId);
+  const pr = await PrHeader.findByPk(prHeaderId, { include: [{ model: AppEntry, as: "appEntry", attributes: ["category", "recoveryImport"] }] });
   if (!pr) return res.status(400).json({ message: "That requisition does not exist." });
+  assertRecoveryNotHeld(pr.appEntry);
 
   // Lifecycle step 4: a requisition must be approved before it can be advertised.
   if (pr.status !== "approved") {
     return res.status(400).json({ message: "Only an approved requisition can be advertised." });
   }
+  const category = solicitationCategory(pr.appEntry, req.body.category);
+  const config = evaluationConfig({ ...req.body, category });
   if (await Rfq.findOne({ where: { prHeaderId, status: { [Op.notIn]: ["cancelled", "failed"] } } })) {
     return res.status(409).json({ message: "This requisition already has an active RFQ/ITB." });
   }
-  if (!closingDate) return res.status(400).json({ message: "A closing date is required." });
 
   const abc = Number(pr.totalAmount);
   const lgu = await getLguProfile();
@@ -308,10 +314,9 @@ export const createRfq = async (req, res) => {
       abc,
       category: category ?? "goods",
       ...solicitationInformation(req.body),
-      ...svpRequirementsFrom(req.body, modeKey),
-      closingDate,
+      ...svpRequirementsFrom(req.body, modeKey, { draft: true }),
       ...config,
-      ...readProcurementSchedule(req.body, { mandatoryPrebid: requiresPrebidConference(abc, lgu, category ?? "goods") }),
+      ...readProcurementSchedule(req.body, { mandatoryPrebid: requiresPrebidConference(abc, lgu, category ?? "goods"), draft: true }),
       schedulePreparedById: req.currentUser.id,
       postingRequired: modeKey !== "smallValueProcurement" || abc > postingExemptionFor(lgu, category ?? "goods"),
       prHeaderId,
@@ -319,7 +324,7 @@ export const createRfq = async (req, res) => {
       status: "draft",
     }, { transaction });
     const attempt = await ensureProcurementAttempt(created, { transaction, actorId: req.currentUser.id });
-    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate, ...config, ...(modeKey === "smallValueProcurement" ? { svpTechnicalSpecifications: created.svpTechnicalSpecifications, svpEligibilityDueStage: created.svpEligibilityDueStage } : {}) } }));
+    await audit(actorAudit(req, { actionType: "rfq.created", entityRef: "rfq", entityId: created.id, summary: "Procurement preparation saved. Review the schedule before publication.", afterState: { attemptId: attempt.id, attemptNumber: attempt.attemptNumber, closingDate: created.closingDate, ...config, ...(modeKey === "smallValueProcurement" ? { svpTechnicalSpecifications: created.svpTechnicalSpecifications, svpEligibilityDueStage: created.svpEligibilityDueStage } : {}) } }));
     return created;
   }));
 
@@ -338,13 +343,15 @@ export const createRfq = async (req, res) => {
 // reason the indicative APP matters: without it an LGU cannot start buying
 // until the ordinance is passed, and the first quarter of the year is lost.
 const createEpaSolicitation = async (req, res) => {
-  const { appEntryId, title, category, closingDate } = req.body;
-  const config = evaluationConfig(req.body);
+  const { appEntryId, title } = req.body;
 
   const appEntry = await AppEntry.findByPk(appEntryId, {
     include: [{ model: Department, as: "implementingUnit" }],
   });
   if (!appEntry) return res.status(400).json({ message: "That APP entry does not exist." });
+  assertRecoveryNotHeld(appEntry);
+  const category = solicitationCategory(appEntry, req.body.category);
+  const config = evaluationConfig({ ...req.body, category });
 
   if (appEntry.planCycle !== "indicative") {
     return res.status(409).json({
@@ -371,7 +378,6 @@ const createEpaSolicitation = async (req, res) => {
   if (await Rfq.findOne({ where: { appEntryId, status: { [Op.notIn]: ["cancelled", "failed"] } } })) {
     return res.status(409).json({ message: "This plan line already has an active solicitation." });
   }
-  if (!closingDate) return res.status(400).json({ message: "A closing date is required." });
 
   const abc = Number(appEntry.abc);
   const lgu = await getLguProfile();
@@ -393,10 +399,9 @@ const createEpaSolicitation = async (req, res) => {
       abc,
       category: category ?? "goods",
       ...solicitationInformation(req.body),
-      ...svpRequirementsFrom(req.body, mode.key),
-      closingDate,
+      ...svpRequirementsFrom(req.body, mode.key, { draft: true }),
       ...config,
-      ...readProcurementSchedule(req.body, { mandatoryPrebid: requiresPrebidConference(abc, lgu, category ?? "goods") }),
+      ...readProcurementSchedule(req.body, { mandatoryPrebid: requiresPrebidConference(abc, lgu, category ?? "goods"), draft: true }),
       schedulePreparedById: req.currentUser.id,
       postingRequired: mode.key !== "smallValueProcurement" || abc > postingExemptionFor(lgu, category ?? "goods"),
       appEntryId: appEntry.id,
@@ -424,7 +429,7 @@ export const publishRfq = async (req, res) => {
     const row = await Rfq.findByPk(req.params.id, { ...rfqIncludes, transaction, lock: transaction.LOCK.UPDATE });
     if (!row) throw workflowError("RFQ/ITB not found.", 404);
     if (row.status !== "draft") throw workflowError(`Cannot publish from status "${row.status}".`);
-    if (row.mode?.key === "smallValueProcurement" && (!row.svpTechnicalSpecifications?.trim() || !SVP_ELIGIBILITY_DUE_STAGES.includes(row.svpEligibilityDueStage))) throw workflowError("Complete the SVP technical specifications and eligibility-document timing before publication.", 400);
+    svpRequirementsFrom(row, row.mode?.key);
     assertApprovedSchedule(row);
     readProcurementSchedule({}, { base: row, mandatoryPrebid: requiresPrebidConference(Number(row.abc), await getLguProfile(), row.category) });
     await assertApprovedEvaluationPlan(row, { transaction });
@@ -1674,7 +1679,7 @@ export const listAwards = async (req, res) => {
   ]);
   if (search) where[Op.and] = [search];
   const include = [
-    { model: Rfq, as: "rfq" },
+    { model: Rfq, as: "rfq", include: [{ model: AppEntry, as: "appEntry", attributes: ["recoveryImport"] }] },
     { model: Vendor, as: "vendor" },
     { model: User, as: "recommendedBy", attributes: ["id", "name"] },
   ];
@@ -1684,22 +1689,27 @@ export const listAwards = async (req, res) => {
     const resolutions = await BacResolution.findAll({ where: { entityRef: "award", type: "recommendAward", entityId: { [Op.in]: awards.map((award) => award.id) } }, attributes: ["entityId", "resolutionNo"] });
     for (const resolution of resolutions) resolutionNumbers.set(resolution.entityId, resolution.resolutionNo);
   };
-  const serializeAward = (award) => ({
-    id: award.id,
-    noaNumber: award.noaNumber,
-    noaDate: award.noaDate,
-    externalNoaNumber: award.externalNoaNumber,
-    supplierReceivedAt: award.supplierReceivedAt,
-    awardBasis: award.awardBasis,
-    resolutionNo: resolutionNumbers.get(award.id) || null,
-    amount: Number(award.amount),
-    status: award.status,
-    referenceNo: award.rfq?.referenceNo ?? null,
-    projectTitle: award.rfq?.title ?? null,
-    vendorName: award.vendor?.businessName ?? null,
-    recommendedByName: award.recommendedBy?.name ?? null,
-    recommendedById: award.recommendedById,
-  });
+  const serializeAward = (award) => {
+    const sourceAward = award.rfq?.appEntry?.recoveryImport?.historicalAward;
+    const historical = sourceAward?.id === award.id ? sourceAward : null;
+    return {
+      id: award.id,
+      noaNumber: award.noaNumber,
+      noaDate: award.noaDate,
+      externalNoaNumber: award.externalNoaNumber,
+      supplierReceivedAt: award.supplierReceivedAt,
+      awardBasis: award.awardBasis,
+      resolutionNo: resolutionNumbers.get(award.id) ?? historical?.resolutionNumber ?? null,
+      amount: Number(award.amount),
+      status: award.status,
+      referenceNo: award.rfq?.referenceNo ?? null,
+      projectTitle: award.rfq?.title ?? null,
+      vendorName: award.vendor?.businessName ?? historical?.recommendedSupplier ?? null,
+      ...(historical && { historical: true, supplierMismatch: historical.supplierMismatch, registeredSupplier: historical.registeredSupplier }),
+      recommendedByName: award.recommendedBy?.name ?? null,
+      recommendedById: award.recommendedById,
+    };
+  };
 
   // Keep the original array response for selection dialogs and other callers
   // that predate the list protocol; the award workspace opts in explicitly.

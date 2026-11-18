@@ -1,10 +1,11 @@
 export default function RecoveryProvenance({ recovery, showFields = true }) {
   if (!recovery) return null
-  const imported = new Intl.DateTimeFormat('en-PH', { dateStyle: 'long', timeStyle: 'medium', timeZone: 'Asia/Manila' }).format(new Date(recovery.importedAt))
+  const dateFormat = new Intl.DateTimeFormat('en-PH', { dateStyle: 'long', timeStyle: 'medium', timeZone: 'Asia/Manila' })
+  const imported = dateFormat.format(new Date(recovery.importedAt))
   return (
     <section className="space-y-5" aria-label="Recovery provenance">
       {showFields && <dl className="divide-y divide-border-muted rounded border border-border-muted">
-        {recovery.sourceFields.map((field) => (
+        {(recovery.reviewedForm?.fields ?? recovery.sourceFields).map((field) => (
           <div key={field.label} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(180px,1fr)_2fr]">
             <dt className="text-xs font-medium text-text-secondary">{field.label}</dt>
             <dd className="min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-navy">{field.value}</dd>
@@ -13,13 +14,17 @@ export default function RecoveryProvenance({ recovery, showFields = true }) {
       </dl>}
       <details className="rounded border border-border-muted p-4">
         <summary className="cursor-pointer text-sm font-medium text-navy">Source and record history</summary>
-        <p className="mt-3 text-xs text-text-secondary">Source: {recovery.source.filename}</p>
+        <p className="mt-3 text-xs text-text-secondary">Source: {recovery.source?.filename ?? recovery.source}</p>
         <p className="mt-2 text-xs text-text-secondary">Recovery recorded: {imported} (Philippine time)</p>
+        {recovery.reviewedForm && <p className="mt-2 text-xs text-text-secondary">Reviewed form: {recovery.reviewedForm.filename}</p>}
+        {recovery.reviewedForm?.recordedAt && <p className="mt-2 text-xs text-text-secondary">Reviewed form recorded: {dateFormat.format(new Date(recovery.reviewedForm.recordedAt))} (Philippine time)</p>}
         <p className="mt-1 text-xs text-text-secondary">Original entry timestamps: not verified.</p>
-        <p className="mt-2 text-sm text-navy">Restoration ends at Item Description. This draft awaits the missing supporting information before it can proceed.</p>
-        <p className="mt-4 text-sm font-medium text-navy">Information requiring verification</p>
+        <p className="mt-2 text-sm text-navy">{recovery.historicalAward || recovery.reviewedForm?.award ? 'The client reports milestones through receipt of the Notice of Award. Signed supporting records are unavailable for verification.' : 'This draft awaits supporting information before it can proceed.'}</p>
+        {recovery.demonstrationCompletion && <p className="mt-2 text-xs text-text-secondary">Archived training entries for implementation and settlement retain their original references and audit history.</p>}
+        {recovery.supplierMismatch && <p className="mt-2 text-sm text-navy">The registered supplier and recommended award supplier differ in the source form.</p>}
+        {recovery.blockers?.length > 0 && <p className="mt-4 text-sm font-medium text-navy">{recovery.reviewedForm ? 'Original recovery notes' : 'Information requiring verification'}</p>}
         <ul className="mt-2 list-disc space-y-2 pl-5 text-xs leading-relaxed text-text-secondary">
-          {recovery.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+          {recovery.blockers?.map((blocker) => <li key={blocker}>{blocker}</li>)}
         </ul>
       {recovery.reconstructedProgression?.length > 0 && <details className="mt-4 rounded border border-border-muted p-4">
         <summary className="cursor-pointer text-sm font-medium text-navy">Reconstructed progression · September 25–October 9, 2026</summary>

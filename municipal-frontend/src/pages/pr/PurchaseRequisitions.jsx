@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useActionQueue } from '../../context/useActionQueue'
 import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
 import BacAttendance from '../bidding/BacAttendance'
@@ -49,6 +50,7 @@ const emptyLine = () => ({
 // consequence of ticking the box before saving. The server's answer is the one
 // that is stored — this is a preview, not a second source of truth.
 const previewAssetClass = (line, threshold) => {
+  if (line.hasUsefulLifeOverOneYear == null || !line.unitCost) return null
   if (!line.hasUsefulLifeOverOneYear) return 'expense'
   return Number(line.unitCost || 0) >= threshold ? 'capitalOutlay' : 'semiExpendable'
 }
@@ -141,6 +143,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
     (sum, line) => sum + (Number(line.quantity) || 0) * (Number(line.unitCost) || 0),
     0
   )
+  const totalPending = !lines.length || lines.some((line) => !line.quantity || !line.unitCost)
   const overBudget = balance !== null && total > balance.remaining
 
   const updateLine = (index, field, value) =>
@@ -157,12 +160,12 @@ function PrFormModal({ existing, onClose, onSaved }) {
         isEmergency,
         justification,
         justificationStatus: justificationStatus || null,
-        lineItems: lines.map((line) => ({
+        lineItems: lines.filter((line) => line.description.trim() || line.technicalSpecifications?.trim() || line.unit || line.quantity || line.unitCost || line.hasUsefulLifeOverOneYear != null).map((line) => ({
           description: line.description,
           technicalSpecifications: line.technicalSpecifications ?? '',
           unit: line.unit,
-          quantity: Number(line.quantity),
-          unitCost: Number(line.unitCost),
+          quantity: line.quantity === '' || line.quantity == null ? null : Number(line.quantity),
+          unitCost: line.unitCost === '' || line.unitCost == null ? null : Number(line.unitCost),
           // The classification itself is derived server-side; what the form
           // sends is the only part it can know — whether the item lasts.
           hasUsefulLifeOverOneYear: line.hasUsefulLifeOverOneYear,
@@ -249,7 +252,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
                 {peso(balance.abc)} ({peso(balance.committed)} already committed)
               </p>
               <p className={`mt-0.5 font-medium ${overBudget ? 'text-danger' : 'text-success'}`}>
-                This requisition: {peso(total)}
+                This requisition: {totalPending ? 'Pending' : peso(total)}
                 {overBudget ? ' — exceeds the remaining balance' : ' — within balance'}
               </p>
             </div>
@@ -264,7 +267,7 @@ function PrFormModal({ existing, onClose, onSaved }) {
         <div className="flex flex-col gap-4">
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Purpose</label>
-            <textarea
+            <OptionalWorkflowInput as="textarea"
               rows={2}
               value={purpose}
               onChange={(event) => setPurpose(event.target.value)}
@@ -277,14 +280,14 @@ function PrFormModal({ existing, onClose, onSaved }) {
               <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
                 Date required
               </label>
-              <input
+              <OptionalWorkflowInput
                 type="date"
                 value={dateRequired}
                 onChange={(event) => setDateRequired(event.target.value)}
                 className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
               />
             </div>
-            <YesNoSelect label="Emergency purchase" value={isEmergency} onChange={(value) => { setIsEmergency(value); setJustificationStatus(value === true ? 'provided' : ''); setJustification('') }} />
+            <YesNoSelect allowUnavailable label="Emergency purchase" value={isEmergency} onChange={(value) => { setIsEmergency(value); setJustificationStatus(value === true ? 'provided' : ''); setJustification('') }} />
           </div>
 
           {isEmergency === false && (
@@ -339,20 +342,20 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       onChange={(event) => updateLine(index, 'description', event.target.value)}
                       className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-5"
                     />
-                    <input
+                    <OptionalWorkflowInput
                       placeholder="Unit"
                       value={line.unit ?? ''}
                       onChange={(event) => updateLine(index, 'unit', event.target.value)}
                       className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-2"
                     />
-                    <input
+                    <OptionalWorkflowInput
                       type="number"
                       placeholder="Qty"
                       value={line.quantity}
                       onChange={(event) => updateLine(index, 'quantity', event.target.value)}
                       className="min-h-11 rounded border border-border-muted px-3 py-2 text-[13px] text-navy focus:border-navy focus:outline-none sm:col-span-2"
                     />
-                    <input
+                    <OptionalWorkflowInput
                       type="number"
                       placeholder="Unit cost"
                       value={line.unitCost}
@@ -378,8 +381,8 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       ticked, so nobody discovers the classification at
                       certification. */}
                   <div className="mt-2 flex flex-wrap items-center gap-3 pl-1">
-                    <YesNoSelect label="Useful life exceeds one year" value={line.hasUsefulLifeOverOneYear} onChange={(value) => updateLine(index, 'hasUsefulLifeOverOneYear', value)} />
-                    {line.hasUsefulLifeOverOneYear == null ? <span className="text-xs text-text-faint">Useful life not answered</span> : <Badge tone={ASSET_CLASS_TONES[assetClass]}>{ASSET_CLASS_LABELS[assetClass]}</Badge>}
+                    <YesNoSelect allowUnavailable label="Useful life exceeds one year" value={line.hasUsefulLifeOverOneYear} onChange={(value) => updateLine(index, 'hasUsefulLifeOverOneYear', value)} />
+                    {assetClass == null ? <span className="text-xs text-text-faint">{line.hasUsefulLifeOverOneYear == null ? 'Useful life not answered' : 'Unit cost pending'}</span> : <Badge tone={ASSET_CLASS_TONES[assetClass]}>{ASSET_CLASS_LABELS[assetClass]}</Badge>}
                     {assetClass === 'capitalOutlay' && (
                       <span className="text-[11px] text-text-faint">
                         At or above {peso(threshold)} per item — must be charged to a Capital Outlay
@@ -387,13 +390,13 @@ function PrFormModal({ existing, onClose, onSaved }) {
                       </span>
                     )}
                   </div>
-                  <label className="mt-3 block text-xs font-medium text-text-secondary">Technical specifications (optional)<textarea rows={3} maxLength={8000} value={line.technicalSpecifications ?? ''} onChange={(event) => updateLine(index, 'technicalSpecifications', event.target.value)} className="mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy" /></label>
+                  <label className="mt-3 block text-xs font-medium text-text-secondary">Technical specifications (optional)<OptionalWorkflowInput as="textarea" rows={3} maxLength={8000} value={line.technicalSpecifications ?? ''} onChange={(event) => updateLine(index, 'technicalSpecifications', event.target.value)} className="mt-1 w-full rounded border border-border-muted bg-surface px-3 py-2 text-sm text-navy" /></label>
                 </div>
               )
             })}
           </div>
 
-          <p className="mt-3 text-right text-sm font-bold text-navy">Total: {peso(total)}</p>
+          <p className="mt-3 text-right text-sm font-bold text-navy">Total: {totalPending ? 'Pending' : peso(total)}</p>
         </div>
       </LargeFormPage.Section>
     </LargeFormPage>
@@ -635,6 +638,7 @@ const Fact = ({ label, value, mono }) => (
 
 function RequisitionDetail({ pr, onClose }) {
   const stageIndex = PR_STAGE_SEQUENCE.indexOf(pr.status)
+  const historical = pr.fiscalYear === 2025 && Boolean(pr.recoveryImport?.historicalAward)
 
   // The four stamps LGC Sec. 344 and the municipal process collect, in the order
   // they are collected. An empty one is as informative as a filled one — it is
@@ -656,7 +660,7 @@ function RequisitionDetail({ pr, onClose }) {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={PR_STATUS_TONES[pr.status]} dot>
-            {PR_STATUS_LABELS[pr.status] ?? pr.status}
+            {historical ? 'Historical requisition' : PR_STATUS_LABELS[pr.status] ?? pr.status}
           </Badge>
           {pr.isEmergency && <Badge tone="danger">Emergency</Badge>}
           {pr.modeDepartedFromSuggestion && <Badge tone="warning">Departs from threshold</Badge>}
@@ -668,11 +672,11 @@ function RequisitionDetail({ pr, onClose }) {
           </p>
         )}
 
-        <NextStep next={prNext(pr)} tone={PR_STATUS_TONES[pr.status]} />
+        {historical ? <p className="text-sm text-text-secondary">The client form identifies this requisition. Original endorsement, approval and funding signatures are unavailable.</p> : <NextStep next={prNext(pr)} tone={PR_STATUS_TONES[pr.status]} />}
         {pr.recoveryImport && <RecoveryProvenance recovery={pr.recoveryImport} showFields={false} />}
 
         {/* ── Where it is in the chain ──────────────────────────────────── */}
-        <section>
+        {!historical && <section>
           <p className="mb-3 text-[11.5px] tracking-[0.04em] text-text-faint uppercase">Progress</p>
           <ol className="flex flex-col gap-0">
             {PR_STAGE_SEQUENCE.map((stage, index) => {
@@ -710,7 +714,7 @@ function RequisitionDetail({ pr, onClose }) {
               )
             })}
           </ol>
-        </section>
+        </section>}
 
         <section className="grid gap-5 border-t border-border-muted pt-5 sm:grid-cols-3">
           <Fact label="Requested by" value={pr.requesterName} />
@@ -1044,8 +1048,8 @@ export default function PurchaseRequisitions() {
                       </td>
                       <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">{pr.dateRequired}</td>
                       <td className="px-4 py-3">
-                        <Badge tone={PR_STATUS_TONES[pr.status]}>{PR_STATUS_LABELS[pr.status]}</Badge>
-                        <NextInline next={prNext(pr)} />
+                        <Badge tone={PR_STATUS_TONES[pr.status]}>{pr.fiscalYear === 2025 && pr.recoveryImport?.historicalAward ? 'Historical requisition' : PR_STATUS_LABELS[pr.status]}</Badge>
+                        {!(pr.fiscalYear === 2025 && pr.recoveryImport?.historicalAward) && <NextInline next={prNext(pr)} />}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex w-max items-center gap-2">

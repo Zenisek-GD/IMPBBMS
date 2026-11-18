@@ -11,6 +11,8 @@
 // and down to understand the form and is unusable at larger text sizes.
 import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
+const dialogStack = []
+let initialOverflow = ''
 
 const WIDTHS = {
   sm: 'max-w-sm',
@@ -28,7 +30,11 @@ export default function Modal({ title, subtitle, onClose, size = 'md', placement
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
 
   useEffect(() => {
+    const overlay = overlayRef.current
+    if (!dialogStack.length) initialOverflow = document.body.style.overflow
+    dialogStack.push(overlay)
     const onKeyDown = (event) => {
+      if (dialogStack.at(-1) !== overlay) return
       if (event.key === 'Escape') onCloseRef.current()
       if (event.key === 'Tab') {
         const controls = [...overlayRef.current?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]') ?? []]
@@ -51,12 +57,13 @@ export default function Modal({ title, subtitle, onClose, size = 'md', placement
     panelRef.current?.focus()
 
     // The page behind a modal must not scroll under it.
-    const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
 
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = previousOverflow
+      const index = dialogStack.indexOf(overlay)
+      if (index >= 0) dialogStack.splice(index, 1)
+      document.body.style.overflow = dialogStack.length ? 'hidden' : initialOverflow
       if (previousFocus?.isConnected) previousFocus.focus()
     }
   }, [])

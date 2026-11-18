@@ -1,3 +1,4 @@
+import { publicProjectStatus } from '../../utils/publicProjectStatus'
 import { currentFiscalYear } from '../../utils/fiscalYear'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
@@ -79,6 +80,13 @@ const CATEGORY_STYLES = {
     text: 'text-success',
     icon: CheckCircle2,
   },
+  awarded: {
+    label: 'Awarded',
+    chip: 'bg-chip text-navy',
+    band: 'border-border-muted bg-chip text-navy',
+    text: 'text-navy',
+    icon: FileCheck2,
+  },
   ongoing: {
     label: 'Ongoing',
     chip: 'bg-warning/10 text-warning',
@@ -99,8 +107,11 @@ const TABS = [
   { key: 'all', label: 'All' },
   { key: 'completed', label: 'Completed' },
   { key: 'ongoing', label: 'Ongoing' },
+  { key: 'awarded', label: 'Awarded' },
   { key: 'upcoming', label: 'Upcoming' },
 ]
+
+const CATEGORY_ORDER = { completed: 0, ongoing: 1, awarded: 2, upcoming: 3 }
 
 const SORT_OPTIONS = [
   { key: 'newest', label: 'Newest first' },
@@ -118,7 +129,7 @@ function HomeSpotlight({ projects, announcements }) {
     ) ??
     (announcements ?? []).find((entry) => entry?.source === 'solicitation') ??
     null
-  const recentAward = (projects ?? []).find((project) => project?.awardedTo) ?? null
+  const recentAward = (projects ?? []).find((project) => project?.awardedTo && project.recordSource !== 'academic') ?? null
 
   if (!openCall && !recentAward) return null
 
@@ -152,7 +163,7 @@ function HomeSpotlight({ projects, announcements }) {
           className="group rounded-xl border border-border-strong bg-surface p-5 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md"
         >
           <p className="text-[11px] font-medium tracking-[0.06em] text-navy uppercase">
-            Recently awarded
+            {recentAward.clientReportedStatus ? 'Notice of Award' : 'Recently awarded'}
           </p>
           <h3 className="mt-2 line-clamp-2 text-[15px] font-semibold text-navy group-hover:underline">
             {recentAward.projectTitle}
@@ -161,7 +172,7 @@ function HomeSpotlight({ projects, announcements }) {
             {recentAward.awardedTo ?? ''}
           </p>
           <p className="tabular-nums mt-2 text-[13px] font-medium text-navy">
-            {compactPeso(recentAward.financials?.contractAmount ?? recentAward.financials?.budget)}
+            {compactPeso((recentAward.clientReportedStatus ? recentAward.financials?.awardedAmount : recentAward.financials?.contractAmount) ?? recentAward.financials?.budget)}
           </p>
         </Link>
       )}
@@ -239,13 +250,14 @@ function LedgerStrip({ overview, savings, releaseRate }) {
   const total = overview?.totalProjects ?? 0
 
   const segments = [
-    { key: 'ongoing', label: 'Ongoing', value: overview?.ongoing ?? 0, className: 'bg-accent' },
     {
       key: 'completed',
       label: 'Completed',
       value: overview?.completed ?? 0,
       className: 'bg-eco',
     },
+    { key: 'ongoing', label: 'Ongoing', value: overview?.ongoing ?? 0, className: 'bg-accent' },
+    { key: 'awarded', label: 'Awarded', value: overview?.awarded ?? 0, className: 'bg-navy' },
     {
       key: 'upcoming',
       label: 'Upcoming',
@@ -268,7 +280,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
         ? `Across ${overview.contractedProjects} awarded ${
             overview.contractedProjects === 1 ? 'project' : 'projects'
           }`
-        : 'No awards published yet',
+        : overview?.clientReportedAwards ? 'Award notices on file. Contract amounts unavailable.' : 'No awards published yet',
     },
     {
       label: 'Gross expenses',
@@ -276,7 +288,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
       note:
         releaseRate !== null
           ? `${releaseRate}% of contracted value; ${compactPeso(overview?.totalSupplierPaid ?? 0)} net paid`
-          : 'Includes supplier payments and deductions',
+          : overview?.historicalDemonstrations ? 'Excludes historical demonstration payments' : 'Includes supplier payments and deductions',
     },
   ]
 
@@ -296,7 +308,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
       <div className="grid grid-cols-2 gap-px lg:grid-cols-4">
         <div className="bg-surface p-4 sm:p-5">
           <p className="text-[12px] font-medium tracking-[0.06em] text-navy uppercase">
-            On the public record
+            {overview?.academicProjects ? 'Projects shown' : 'On the public record'}
           </p>
 
           <p className="tabular-nums mt-2.5 text-[26px] leading-none font-semibold tracking-[-0.025em] text-navy">
@@ -311,7 +323,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
           <div
             className="mt-3.5 flex h-1.5 overflow-hidden rounded-full bg-track"
             role="img"
-            aria-label={`${overview?.ongoing ?? 0} ongoing, ${overview?.completed ?? 0} completed, ${overview?.upcoming ?? 0} upcoming`}
+            aria-label={`${overview?.ongoing ?? 0} ongoing, ${overview?.completed ?? 0} completed or awarded, ${overview?.upcoming ?? 0} upcoming`}
           >
             {total > 0 &&
               segments.map((s) => (
@@ -368,7 +380,7 @@ function LedgerStrip({ overview, savings, releaseRate }) {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border-strong bg-surface px-4 py-2.5 sm:px-5">
         <p className="text-[12px] text-navy">
-          Live from published plans, awards and payments
+          {overview?.academicProjects ? 'Municipal totals reflect published plans, awards and payments' : 'Live from published plans, awards and payments'}
         </p>
         <details className="text-[12px] text-navy">
           <summary className="cursor-pointer font-medium text-navy underline-offset-2 hover:underline">
@@ -783,9 +795,10 @@ function ProjectCard({ project, query = '' }) {
 
   // One figure, not three. A project without an award showed "Contract amount —"
   // and "Awarded to —" and still paid full height for them.
-  const isAwarded = financials.contractAmount !== null && financials.contractAmount !== undefined
-  const headlineLabel = isAwarded ? 'Contract amount' : 'Approved budget'
-  const headlineValue = isAwarded ? financials.contractAmount : financials.budget
+  const awardAmount = project.clientReportedStatus ? financials.awardedAmount : financials.contractAmount
+  const isAwarded = awardAmount != null
+  const headlineLabel = isAwarded ? (project.clientReportedStatus ? 'Award amount' : 'Contract amount') : 'Approved budget'
+  const headlineValue = awardAmount ?? financials.budget
 
   return (
     <Link
@@ -801,17 +814,19 @@ function ProjectCard({ project, query = '' }) {
         className={`flex items-center gap-1.5 border-b px-4 py-2 text-[12px] font-medium ${style.band}`}
       >
         <style.icon size={13} className="shrink-0" aria-hidden="true" />
-        <span>{style.label}</span>
+        <span>{publicProjectStatus(project, style.label)}</span>
         <span aria-hidden="true" className="text-current opacity-50">
           •
         </span>
         <span className="tabular-nums">
-          {stage} of {LIFECYCLE_STAGE_COUNT} steps
+          {project.documentedThrough ? `Records through ${project.documentedThrough.toLowerCase()}` : `${stage} of ${LIFECYCLE_STAGE_COUNT} steps`}
         </span>
       </div>
 
       <div className="flex flex-1 flex-col p-4">
         {project.demonstration && <p className="mb-2 text-xs text-navy">Demonstration scenario · Actual client status: {project.demonstration.actualClientStatus}</p>}
+        {project.ongoingDemonstration && <p className="mb-2 text-xs text-navy">Local demonstration</p>}
+        {project.historicalDemonstration && <p className="mb-2 text-xs text-navy">Historical demonstration</p>}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             {project.referenceNo && (
@@ -871,9 +886,9 @@ function ProjectCard({ project, query = '' }) {
                 {project.bidsReceived} bid{project.bidsReceived === 1 ? '' : 's'}
               </p>
             )}
-            {isAwarded && financials.budget > financials.contractAmount && (
+            {isAwarded && financials.budget > awardAmount && (
               <p className="tabular-nums mt-1 text-[12px] text-navy">
-                {compactPeso(financials.budget - financials.contractAmount)} below budget
+                {compactPeso(financials.budget - awardAmount)} below budget
               </p>
             )}
           </div>
@@ -909,8 +924,8 @@ function ProjectRecordsTable({ projects, query }) {
               LIFECYCLE_STAGE_COUNT,
               Math.max(1, Math.round((project.progressPercent / 100) * LIFECYCLE_STAGE_COUNT))
             )
-            const awarded = project.financials?.contractAmount !== null && project.financials?.contractAmount !== undefined
-            const amount = awarded ? project.financials.contractAmount : project.financials?.budget
+            const awardAmount = project.clientReportedStatus ? project.financials?.awardedAmount : project.financials?.contractAmount
+            const amount = awardAmount ?? project.financials?.budget
 
             return (
               <tr key={project.id} className="group border-t border-border-muted align-top hover:bg-sidebar/60">
@@ -933,10 +948,12 @@ function ProjectRecordsTable({ projects, query }) {
                 </td>
                 <td className="px-4 py-3.5 text-[13px]">
                   <p className={`flex items-center gap-1.5 font-medium ${style.text}`}>
-                    <style.icon size={13} aria-hidden="true" /> {style.label}
+                    <style.icon size={13} aria-hidden="true" /> {publicProjectStatus(project, style.label)}
                     {project.demonstration && <span className="text-xs">Demonstration scenario</span>}
+                    {project.ongoingDemonstration && <span className="text-xs">Local demonstration</span>}
+                    {project.historicalDemonstration && <span className="text-xs">Historical demonstration</span>}
                   </p>
-                  <p className="mt-1 text-[12px] text-text-secondary">{stage} of {LIFECYCLE_STAGE_COUNT} procurement steps</p>
+                  <p className="mt-1 text-[12px] text-text-secondary">{project.documentedThrough ? `Records through ${project.documentedThrough.toLowerCase()}` : `${stage} of ${LIFECYCLE_STAGE_COUNT} procurement steps`}</p>
                 </td>
                 <td className="px-4 py-3.5 text-[13px] text-text-secondary whitespace-nowrap">
                   {project.lastUpdatedAt
@@ -945,7 +962,7 @@ function ProjectRecordsTable({ projects, query }) {
                 </td>
                 <td className="tabular-nums px-4 py-3.5 text-right text-[14px] font-semibold whitespace-nowrap text-navy">
                   {peso(amount)}
-                  <p className="mt-1 text-[12px] font-normal text-text-faint">{awarded ? 'Contract amount' : 'Approved budget'}</p>
+                  <p className="mt-1 text-[12px] font-normal text-text-faint">{awardAmount != null ? (project.clientReportedStatus ? 'Award amount' : 'Contract amount') : 'Approved budget'}</p>
                 </td>
                 <td className="px-4 py-3.5 text-right">
                   <Link to={`/projects/${project.id}`} className="inline-flex min-h-11 items-center text-[13px] font-medium text-navy underline decoration-border-strong underline-offset-4 hover:decoration-accent focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40">
@@ -1005,7 +1022,7 @@ export default function PublicTransparency() {
   const [refineOpen, setRefineOpen] = useState(false)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [fiscalYear, setFiscalYear] = useState(String(currentFiscalYear()))
+  const [fiscalYear, setFiscalYear] = useState('all')
   const [department, setDepartment] = useState('')
   const overview = overviewSnapshot && String(overviewSnapshot.fiscalYear) === String(fiscalYear) && overviewSnapshot.selectedDepartment === department ? overviewSnapshot : null
   const [procMode, setProcMode] = useState('')
@@ -1191,7 +1208,8 @@ export default function PublicTransparency() {
         return (Number(b?.fiscalYear ?? 0) - Number(a?.fiscalYear ?? 0)) || String(a?.projectTitle ?? '').localeCompare(String(b?.projectTitle ?? ''))
       })
     }
-    return rows
+    // Keep the status order and apply the selected sort within each status.
+    return rows.sort((a, b) => (CATEGORY_ORDER[a.category] ?? 4) - (CATEGORY_ORDER[b.category] ?? 4))
   }, [projects, procMode, sort])
 
   const { pageRows: pageProjects, paginationProps } = usePagination(visibleProjects, 9)
@@ -1200,6 +1218,7 @@ export default function PublicTransparency() {
     () => ({
       all: overview?.totalProjects ?? 0,
       completed: overview?.completed ?? 0,
+      awarded: overview?.awarded ?? 0,
       ongoing: overview?.ongoing ?? 0,
       upcoming: overview?.upcoming ?? 0,
     }),
@@ -1411,16 +1430,16 @@ export default function PublicTransparency() {
                     onClick={() => setRefineOpen((open) => !open)}
                     aria-expanded={refineOpen}
                     className={`inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors focus:ring-2 focus:ring-accent/20 focus:outline-none sm:w-auto sm:justify-start ${
-                      refineOpen || fiscalYear || department || procMode
+                      refineOpen || fiscalYear !== 'all' || department || procMode
                         ? 'border-accent/40 bg-chip text-navy'
                         : 'border-border-strong text-navy hover:text-navy'
                     }`}
                   >
                     <SlidersHorizontal size={13} className="shrink-0" />
                     Refine
-                    {(fiscalYear || department || procMode) && (
+                    {(fiscalYear !== 'all' || department || procMode) && (
                       <span className="tabular-nums rounded-full bg-accent px-1.5 text-[10.5px] text-accent-fg">
-                        {[fiscalYear, department, procMode].filter(Boolean).length}
+                        {[fiscalYear === 'all' ? '' : fiscalYear, department, procMode].filter(Boolean).length}
                       </span>
                     )}
                     <ChevronDown
@@ -1481,11 +1500,11 @@ export default function PublicTransparency() {
                       desktopClassName="max-w-[16rem] rounded-md border border-border-strong bg-canvas px-3.5 py-1.5 text-[12.5px] text-navy transition-colors hover:border-border-strong focus:border-accent focus:outline-none"
                     />
 
-                    {(fiscalYear || department || procMode) && (
+                    {(fiscalYear !== 'all' || department || procMode) && (
                       <button
                         type="button"
                         onClick={() => {
-                          setFiscalYear(String(currentFiscalYear()))
+                          setFiscalYear('all')
                           setDepartment('')
                           setProcMode('')
                         }}
@@ -1551,7 +1570,7 @@ export default function PublicTransparency() {
                           type="button"
                           onClick={() => {
                             setSearchInput('')
-                            setFiscalYear(String(currentFiscalYear()))
+                            setFiscalYear('all')
                             setDepartment('')
                             setProcMode('')
                             setTab('all')

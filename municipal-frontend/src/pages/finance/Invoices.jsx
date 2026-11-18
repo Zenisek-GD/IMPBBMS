@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useEffect, useState } from 'react'
 import { Receipt, Banknote, Plus, ShieldAlert } from 'lucide-react'
 import * as financeApi from '../../api/finance'
@@ -114,7 +115,7 @@ function SubmitInvoiceModal({ invoice, onClose, onSubmitted }) {
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Your invoice ref.
             </label>
-            <input
+            <OptionalWorkflowInput
               type="text"
               value={form.supplierInvoiceRef}
               onChange={(event) => setForm({ ...form, supplierInvoiceRef: event.target.value })}
@@ -168,12 +169,35 @@ function SubmitInvoiceModal({ invoice, onClose, onSubmitted }) {
   )
 }
 
+function ReleasePaymentForm({ invoice, onClose, onReleased }) {
+  const [method, setMethod] = useState('LDDAP-ADA')
+  const [reference, setReference] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  return <Modal title={`Release payment - ${invoice.invoiceNo}`} onClose={onClose}>
+    <form className="space-y-4" onSubmit={async event => {
+      event.preventDefault()
+      if (saving) return
+      setSaving(true); setError('')
+      try { await financeApi.releasePayment(invoice.payment.id, { method, reference }); onReleased(); onClose() }
+      catch (err) { setError(err.response?.data?.message ?? 'Could not release the payment.') }
+      finally { setSaving(false) }
+    }}>
+      <label className="block text-sm">Payment method<OptionalWorkflowInput value={method} maxLength={255} onChange={event => setMethod(event.target.value)} className="mt-1 w-full rounded border border-border-muted bg-surface p-2" /></label>
+      <label className="block text-sm">Payment reference<OptionalWorkflowInput value={reference} maxLength={255} onChange={event => setReference(event.target.value)} className="mt-1 w-full rounded border border-border-muted bg-surface p-2" /></label>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? 'Releasing...' : 'Release payment'}</Button></div>
+    </form>
+  </Modal>
+}
+
 export default function Invoices() {
   const { fiscalYear } = useActionQueue()
   const permissions = usePermissions()
   const [submitting, setSubmitting] = useState(false)
   const [returning, setReturning] = useState(null)
   const [correcting, setCorrecting] = useState(null)
+  const [releasing, setReleasing] = useState(null)
   const [busy, setBusy] = useState(false)
   const [remarks, setRemarks] = useState('')
   const [actionError, setActionError] = useState('')
@@ -294,7 +318,9 @@ export default function Invoices() {
                       {invoice.remarks && <p className="mt-1 text-xs text-danger">{invoice.remarks}</p>}
                     </td>
                     <td className="px-4 py-3 text-[13px] text-text-secondary">{invoice.contractNo}</td>
-                    <td className="px-4 py-3 text-[13px] text-text-secondary">{invoice.vendorName}</td>
+                    <td className="px-4 py-3 text-[13px] text-text-secondary">{invoice.vendorName ?? (invoice.supplierMismatch ? 'Supplier discrepancy' : 'Unavailable')}
+                      {invoice.historicalDemonstration && <p className="text-xs text-text-faint">Historical demonstration</p>}
+                    </td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">
                       {peso(invoice.amount)}
                     </td>
@@ -347,11 +373,7 @@ export default function Invoices() {
                             variant="success"
                             icon={Banknote}
                             disabled={busy}
-                            onClick={() =>
-                              run(() =>
-                                financeApi.releasePayment(invoice.payment.id, { method: 'LDDAP-ADA' })
-                              )
-                            }
+                            onClick={() => setReleasing(invoice)}
                           >
                             Release
                           </Button>
@@ -368,6 +390,7 @@ export default function Invoices() {
       </Card>
 
       {correcting && <SubmitInvoiceModal invoice={correcting} onClose={() => setCorrecting(null)} onSubmitted={refresh} />}
+      {releasing && <ReleasePaymentForm invoice={releasing} onClose={() => setReleasing(null)} onReleased={refresh} />}
       {submitting && <SubmitInvoiceModal onClose={() => setSubmitting(false)} onSubmitted={refresh} />}
 
       {returning && (

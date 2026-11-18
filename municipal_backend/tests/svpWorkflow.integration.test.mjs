@@ -45,6 +45,9 @@ test('SVP terms, quotation evidence, disclosure and single responsive quotation 
     await call(api.updateSvpTerms,secretariat,{id:rfq.id},{svpTechnicalSpecifications:'Revised desktop specifications, three units, delivery and required legal documents.',svpEligibilityDueStage:'beforeAward'});
     const audit=await m.AuditLog.findOne({where:{actionType:'rfq.svpTermsChanged',entityId:rfq.id}});
     assert.equal(audit.beforeState.svpEligibilityDueStage,'evaluation');assert.equal(audit.afterState.svpEligibilityDueStage,'beforeAward');
+    const pending=await call(api.updateSvpTerms,secretariat,{id:rfq.id},{svpTechnicalSpecifications:'Pending',svpEligibilityDueStage:'Not Available'});
+    assert.equal(pending.svpTechnicalSpecifications,null);assert.equal(pending.svpEligibilityDueStage,null);
+    await assert.rejects(call(api.publishRfq,secretariat,{id:rfq.id},{}),/technical specifications/);
     await rfq.update({status:'published'});
     await assert.rejects(call(api.updateSvpTerms,secretariat,{id:rfq.id},{}),/Only draft/);
   });

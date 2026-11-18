@@ -113,7 +113,7 @@ function PublishedTable({ tab, rows }) {
                       <p className="mt-0.5 text-[11px] text-text-faint">{row.noaDate}</p>
                     </td>
                     <td className="px-4 py-3 text-[13px] text-navy">{row.projectTitle}</td>
-                    <td className="px-4 py-3 text-[13px] text-text-secondary">{row.awardedTo}</td>
+                    <td className="px-4 py-3 text-[13px] text-text-secondary">{row.supplierMismatch ? 'Supplier identity pending confirmation' : row.awardedTo}</td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap">{peso(row.amount)}</td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">
                       {peso(row.abc)}
@@ -262,7 +262,7 @@ export default function TransparencyBrowser({ renderHeader }) {
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="Published APP Entries" value={overview.publishedAppEntries} icon={ClipboardList} />
           <StatCard label="Procurements" value={overview.publishedProcurements} icon={Gavel} />
-          <StatCard label="Awarded Contracts" value={overview.awardedContracts} icon={Award} tone="success" />
+          <StatCard label="Notices of Award" value={overview.issuedAwards ?? overview.awardedContracts} icon={Award} tone="success" />
           <StatCard label="Total Awarded" value={peso(overview.totalAwardedValue)} icon={Globe} />
         </div>
       )}

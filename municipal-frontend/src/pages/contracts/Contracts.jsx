@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useEffect, useState } from 'react'
 import { FileSignature, Plus, Truck, PenLine, Send, GitBranch, ShieldCheck, TriangleAlert } from 'lucide-react'
 import * as contractsApi from '../../api/contracts'
@@ -23,28 +24,35 @@ import { describeContractsLoadFailure } from './contractsLoadFailure'
 
 const peso = (value) => `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
-function DraftModal({ onClose, onCreated }) {
+function DraftModal({ contract, onClose, onCreated }) {
   const [awards, setAwards] = useState([])
-  const [form, setForm] = useState({ awardId: '', deliveryDeadline: '', terms: '', poRef: '' })
+  const [form, setForm] = useState({
+    awardId: '',
+    deliveryDeadline: contract?.deliveryDeadline ?? '',
+    contractDays: contract?.contractDays ?? '',
+    terms: contract?.terms ?? '',
+    poRef: contract?.poRef ?? '',
+  })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
+    if (contract) return
     let cancelled = false
     fetchAwards()
       .then((data) => {
-        if (!cancelled) setAwards(data.filter((award) => award.status === 'issued'))
+        if (!cancelled) setAwards(data.filter((award) => award.status === 'issued' && !award.historical))
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [contract])
 
   return (
-    <Modal title="Draft contract" onClose={onClose}>
+    <Modal title={contract ? `Edit ${contract.contractNo}` : 'Draft contract'} onClose={onClose}>
       <div className="flex flex-col gap-4">
-        <div>
+        {!contract && <div>
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
             Issued award
           </label>
@@ -60,14 +68,14 @@ function DraftModal({ onClose, onCreated }) {
               </option>
             ))}
           </select>
-        </div>
+        </div>}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               PO reference
             </label>
-            <input
+            <OptionalWorkflowInput
               type="text"
               value={form.poRef}
               onChange={(event) => setForm({ ...form, poRef: event.target.value })}
@@ -78,7 +86,7 @@ function DraftModal({ onClose, onCreated }) {
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">
               Delivery deadline
             </label>
-            <input
+            <OptionalWorkflowInput
               type="date"
               value={form.deliveryDeadline}
               onChange={(event) => setForm({ ...form, deliveryDeadline: event.target.value })}
@@ -87,9 +95,15 @@ function DraftModal({ onClose, onCreated }) {
           </div>
         </div>
 
+        <label className="block text-xs font-medium text-text-secondary">
+          Contract period in calendar days
+          <OptionalWorkflowInput type="number" min={1} step={1} value={form.contractDays} onChange={(event) => setForm({ ...form, contractDays: event.target.value })} className="mt-1 w-full rounded border border-border-muted px-4 py-2 text-sm text-navy" />
+          <span className="mt-1 block text-text-faint">Required before the contract can be issued for signature.</span>
+        </label>
+
         <div>
           <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Terms</label>
-          <textarea
+          <OptionalWorkflowInput as="textarea"
             rows={3}
             value={form.terms}
             onChange={(event) => setForm({ ...form, terms: event.target.value })}
@@ -109,12 +123,14 @@ function DraftModal({ onClose, onCreated }) {
           </Button>
           <button
             type="button"
-            disabled={saving || !form.awardId}
+            disabled={saving || (!contract && !form.awardId)}
             onClick={async () => {
               setError('')
               setSaving(true)
               try {
-                await contractsApi.createContract({ ...form, awardId: Number(form.awardId) })
+                const { awardId, ...fields } = form
+                if (contract) await contractsApi.updateContractDraft(contract.id, fields)
+                else await contractsApi.createContract({ ...fields, awardId: Number(awardId) })
                 onCreated()
                 onClose()
               } catch (err) {
@@ -125,7 +141,7 @@ function DraftModal({ onClose, onCreated }) {
             }}
             className="rounded-sm bg-accent px-4 py-2 text-[11px] font-medium tracking-[0.03em] text-accent-fg disabled:opacity-60"
           >
-            {saving ? 'DRAFTING...' : 'DRAFT CONTRACT'}
+            {saving ? 'SAVING…' : 'SAVE DRAFT'}
           </button>
         </div>
       </div>
@@ -133,8 +149,56 @@ function DraftModal({ onClose, onCreated }) {
   )
 }
 
+const securityForms = [
+  ['cash', 'Cash'],
+  ['managersCheck', 'Manager’s check'],
+  ['bankDraftGuarantee', 'Bank draft or guarantee'],
+  ['suretyBond', 'Surety bond'],
+  ['securingDeclaration', 'Performance Securing Declaration'],
+]
+
+function PerformanceSecurityModal({ contract, onClose, onPosted }) {
+  const [form, setForm] = useState({ form: 'cash', amount: '', referenceNo: '', issuer: '' })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const field = 'mt-1 w-full rounded border border-border-muted px-3 py-2 text-sm text-navy'
+  const declaration = form.form === 'securingDeclaration'
+  const save = async (event) => {
+    event.preventDefault()
+    setError('')
+    setSaving(true)
+    try {
+      await contractsApi.postPerformanceSecurity(contract.id, { ...form, amount: declaration ? 0 : Number(form.amount) })
+      onPosted()
+      onClose()
+    } catch (err) {
+      setError(err.response?.data?.message ?? 'Could not record performance security.')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <Modal title={`Performance security for ${contract.contractNo}`} onClose={onClose}>
+    <form onSubmit={save} className="space-y-4">
+      <label className="block text-sm">Form of security
+        <select className={field} value={form.form} onChange={(event) => setForm({ ...form, form: event.target.value })}>
+          {securityForms.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+      {!declaration && <label className="block text-sm">Amount actually posted
+        <input type="number" min="0.01" step="0.01" required className={field} value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} />
+      </label>}
+      {['referenceNo', 'issuer'].map((key) => <label className="block text-sm" key={key}>{key === 'referenceNo' ? 'Reference number' : 'Issuer'}
+        <input className={field} maxLength={255} value={form[key]} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
+      </label>)}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <Button type="submit" disabled={saving}>{saving ? 'Recording…' : 'Record security'}</Button>
+    </form>
+  </Modal>
+}
+
 function DeliveryModal({ contract, onClose, onReported }) {
   const [description, setDescription] = useState('')
+  const [deliveredAt, setDeliveredAt] = useState('')
   const [error, setError] = useState('')
 
   return (
@@ -142,7 +206,8 @@ function DeliveryModal({ contract, onClose, onReported }) {
       <p className="mb-3 text-[13px] text-text-secondary">
         The General Services Office inspects and accepts before an invoice can be raised.
       </p>
-      <textarea
+      <label className="mb-3 block text-sm">Delivery date (if known)<OptionalWorkflowInput type="date" value={deliveredAt} onChange={event => setDeliveredAt(event.target.value)} className="mt-1 w-full rounded border border-border-muted bg-surface p-2" /></label>
+      <OptionalWorkflowInput as="textarea"
         rows={3}
         value={description}
         onChange={(event) => setDescription(event.target.value)}
@@ -158,7 +223,7 @@ function DeliveryModal({ contract, onClose, onReported }) {
           type="button"
           onClick={async () => {
             try {
-              await contractsApi.reportDelivery(contract.id, { description })
+              await contractsApi.reportDelivery(contract.id, { description, deliveredAt: deliveredAt || null })
               onReported()
               onClose()
             } catch (err) {
@@ -400,10 +465,13 @@ export default function Contracts() {
   const { fiscalYear } = useActionQueue()
   const permissions = usePermissions()
   const [drafting, setDrafting] = useState(false)
+  const [editingDraft, setEditingDraft] = useState(null)
   const [delivering, setDelivering] = useState(null)
   const [varying, setVarying] = useState(null)
   const [warranting, setWarranting] = useState(null)
   const [signing, setSigning] = useState(null)
+  const [postingSecurity, setPostingSecurity] = useState(null)
+  const [issuingNotice, setIssuingNotice] = useState(null)
   const [actionError, setActionError] = useState('')
 
   const run = async (fn) => {
@@ -518,7 +586,9 @@ export default function Contracts() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-[13px] text-navy">{contract.projectTitle ?? '—'}</td>
-                    <td className="px-4 py-3 text-[13px] text-text-secondary">{contract.vendorName}</td>
+                    <td className="px-4 py-3 text-[13px] text-text-secondary">{contract.vendorName ?? (contract.supplierMismatch ? 'Supplier discrepancy' : 'Unavailable')}
+                      {contract.historicalDemonstration && <p className="text-xs text-text-faint">Historical demonstration</p>}
+                    </td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">
                       {peso(contract.amount)}
                     </td>
@@ -540,6 +610,10 @@ export default function Contracts() {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex w-max items-center gap-2">
+                        {canDraft && contract.status === 'draft' && <Button size="table" variant="secondary" onClick={() => setEditingDraft(contract)}>Edit draft</Button>}
+                        {(canDraft || isSupplier) && ['draft', 'pendingSignatures'].includes(contract.status) && (
+                          <Button size="table" variant="secondary" onClick={() => setPostingSecurity(contract)}>Performance security</Button>
+                        )}
                         {canDraft && contract.status === 'draft' && (
                           <Button
                             size="table"
@@ -561,7 +635,10 @@ export default function Contracts() {
                               Sign
                             </Button>
                           )}
-                        {isSupplier && contract.status === 'active' && (
+                        {permissions.has('contract.sign') && contract.status === 'active' && !contract.noticeToProceedAt && (
+                          <Button size="table" icon={Send} onClick={() => setIssuingNotice(contract)}>Issue notice to proceed</Button>
+                        )}
+                        {isSupplier && contract.status === 'active' && contract.noticeToProceedAt && (
                           <Button
                             size="table"
                             icon={Truck}
@@ -586,7 +663,7 @@ export default function Contracts() {
 
                         {/* Sec. 62 — posted on final acceptance, so it appears
                             once the contract has run to completion. */}
-                        {canSign && !isSupplier && contract.status === 'completed' && (
+                        {canSign && !isSupplier && !contract.historicalDemonstration && contract.status === 'completed' && (
                           <Button
                             size="table"
                             variant="success"
@@ -608,6 +685,20 @@ export default function Contracts() {
       </Card>
 
       {drafting && <DraftModal onClose={() => setDrafting(false)} onCreated={refresh} />}
+      {editingDraft && <DraftModal contract={editingDraft} onClose={() => setEditingDraft(null)} onCreated={refresh} />}
+      {postingSecurity && <PerformanceSecurityModal contract={postingSecurity} onClose={() => setPostingSecurity(null)} onPosted={refresh} />}
+      {issuingNotice && <ReasonModal
+        title={`Issue notice to proceed for ${issuingNotice.contractNo}?`}
+        consequence="Contract time starts when you issue this notice."
+        confirmLabel="Issue notice"
+        requireReason={false}
+        onClose={() => setIssuingNotice(null)}
+        onConfirm={() => {
+          const contract = issuingNotice
+          setIssuingNotice(null)
+          run(() => contractsApi.issueNoticeToProceed(contract.id))
+        }}
+      />}
       {delivering && (
         <DeliveryModal contract={delivering} onClose={() => setDelivering(null)} onReported={refresh} />
       )}

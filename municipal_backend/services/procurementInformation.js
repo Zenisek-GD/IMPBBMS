@@ -3,19 +3,24 @@ import { workflowError } from "./workflowSupport.js";
 // A blank answer is distinct from an explicit No. Never use Boolean(value)
 // on form data: Boolean("false") and Boolean("no") are both true.
 export const procurementAnswer = (value, label) => {
-  if (value == null || value === "") return null;
+  if (missingOptionalValue(value)) return null;
   if (value === true || value === "true" || value === "yes") return true;
   if (value === false || value === "false" || value === "no") return false;
   throw workflowError(`${label}: select Yes or No.`, 400);
 };
 
 export const placeholderAnswer = (value) => typeof value === "string"
-  && /^(?:n\/?a|not\s+applicable|none|no)(?:\s*[-–—:.].*)?$/i.test(value.trim());
+  && /^(?:n\/?a|not\s+applicable|none|no|pending|not\s+available|not\s+provided)(?:\s*[-–—:.].*)?$/i.test(value.trim());
 
-export const justificationError = ({ status, text, applicable, label }) => {
+export const missingOptionalValue = (value) => value == null || (
+  typeof value === "string" && /^(?:n\/?a|not\s+applicable|none|pending|not\s+available|not\s+provided)?$/i.test(value.trim())
+);
+
+export const justificationError = ({ status, text, applicable, label, draft = false }) => {
   if (status != null && status !== "" && !["provided", "notApplicable"].includes(status)) return `${label}: select a valid response.`;
   if (status === "notApplicable" && applicable) return `${label} applies to this selection and cannot be marked Not Applicable.`;
-  if (status === "notApplicable" && text?.trim()) return `${label}: clear the explanation when selecting Not Applicable.`;
+  if (status === "notApplicable" && !missingOptionalValue(text)) return `${label}: clear the explanation when selecting Not Applicable.`;
+  if (draft && missingOptionalValue(text)) return null;
   if ((applicable || status === "provided") && (typeof text !== "string" || !text.trim() || placeholderAnswer(text))) return `Provide an explanation for ${label.toLowerCase()}.`;
   return null;
 };
@@ -37,7 +42,7 @@ export const solicitationInformation = (body) => {
     if (!Object.hasOwn(body, key)) continue;
     const value = body[key];
     if (value != null && typeof value !== "string") throw workflowError(`Enter text for ${key}.`, 400);
-    const cleaned = value?.trim() || null;
+    const cleaned = missingOptionalValue(value) ? null : value.trim();
     if (cleaned && cleaned.length > (key === "requiredSupplierDocuments" ? 8000 : 255)) throw workflowError(`The ${key} value is too long.`, 400);
     fields[key] = cleaned;
   }

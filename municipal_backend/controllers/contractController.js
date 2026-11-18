@@ -1,4 +1,4 @@
-import { fundingIncludes, fundingYearCondition, fundingYearOf } from "../services/fundingYear.js";
+import { fundingIncludes, fundingYearCondition, fundingYearOf, procurementProvenanceOf } from "../services/fundingYear.js";
 import { Op } from "sequelize";
 import { sequelize } from "../models/db.js";
 import {
@@ -19,64 +19,75 @@ import {
   WARRANTY_SECURITY_RATE,
 } from "../models/securityModel.js";
 import { notifyUsers, notifyByPermission, NOTIFICATION_EVENTS } from "../services/notifier.js";
-import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
+import { auditFromRequest, AUDIT_ACTIONS, withAuditTransaction } from "../services/auditLog.js";
 import { nextSequenceNo, withSequenceRetry } from "../services/sequenceNo.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
+import { actorAudit, workflowError } from "../services/workflowSupport.js";
+import { missingOptionalValue, validDateOnly } from "../services/procurementInformation.js";
+import { archivedHistoricalIds, assertOperationalContract } from "../services/historicalAwards.js";
 
 const contractIncludes = {
   include: [
     { model: Vendor, as: "vendor" },
-    { model: Award, as: "award", include: [{ model: Rfq, as: "rfq", include: fundingIncludes() }] },
+    { model: Award, as: "award", include: [{ model: Rfq, as: "rfq", include: fundingIncludes({ includeProvenance: true }) }] },
     { model: Delivery, as: "deliveries" },
     { model: User, as: "draftedBy", attributes: ["id", "name"] },
   ],
 };
 
-const serialize = (contract) => ({
-  id: contract.id,
-  contractNo: contract.contractNo,
-  fiscalYear: fundingYearOf(contract.award?.rfq),
-  poRef: contract.poRef,
-  amount: Number(contract.amount),
-  amountPaid: Number(contract.amountPaid ?? 0),
-  amountOutstanding: Math.max(0, Number(contract.amount) - Number(contract.amountPaid ?? 0)),
-  startDate: contract.startDate,
-  deliveryDeadline: contract.deliveryDeadline,
-  terms: contract.terms,
-  status: contract.status,
-  signedByLguAt: contract.signedByLguAt,
-  signedByVendorAt: contract.signedByVendorAt,
-  vendorId: contract.vendorId,
-  vendorName: contract.vendor?.businessName ?? null,
-  noaNumber: contract.award?.noaNumber ?? null,
-  referenceNo: contract.award?.rfq?.referenceNo ?? null,
-  projectTitle: contract.award?.rfq?.title ?? null,
-  draftedByName: contract.draftedBy?.name ?? null,
+const serialize = (contract) => {
+  const provenance = procurementProvenanceOf(contract.award?.rfq);
+  const sourceAward = provenance?.historicalAward;
+  return {
+    id: contract.id,
+    contractNo: contract.contractNo,
+    fiscalYear: fundingYearOf(contract.award?.rfq),
+    poRef: contract.poRef,
+    amount: Number(contract.amount),
+    amountPaid: Number(contract.amountPaid ?? 0),
+    amountOutstanding: Math.max(0, Number(contract.amount) - Number(contract.amountPaid ?? 0)),
+    startDate: contract.startDate,
+    contractDays: contract.contractDays,
+    noticeToProceedAt: contract.noticeToProceedAt,
+    deliveryDeadline: contract.deliveryDeadline,
+    terms: contract.terms,
+    status: contract.status,
+    signedByLguAt: contract.signedByLguAt,
+    signedByVendorAt: contract.signedByVendorAt,
+    vendorId: contract.vendorId,
+    vendorName: contract.vendor?.businessName ?? (sourceAward?.supplierMismatch ? null : sourceAward?.recommendedSupplier) ?? null,
+    supplierMismatch: sourceAward?.supplierMismatch ?? false,
+    historicalDemonstration: Boolean(provenance?.demonstrationCompletion),
+    noaNumber: contract.award?.noaNumber ?? null,
+    referenceNo: contract.award?.rfq?.referenceNo ?? null,
+    projectTitle: contract.award?.rfq?.title ?? null,
+    draftedByName: contract.draftedBy?.name ?? null,
 
-  // Variation and termination state. Added so the contracts screen can show the
-  // Sec. 71 headroom *before* an officer drafts a variation order rather than
-  // after the API refuses it — the ceiling is ten percent of the ORIGINAL price,
-  // which is not derivable from `amount` alone once a variation has moved it.
-  category: contract.category,
-  variationTotal: Number(contract.variationTotal ?? 0),
-  originalAmount: originalAmountOf(contract),
-  actualCompletionAt: contract.actualCompletionAt,
-  terminatedAt: contract.terminatedAt,
-  terminationGround: contract.terminationGround,
+    // Variation and termination state. Added so the contracts screen can show the
+    // Sec. 71 headroom *before* an officer drafts a variation order rather than
+    // after the API refuses it — the ceiling is ten percent of the ORIGINAL price,
+    // which is not derivable from `amount` alone once a variation has moved it.
+    category: contract.category,
+    variationTotal: Number(contract.variationTotal ?? 0),
+    originalAmount: originalAmountOf(contract),
+    actualCompletionAt: contract.actualCompletionAt,
+    terminatedAt: contract.terminatedAt,
+    terminationGround: contract.terminationGround,
 
-  deliveries: (contract.deliveries ?? []).map((delivery) => ({
-    id: delivery.id,
-    deliveredAt: delivery.deliveredAt,
-    inspectedAt: delivery.inspectedAt,
-    description: delivery.description,
-    status: delivery.status,
-    remarks: delivery.remarks,
-  })),
-});
+    deliveries: (contract.deliveries ?? []).map((delivery) => ({
+      id: delivery.id,
+      deliveredAt: delivery.deliveredAt,
+      inspectedAt: delivery.inspectedAt,
+      description: delivery.description,
+      status: delivery.status,
+      remarks: delivery.remarks,
+    })),
+  };
+};
 
 export const listContracts = async (req, res) => {
   const { status } = req.query;
-  const where = {};
+  const where = { id: { [Op.notIn]: await archivedHistoricalIds("contractId") } };
   const fundingScope = fundingYearCondition(req.query.fiscalYear);
   if (fundingScope) where[Op.and] = [fundingScope];
   const canViewAll = req.permissions.has("contract.view");
@@ -154,56 +165,55 @@ export const listContracts = async (req, res) => {
   }));
 };
 
+const contractDraftFields = (body) => {
+  const fields = {};
+  for (const key of ["startDate", "deliveryDeadline", "terms", "poRef", "contractDays"]) {
+    if (Object.hasOwn(body, key)) fields[key] = missingOptionalValue(body[key]) ? null : body[key];
+  }
+  for (const key of ["startDate", "deliveryDeadline"]) {
+    if (fields[key] != null && !validDateOnly(fields[key])) throw workflowError("Enter valid calendar dates for the contract.", 400);
+  }
+  if (fields.contractDays != null) {
+    const days = Number(fields.contractDays);
+    if (!["string", "number"].includes(typeof fields.contractDays) || !Number.isSafeInteger(days) || days <= 0 || days > 2147483647) {
+      throw workflowError("Enter a positive whole number for the contract period in calendar days.", 400);
+    }
+    fields.contractDays = days;
+  }
+  if (fields.poRef != null && (typeof fields.poRef !== "string" || fields.poRef.length > 255)) throw workflowError("Enter a PO reference of at most 255 characters.", 400);
+  if (fields.terms != null && (typeof fields.terms !== "string" || Buffer.byteLength(fields.terms, "utf8") > 65535)) throw workflowError("The contract terms exceed the text field's capacity.", 400);
+  return fields;
+};
+
 // Lifecycle step 10: the contract is generated from an issued award.
 export const createContract = async (req, res) => {
-  const { awardId, startDate, deliveryDeadline, terms, poRef, contractDays } = req.body;
-
-  const award = await Award.findByPk(awardId, { include: [{ model: Rfq, as: "rfq" }] });
-  if (!award) return res.status(400).json({ message: "That award does not exist." });
-  if (award.status !== "issued") {
-    return res.status(400).json({ message: "The award must be issued before a contract can be drafted." });
-  }
-  if (await Contract.findOne({ where: { awardId, status: { [Op.ne]: "cancelled" } } })) {
-    return res.status(409).json({ message: "This award already has a contract." });
-  }
-
-  // Contract time is what makes delay — and therefore liquidated damages —
-  // computable. `services/deductions.js` has always been able to calculate them
-  // and has never had anything to calculate from, because nothing outside the
-  // demo seeder ever set these two fields.
-  const days = Number(contractDays);
-  if (!Number.isInteger(days) || days <= 0) {
-    return res.status(400).json({
-      message:
-        "A contract period in calendar days is required. Without it there is no day zero to count " +
-        "delay from, and liquidated damages cannot be computed.",
-    });
-  }
-
-  // Goods and small-value awards run on a Purchase Order; infrastructure and
-  // consulting on a Contract. They carry different securities and retention
-  // rules, so the instrument follows the category rather than being guessed.
-  const category = award.rfq?.category ?? "goods";
-
+  const { awardId } = req.body;
+  const fields = contractDraftFields(req.body);
   const year = new Date().getFullYear();
-
-  const contract = await withSequenceRetry(async () =>
-    Contract.create({
-    contractNo: await nextSequenceNo(Contract, "contractNo", "CON", year),
-    poRef: poRef ?? null,
-    amount: award.amount,
-    category,
-    instrumentType: category === "goods" ? "purchaseOrder" : "contract",
-    contractDays: days,
-    startDate: startDate ?? null,
-    deliveryDeadline: deliveryDeadline ?? null,
-    terms: terms ?? null,
-    awardId: award.id,
-    vendorId: award.vendorId,
-    draftedById: req.currentUser.id,
-    status: "draft",
-    })
-  );
+  const contract = await withSequenceRetry(() => withAuditTransaction(async (transaction, audit) => {
+    const award = await Award.findByPk(awardId, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!award) throw workflowError("That award does not exist.", 400);
+    const rfq = await Rfq.findByPk(award.rfqId, { include: fundingIncludes({ includeProvenance: true }), transaction });
+    const provenance = procurementProvenanceOf(rfq);
+    if (provenance?.historicalAward?.id === award.id) throw workflowError("Verify the supplier and supporting approvals before preparing a contract for this historical award.", 409);
+    if (award.status !== "issued") throw workflowError("The award must be issued before a contract can be drafted.", 400);
+    if (await Contract.findOne({ where: { awardId, status: { [Op.ne]: "cancelled" } }, transaction })) throw workflowError("This award already has a contract.", 409);
+    const category = rfq?.category ?? "goods";
+    const created = await Contract.create({
+      ...fields,
+      contractNo: await nextSequenceNo(Contract, "contractNo", "CON", year, { transaction }),
+      amount: award.amount,
+      category,
+      instrumentType: category === "goods" ? "purchaseOrder" : "contract",
+      awardId: award.id,
+      vendorId: award.vendorId,
+      draftedById: req.currentUser.id,
+      status: "draft",
+    }, { transaction });
+    await audit(actorAudit(req, { actionType: "contract.drafted", entityRef: "contract", entityId: created.id, summary: "Contract draft saved.", afterState: { awardId: award.id, ...fields, status: created.status } }));
+    return created;
+  }));
+  const { category, amount } = contract;
 
   res.status(201).json({
     ...serialize(await Contract.findByPk(contract.id, contractIncludes)),
@@ -212,10 +222,25 @@ export const createContract = async (req, res) => {
     performanceSecurity: {
       required: true,
       rates: PERFORMANCE_SECURITY_RATES[category] ?? PERFORMANCE_SECURITY_RATES.goods,
-      amountBySuretyBond: requiredPerformanceSecurity(award.amount, category, "suretyBond"),
-      amountByCash: requiredPerformanceSecurity(award.amount, category, "cash"),
+      amountBySuretyBond: requiredPerformanceSecurity(amount, category, "suretyBond"),
+      amountByCash: requiredPerformanceSecurity(amount, category, "cash"),
     },
   });
+};
+
+export const updateContractDraft = async (req, res) => {
+  const fields = contractDraftFields(req.body);
+  const id = await withAuditTransaction(async (transaction, audit) => {
+    const contract = await Contract.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!contract) throw workflowError("Contract not found.", 404);
+    await assertOperationalContract(contract.id);
+    if (contract.status !== "draft") throw workflowError("Only a draft contract can be edited.", 409);
+    const beforeState = Object.fromEntries(Object.keys(fields).map((key) => [key, contract[key]]));
+    await contract.update(fields, { transaction });
+    await audit(actorAudit(req, { actionType: "contract.draftUpdated", entityRef: "contract", entityId: contract.id, summary: "Contract draft updated.", beforeState, afterState: fields }));
+    return contract.id;
+  });
+  res.json(serialize(await Contract.findByPk(id, contractIncludes)));
 };
 
 // ── Performance security (RA 12009 Sec. 68) ─────────────────────────────────
@@ -232,6 +257,10 @@ export const postPerformanceSecurity = async (req, res) => {
   const { form, referenceNo, issuer, amount } = req.body ?? {};
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  await assertOperationalContract(contract.id);
+  if (!req.permissions.has("contract.draft") && contract.vendor?.userId !== req.currentUser.id) {
+    return res.status(403).json({ message: "You may only record performance security for your own contract." });
+  }
 
   if (!["draft", "pendingSignatures"].includes(contract.status)) {
     return res.status(409).json({
@@ -250,7 +279,9 @@ export const postPerformanceSecurity = async (req, res) => {
   }
 
   const required = requiredPerformanceSecurity(contract.amount, contract.category, form);
-  const posted = amount === undefined ? required : Number(amount);
+  const posted = form === "securingDeclaration" && missingOptionalValue(amount) ? 0
+    : missingOptionalValue(amount) ? NaN : Number(amount);
+  if (!Number.isFinite(posted) || posted < 0) return res.status(400).json({ message: "Record the amount actually posted for the performance security." });
 
   // Sec. 68.4 — "in the amount not less than the required percentage of the
   // total contract price". A Performance Securing Declaration carries no
@@ -299,13 +330,17 @@ const performanceSecurityFor = (contractId) =>
   });
 
 export const issueForSignature = async (req, res) => {
-  const contract = await Contract.findByPk(req.params.id, contractIncludes);
-  if (!contract) return res.status(404).json({ message: "Contract not found." });
-  if (contract.status !== "draft") {
-    return res.status(409).json({ message: `Cannot issue from status "${contract.status}".` });
-  }
-
-  await contract.update({ status: "pendingSignatures" });
+  const id = await withAuditTransaction(async (transaction, audit) => {
+    const contract = await Contract.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!contract) throw workflowError("Contract not found.", 404);
+    await assertOperationalContract(contract.id);
+    if (contract.status !== "draft") throw workflowError(`Cannot issue from status "${contract.status}".`, 409);
+    if (!Number.isInteger(contract.contractDays) || contract.contractDays <= 0) throw workflowError("Enter the contract period in calendar days before issuing the contract for signature.", 400);
+    await contract.update({ status: "pendingSignatures" }, { transaction });
+    await audit(actorAudit(req, { actionType: "contract.issuedForSignature", entityRef: "contract", entityId: contract.id, summary: "Contract issued for signature.", beforeState: { status: "draft" }, afterState: { status: contract.status, contractDays: contract.contractDays } }));
+    return contract.id;
+  });
+  const contract = await Contract.findByPk(id, contractIncludes);
 
   await notifyUsers([contract.vendor?.userId], {
     type: NOTIFICATION_EVENTS.CONTRACT_READY,
@@ -317,7 +352,7 @@ export const issueForSignature = async (req, res) => {
     severity: "warning",
   });
 
-  res.json(serialize(await Contract.findByPk(contract.id, contractIncludes)));
+  res.json(serialize(contract));
 };
 
 // Both parties must sign before the contract becomes active. `party` is
@@ -325,6 +360,7 @@ export const issueForSignature = async (req, res) => {
 export const signContract = async (req, res) => {
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  await assertOperationalContract(contract.id);
   if (contract.status !== "pendingSignatures") {
     return res.status(409).json({ message: "This contract is not awaiting signatures." });
   }
@@ -398,6 +434,7 @@ export const issueNoticeToProceed = async (req, res) => {
   const { issuedAt } = req.body ?? {};
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  await assertOperationalContract(contract.id);
 
   if (contract.status !== "active") {
     return res.status(409).json({
@@ -469,8 +506,10 @@ export const issueNoticeToProceed = async (req, res) => {
 
 export const reportDelivery = async (req, res) => {
   const { description, deliveredAt } = req.body;
+  if (deliveredAt != null && !Number.isFinite(new Date(deliveredAt).getTime())) return res.status(400).json({ message: "Enter a valid delivery date, or select None / N/A." });
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  await assertOperationalContract(contract.id);
   if (!req.permissions.has("delivery.report")) {
     const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
     if (!vendor || vendor.id !== contract.vendorId) {
@@ -495,7 +534,7 @@ export const reportDelivery = async (req, res) => {
   const delivery = await Delivery.create({
     contractId: contract.id,
     reportedById: req.currentUser.id,
-    deliveredAt: deliveredAt ?? new Date(),
+    deliveredAt: Object.hasOwn(req.body, 'deliveredAt') ? deliveredAt : new Date(),
     description: description ?? null,
     status: "reported",
   });
@@ -520,6 +559,7 @@ export const inspectDelivery = async (req, res) => {
     include: [{ model: Contract, as: "contract", include: [{ model: Vendor, as: "vendor" }] }],
   });
   if (!delivery) return res.status(404).json({ message: "Delivery not found." });
+  await assertOperationalContract(delivery.contractId);
   if (delivery.status === "accepted" || delivery.status === "rejected") {
     return res.status(409).json({ message: "This delivery has already been inspected." });
   }
@@ -535,7 +575,7 @@ export const inspectDelivery = async (req, res) => {
   // what the supplier may invoice against this delivery, and it cannot exceed
   // what is still unbilled on the contract.
   let certifiedValue = null;
-  if (result === "accepted" && acceptedValue !== undefined && acceptedValue !== null && acceptedValue !== "") {
+  if (result === "accepted" && !missingOptionalValue(acceptedValue)) {
     certifiedValue = Number(acceptedValue);
     if (!Number.isFinite(certifiedValue) || certifiedValue <= 0) {
       return res.status(400).json({ message: "Accepted value must be a positive amount." });
@@ -587,6 +627,7 @@ export const inspectDelivery = async (req, res) => {
 
 export const listDeliveries = async (req, res) => {
   const deliveries = await Delivery.findAll({
+    where: { contractId: { [Op.notIn]: await archivedHistoricalIds("contractId") } },
     include: [
       { model: Contract, as: "contract", include: [{ model: Vendor, as: "vendor" }] },
       { model: User, as: "reportedBy", attributes: ["id", "name"] },
@@ -623,6 +664,7 @@ export const issueVariationOrder = async (req, res) => {
   const { amount, justification } = req.body ?? {};
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  await assertOperationalContract(contract.id);
 
   if (contract.status !== "active") {
     return res.status(409).json({
@@ -714,6 +756,7 @@ export const terminateContract = async (req, res) => {
   const { ground, reason } = req.body ?? {};
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  await assertOperationalContract(contract.id);
 
   if (!["active", "pendingSignatures"].includes(contract.status)) {
     return res.status(409).json({ message: `Cannot terminate a contract in "${contract.status}".` });
@@ -787,7 +830,11 @@ export const postWarrantySecurity = async (req, res) => {
   const { form, referenceNo, issuer, warrantyMonths } = req.body ?? {};
   const contract = await Contract.findByPk(req.params.id, contractIncludes);
   if (!contract) return res.status(404).json({ message: "Contract not found." });
+  await assertOperationalContract(contract.id);
 
+  if (procurementProvenanceOf(contract.award?.rfq)?.demonstrationCompletion?.contractId === contract.id) {
+    return res.status(409).json({ message: "Historical demonstration records are read-only." });
+  }
   if (!["active", "completed"].includes(contract.status)) {
     return res.status(409).json({
       message: "Warranty security is posted on final acceptance of a contract that ran to completion.",

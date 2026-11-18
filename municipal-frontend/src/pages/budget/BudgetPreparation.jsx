@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Plus, Landmark, Users, Trash2, AlertTriangle, Gavel, CalendarClock } from 'lucide-react'
 import * as budgetApi from '../../api/budgetPreparation'
@@ -284,7 +285,7 @@ function ProposalForm({ budget, existing, onClose, onSaved }) {
       >
         <label className="text-xs text-text-secondary">
           Justification
-          <textarea
+          <OptionalWorkflowInput as="textarea"
             rows={3}
             value={justification}
             onChange={(event) => setJustification(event.target.value)}
@@ -383,7 +384,7 @@ function AmountsForm({ proposal, field, title, onClose, onConfirm }) {
       <LargeFormPage.Section title="Notes" description="Optional remarks recorded with these figures.">
         <label className="text-xs text-text-secondary">
           Notes
-          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput as="textarea" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
       </LargeFormPage.Section>
     </LargeFormPage>
@@ -498,7 +499,7 @@ function StageForm({ budget, stage, options, onClose, onConfirm }) {
             </label>
             <label className="text-xs text-text-secondary">
               Remarks
-              <textarea
+              <OptionalWorkflowInput as="textarea"
                 rows={3}
                 value={values.provincialRemarks}
                 onChange={(e) => set('provincialRemarks', e.target.value)}
@@ -585,19 +586,19 @@ function ProceedingForm({ budget, proceeding, permissions, onClose, onSaved }) {
         </label>
         <label className="text-xs text-text-secondary">
           Actually held on (leave blank until completed)
-          <input type="datetime-local" value={values.heldAt} max={localDateTime(new Date())} onChange={(e) => set('heldAt', e.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput type="datetime-local" value={values.heldAt} max={localDateTime(new Date())} onChange={(e) => set('heldAt', e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         <label className="text-xs text-text-secondary">
           Venue
-          <input value={values.venue} onChange={(e) => set('venue', e.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput value={values.venue} onChange={(e) => set('venue', e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         <label className="text-xs text-text-secondary">
           Agenda
-          <textarea rows={2} value={values.agenda} onChange={(e) => set('agenda', e.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput as="textarea" rows={2} value={values.agenda} onChange={(e) => set('agenda', e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         <label className="text-xs text-text-secondary">
           Minutes
-          <textarea rows={4} value={values.minutes} onChange={(e) => set('minutes', e.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput as="textarea" rows={4} value={values.minutes} onChange={(e) => set('minutes', e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">

@@ -6,16 +6,23 @@ import { fiscalYearFilter } from "./financialCalculations.js";
 
 // Legacy solicitations may link directly to the APP. New procurements carry
 // the PR link. In either case the enacted funding year wins over creation date.
-export const fundingIncludes = () => [
-  { model: PrHeader, as: "purchaseRequisition", attributes: ["id", "appEntryId"], include: [
-    { model: AppEntry, as: "appEntry", attributes: ["id", "fiscalYear", "appropriationId"], include: [
+export const fundingIncludes = ({ includeProvenance = false } = {}) => {
+  const appAttributes = ["id", "fiscalYear", "appropriationId"];
+  if (includeProvenance) appAttributes.push("recoveryImport");
+  return [
+    { model: PrHeader, as: "purchaseRequisition", attributes: ["id", "appEntryId"], include: [
+      { model: AppEntry, as: "appEntry", attributes: appAttributes, include: [
+        { model: Appropriation, as: "appropriation", attributes: ["id", "fiscalYear"] },
+      ] },
+    ] },
+    { model: AppEntry, as: "appEntry", attributes: appAttributes, include: [
       { model: Appropriation, as: "appropriation", attributes: ["id", "fiscalYear"] },
     ] },
-  ] },
-  { model: AppEntry, as: "appEntry", attributes: ["id", "fiscalYear", "appropriationId"], include: [
-    { model: Appropriation, as: "appropriation", attributes: ["id", "fiscalYear"] },
-  ] },
-];
+  ];
+};
+
+export const procurementProvenanceOf = (rfq) =>
+  (rfq?.purchaseRequisition?.appEntry ?? rfq?.appEntry)?.recoveryImport ?? null;
 
 export const fundingYearOf = (rfq) => {
   const app = rfq?.purchaseRequisition?.appEntry ?? rfq?.appEntry;

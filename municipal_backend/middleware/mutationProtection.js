@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { MutationReceipt } from "../models/mutationReceiptModel.js";
 import { attachRecordChangeAudit, withRecordChangeAudit } from "../services/recordChangeAudit.js";
+import { checkWorkflowInformation } from "../services/workflowInformation.js";
 
 const MUTATIONS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const BUSINESS_PATH = /^\/api\/(?:planning|budget-preparation|app-entries|purchase-requisitions|bidding|finance|contracts|conferences|announcements|observers|protests|departments|messages|vendors|settings)(?:\/|$)/;
@@ -11,6 +12,8 @@ export const canonicalMutation = value => value === null || typeof value !== "ob
 const conflict = (res, code, message) => res.status(409).json({ code, message });
 
 export const protectMutation = (handler, { Receipt = MutationReceipt } = {}) => async (req, res, next) => {
+  // This runs after route permissions and before receipt allocation or writes.
+  if (!checkWorkflowInformation(req, res)) return;
   const key = req.get?.("Idempotency-Key");
   const url = req.originalUrl || req.url || "";
   if (!key || !req.currentUser?.id || !MUTATIONS.has(req.method) || !BUSINESS_PATH.test(url) || !req.is?.("application/json")) {

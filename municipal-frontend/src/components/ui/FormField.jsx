@@ -1,5 +1,6 @@
 import { useState, useId } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import OptionalWorkflowInput from './OptionalWorkflowInput'
 
 // Shared input chrome, exported so selects and textareas elsewhere can match
 // the field styling without re-deriving it.
@@ -13,7 +14,7 @@ export const labelClass =
 // toggle; the field is linked to its error message via aria-describedby so
 // screen readers announce it. `required` marks the label with an asterisk —
 // pass it whenever the server rejects an empty value.
-export default function FormField({ label, type = 'text', error, hint, required = false, registration, ...props }) {
+export default function FormField({ label, type = 'text', error, hint, required = false, allowUnavailable = false, registration, ...props }) {
   const [revealed, setRevealed] = useState(false)
   const id = useId()
   const errorId = `${id}-error`
@@ -21,6 +22,7 @@ export default function FormField({ label, type = 'text', error, hint, required 
 
   const isPassword = type === 'password'
   const inputType = isPassword && revealed ? 'text' : type
+  const Input = allowUnavailable && !required && !isPassword ? OptionalWorkflowInput : 'input'
 
   return (
     <div>
@@ -33,7 +35,7 @@ export default function FormField({ label, type = 'text', error, hint, required 
         </label>
       )}
       <div className="relative">
-        <input
+        <Input
           id={id}
           type={inputType}
           aria-invalid={Boolean(error)}

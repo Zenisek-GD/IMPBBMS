@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useCallback, useEffect, useState } from 'react'
 import {
   Plus, Megaphone, Eye, Copy, Archive, Globe, Paperclip, Trash2, Upload,
@@ -214,9 +215,9 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
     setFieldErrors({})
     setSaving(true)
     try {
-      if (form.submissionDeadline && form.bidOpeningAt && new Date(form.bidOpeningAt) <= new Date(form.submissionDeadline)) {
-        setFieldErrors({ bidOpeningAt: 'Bid opening must be scheduled after the bid submission deadline.' })
-        throw new Error('Bid opening must be scheduled after the bid submission deadline.')
+      if (form.submissionDeadline && form.bidOpeningAt && new Date(form.bidOpeningAt) < new Date(form.submissionDeadline)) {
+        setFieldErrors({ bidOpeningAt: 'Bid opening cannot be scheduled before the bid submission deadline.' })
+        throw new Error('Bid opening cannot be scheduled before the bid submission deadline.')
       }
       const payload = {
         ...form,
@@ -307,7 +308,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
             </label>
             <label className={labelClass}>
               Reference number
-              <input
+              <OptionalWorkflowInput
                 value={form.referenceNo}
                 readOnly={Boolean(form.rfqId)}
                 onChange={(e) => set('referenceNo', e.target.value)}
@@ -342,7 +343,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
           </label>
           <label className={labelClass}>
             Source of funds
-            <input value={form.fundSource} onChange={(e) => set('fundSource', e.target.value)} className={`mt-1 ${inputClass}`} />
+            <OptionalWorkflowInput value={form.fundSource} onChange={(e) => set('fundSource', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
           <label className={labelClass}>
             Mode of procurement
@@ -350,7 +351,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
           </label>
           <label className={labelClass}>
             Legal basis
-            <input
+            <OptionalWorkflowInput
               value={form.procurementMethodCitation}
               readOnly={Boolean(form.rfqId)}
               onChange={(e) => set('procurementMethodCitation', e.target.value)}
@@ -383,7 +384,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
           </div>
           <label className={`block ${labelClass}`}>
             Venue
-            <input value={form.venue} onChange={(e) => set('venue', e.target.value)} className={`mt-1 ${inputClass}`} />
+            <OptionalWorkflowInput value={form.venue} onChange={(e) => set('venue', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
         </div>
       </LargeFormPage.Section>
@@ -393,15 +394,15 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
         <div className="grid gap-3 sm:grid-cols-3">
           <label className={labelClass}>
             Contact person
-            <input value={form.contactPerson} onChange={(e) => set('contactPerson', e.target.value)} className={`mt-1 ${inputClass}`} />
+            <OptionalWorkflowInput value={form.contactPerson} onChange={(e) => set('contactPerson', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
           <label className={labelClass}>
             Email
-            <input value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} className={`mt-1 ${inputClass}`} />
+            <OptionalWorkflowInput value={form.contactEmail} onChange={(e) => set('contactEmail', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
           <label className={labelClass}>
             Telephone
-            <input value={form.contactPhone} onChange={(e) => set('contactPhone', e.target.value)} className={`mt-1 ${inputClass}`} />
+            <OptionalWorkflowInput value={form.contactPhone} onChange={(e) => set('contactPhone', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
         </div>
       </LargeFormPage.Section>
@@ -417,7 +418,7 @@ function NoticeEditor({ existing, solicitations, onClose, onSaved }) {
             </label>
             <label className={labelClass}>
               Remove from the portal on
-              <input type="datetime-local" value={form.expiresAt} onChange={(e) => set('expiresAt', e.target.value)} className={`mt-1 ${inputClass}`} />
+              <OptionalWorkflowInput type="datetime-local" value={form.expiresAt} onChange={(e) => set('expiresAt', e.target.value)} className={`mt-1 ${inputClass}`} />
               {err('expiresAt')}
             </label>
             <label className={labelClass}>

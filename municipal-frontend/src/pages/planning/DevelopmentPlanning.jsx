@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { Fragment, useEffect, useState, useCallback, useRef } from 'react'
 import ResolutionNumberInput from '../../components/ui/ResolutionNumberInput'
 import { Plus, Target, Star, ListTree, Route, Check } from 'lucide-react'
@@ -147,7 +148,7 @@ function PlanForm({ sectors, existing, onClose, onSaved }) {
         </summary>
         <label className="mt-2 block text-xs text-text-secondary">
           Long-term direction (optional)
-          <textarea
+          <OptionalWorkflowInput as="textarea"
             rows={3}
             value={vision}
             onChange={(e) => setVision(e.target.value)}
@@ -179,7 +180,7 @@ function PlanForm({ sectors, existing, onClose, onSaved }) {
                 </label>
                 <label className="text-xs text-text-secondary">
                   Programme (optional)
-                  <input value={goal.subsector} onChange={(event) => updateGoal(index, 'subsector', event.target.value)} placeholder="Example: Health or disaster preparedness" className={`mt-1 ${inputClass}`} />
+                  <OptionalWorkflowInput value={goal.subsector} onChange={(event) => updateGoal(index, 'subsector', event.target.value)} placeholder="Example: Health or disaster preparedness" className={`mt-1 ${inputClass}`} />
                 </label>
               </div>
               <label className="mt-3 block text-xs text-text-secondary">
@@ -188,7 +189,7 @@ function PlanForm({ sectors, existing, onClose, onSaved }) {
               </label>
               <label className="mt-3 block text-xs text-text-secondary">
                 Short description (optional)
-                <textarea rows={2} value={goal.description} onChange={(event) => updateGoal(index, 'description', event.target.value)} placeholder="What does success look like?" className={`mt-1 resize-y ${inputClass}`} />
+                <OptionalWorkflowInput as="textarea" rows={2} value={goal.description} onChange={(event) => updateGoal(index, 'description', event.target.value)} placeholder="What does success look like?" className={`mt-1 resize-y ${inputClass}`} />
               </label>
               {goals.length > 1 && (
                 <Button className="mt-3" size="sm" variant="ghost" onClick={() => setGoals((current) => current.filter((_, goalIndex) => goalIndex !== index))}>
@@ -233,7 +234,7 @@ function GoalForm({ plan, existing, sectors, onClose, onSaved }) {
         </label>
         <label className="text-xs text-text-secondary">
           Programme (free text — e.g. Health, Agriculture, Disaster preparedness)
-          <input value={subsector} onChange={(e) => setSubsector(e.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput value={subsector} onChange={(e) => setSubsector(e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         <label className="text-xs text-text-secondary">
           Goal
@@ -241,7 +242,7 @@ function GoalForm({ plan, existing, sectors, onClose, onSaved }) {
         </label>
         <label className="text-xs text-text-secondary">
           Description
-          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput as="textarea" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -581,8 +582,8 @@ function AipEntryForm({ program, existing, goals, departments, options, onClose,
             <input value={values.title} onChange={(e) => set('title', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
 
-          <label className="text-xs text-text-secondary">Description<textarea rows={2} value={values.description} onChange={(event) => set('description', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
-          <label className="text-xs text-text-secondary">Expected output<textarea rows={2} value={values.expectedOutput} onChange={(event) => set('expectedOutput', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
+          <label className="text-xs text-text-secondary">Description<OptionalWorkflowInput as="textarea" rows={2} value={values.description} onChange={(event) => set('description', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
+          <label className="text-xs text-text-secondary">Expected output<OptionalWorkflowInput as="textarea" rows={2} value={values.expectedOutput} onChange={(event) => set('expectedOutput', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
 
           <label className="text-xs text-text-secondary">
             Development goal it pursues
@@ -602,7 +603,7 @@ function AipEntryForm({ program, existing, goals, departments, options, onClose,
 
           <label className="text-xs text-text-secondary">
             Implementing office
-            <select
+            <OptionalWorkflowInput as="select"
               value={values.implementingUnitId}
               onChange={(e) => set('implementingUnitId', e.target.value)}
               className={`mt-1 ${inputClass}`}
@@ -612,7 +613,7 @@ function AipEntryForm({ program, existing, goals, departments, options, onClose,
                   {d.name}
                 </option>
               ))}
-            </select>
+            </OptionalWorkflowInput>
           </label>
         </div>
       </LargeFormPage.Section>
@@ -675,10 +676,10 @@ function AipEntryForm({ program, existing, goals, departments, options, onClose,
 
           <label className="text-xs text-text-secondary">
             PAP code
-            <input value={values.papCode} onChange={(e) => set('papCode', e.target.value)} className={`mt-1 ${inputClass}`} />
+            <OptionalWorkflowInput value={values.papCode} onChange={(e) => set('papCode', e.target.value)} className={`mt-1 ${inputClass}`} />
           </label>
           {existing && <label className="text-xs text-text-secondary">Project status<select value={values.status} onChange={(event) => set('status', event.target.value)} className={`mt-1 ${inputClass}`}><option value="planned">Planned</option><option value="dropped">Dropped</option></select></label>}
-          <label className="text-xs text-text-secondary">Remarks{existing && ' / reason for changing status'}<textarea rows={3} value={values.remarks} onChange={(event) => set('remarks', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
+          <label className="text-xs text-text-secondary">Remarks{existing && ' / reason for changing status'}<OptionalWorkflowInput as="textarea" rows={3} value={values.remarks} onChange={(event) => set('remarks', event.target.value)} className={`mt-1 ${inputClass}`} /></label>
         </div>
       </LargeFormPage.Section>
     </LargeFormPage>

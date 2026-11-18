@@ -38,7 +38,7 @@ export const PrHeader = sequelize.define(
   {
     prNumber: { type: DataTypes.STRING, allowNull: false, unique: true },
     purpose: { type: DataTypes.TEXT, allowNull: true },
-    dateRequired: { type: DataTypes.DATEONLY, allowNull: false },
+    dateRequired: { type: DataTypes.DATEONLY, allowNull: true },
 
     // Section 5.3: emergency requisitions bypass the 15-day lead time but
     // require a justification.
@@ -187,22 +187,20 @@ PrHeader.belongsTo(ProcurementMode, { as: "procurementMode", foreignKey: "procur
 PrHeader.hasMany(PrLineItem, { as: "lineItems", foreignKey: "prHeaderId", onDelete: "CASCADE" });
 PrLineItem.belongsTo(PrHeader, { foreignKey: "prHeaderId" });
 
-// A recovery that stops at Item Description cannot invent later item amounts
-// or an asset classification. NULL is supported only on a held recovery draft;
-// ordinary controller creation and submission still require complete items.
-const assertRecoveryDraft = async (header, transaction) => {
-  const app = header?.appEntryId ? await AppEntry.findByPk(header.appEntryId, { transaction }) : null;
-  if (header?.status !== "draft" || app?.recoveryImport?.hold !== true) {
-    throw new Error("Incomplete amounts are permitted only on a held procurement recovery draft.");
+// Drafts can carry unanswered amounts. The submission controller validates the
+// complete set of line items and their cost before the first approval.
+const assertLinkedDraft = (header) => {
+  if (!header?.appEntryId || !["draft", "returned"].includes(header.status)) {
+    throw new Error("Incomplete amounts are permitted only on a draft or returned requisition linked to a procurement plan.");
   }
 };
-PrHeader.beforeValidate(async (header, options) => {
-  if (header.totalAmount == null) await assertRecoveryDraft(header, options.transaction);
+PrHeader.beforeValidate((header) => {
+  if (header.totalAmount == null) assertLinkedDraft(header);
 });
 PrLineItem.beforeValidate(async (item, options) => {
   if ([item.quantity, item.unitCost, item.lineTotal, item.assetClass].some((value) => value == null)) {
     const header = item.prHeaderId ? await PrHeader.findByPk(item.prHeaderId, { transaction: options.transaction }) : null;
-    await assertRecoveryDraft(header, options.transaction);
+    assertLinkedDraft(header);
   }
 });
 

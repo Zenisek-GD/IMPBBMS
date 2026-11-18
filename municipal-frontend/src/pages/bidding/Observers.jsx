@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useEffect, useState } from 'react'
 import { Eye, ShieldCheck, AlertTriangle, FileText } from 'lucide-react'
 import * as observersApi from '../../api/observers'
@@ -181,7 +182,7 @@ function ReportModal({ invitation, onClose, onDone }) {
       <label className="mb-1 block text-xs font-medium text-text-secondary">
         Areas for improvement (optional)
       </label>
-      <textarea
+      <OptionalWorkflowInput as="textarea"
         rows={3}
         value={areasForImprovement}
         onChange={(e) => setAreas(e.target.value)}

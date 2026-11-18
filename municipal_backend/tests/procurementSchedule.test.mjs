@@ -13,11 +13,26 @@ test('optional pre-bid has no required schedule; applicable conferences need dat
 });
 
 test('all milestones are validated even across missing optional dates and publication overlaps a pre-bid', () => {
-  assert.ok(scheduleValidationError({ ...base, openingDate: base.closingDate }));
+  assert.equal(scheduleValidationError({ ...base, openingDate: base.closingDate }), null);
+  assert.match(scheduleValidationError({ ...base, openingDate: '2031-06-20T00:59:00Z' }), /before the bid submission deadline/);
   assert.throws(() => normalizeSchedule({ ...base, evaluationEndAt: '2031-06-19T00:00:00Z' }), /Evaluation end cannot occur before bid opening/);
   assert.throws(() => normalizeSchedule({ ...base, expectedAwardAt: 'invalid' }), /valid date/);
   assert.throws(() => normalizeSchedule({ ...base, publicationStartAt: '2031-06-12T00:00:00Z', prebidRequired: true, prebidAt: '2031-06-10T01:00:00Z', prebidVenue: 'Hall' }), /before publication starts/);
   assert.equal(scheduleValidationError({ ...base, publicationStartAt: '2031-06-01', publicationEndAt: '2031-06-19', prebidRequired: true, prebidAt: '2031-06-10', prebidVenue: 'Hall' }), null);
+});
+
+test('applicable milestones can share one calendar day with optional dates omitted', () => {
+  const schedule = normalizeSchedule({
+    ...base,
+    prebidVenue: 'N/A',
+    evaluationStartAt: '2031-06-20T03:15:00Z',
+    postQualificationStartAt: '2031-06-20T05:40:00Z',
+    expectedAwardAt: '2031-06-20T07:10:00Z',
+  });
+  assert.equal(schedule.prebidAt, null);
+  assert.equal(schedule.prebidVenue, null);
+  assert.equal(schedule.evaluationEndAt, null);
+  assert.equal(scheduleValidationError(schedule), null);
 });
 
 test('official sequence cannot be reopened, backdated to completed stages, or overwritten after completion', () => {

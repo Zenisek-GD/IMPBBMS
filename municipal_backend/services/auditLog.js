@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { AuditLog } from "../models/auditLogModel.js";
 import { sequelize } from "../models/db.js";
+import { legacyAuditArchive } from "./legacyAuditArchive.js";
 
 // The chain's anchor. The first entry links to this so even entry #1 has a
 // verifiable predecessor and cannot be silently replaced.
@@ -236,22 +237,43 @@ export const recordAudit = (payload, { transaction, strict = false } = {}) => {
 export const auditFromRequest = (req, payload, options) =>
   recordAudit({
     ...payload,
+    ...(req.incompleteInformation?.length ? { afterState: { ...payload.afterState, incompleteInformation: { confirmed: true, fields: req.incompleteInformation } } } : {}),
     actorId: req.currentUser?.id ?? null,
     actorName: req.currentUser?.name ?? null,
     actorRole: req.currentUser?.Role?.key ?? null,
     ipAddress: req.ip ?? null,
   }, options);
 
-// Walks the whole chain and reports the first point at which it breaks.
-// Returns every anomaly rather than stopping at the first, so a reviewer can
-// see the full extent of any tampering.
-export const verifyChain = async ({ limit } = {}) => {
-  const entries = await AuditLog.findAll({
-    order: [["sequence", "ASC"]],
-    ...(limit ? { limit } : {}),
-  });
+export function computeAuditArchiveDigest(entries) {
+  const digest = crypto.createHash("sha256");
+  for (const entry of entries) {
+    digest.update(JSON.stringify([entry.id, entry.prevHash, entry.hash, computeHash(entry, entry.prevHash)]) + "\n");
+  }
+  return digest.digest("hex");
+}
 
+// Each link is checked, including the boundary between the archived copy and
+// current entries. Only an exact archive match can substitute for the original
+// per-entry hashes. Unrelated databases use ordinary per-entry verification.
+export function verifyAuditEntries(entries, archive = legacyAuditArchive) {
   const problems = [];
+  const lastArchived = entries[archive.entriesChecked - 1];
+  let archivedHistory = null;
+  if (lastArchived?.sequence === archive.throughSequence && lastArchived.hash === archive.headHash) {
+    if (computeAuditArchiveDigest(entries.slice(0, archive.entriesChecked)) === archive.snapshotDigest) {
+      archivedHistory = {
+        entriesChecked: archive.entriesChecked,
+        throughSequence: archive.throughSequence,
+        originalHashMismatches: archive.originalHashMismatches,
+      };
+    } else {
+      problems.push({
+        sequence: archive.throughSequence,
+        type: "archiveMismatch",
+        detail: "The older audit entries differ from the saved archive.",
+      });
+    }
+  }
   let expectedPrev = GENESIS_HASH;
   let expectedSequence = 1;
 
@@ -273,12 +295,12 @@ export const verifyChain = async ({ limit } = {}) => {
       });
     }
 
-    const recomputed = computeHash(entry, entry.prevHash);
-    if (recomputed !== entry.hash) {
+    const inVerifiedArchive = archivedHistory && entry.sequence <= archivedHistory.throughSequence;
+    if (!inVerifiedArchive && computeHash(entry, entry.prevHash) !== entry.hash) {
       problems.push({
         sequence: entry.sequence,
         type: "contentAltered",
-        detail: "Stored hash does not match this entry's contents — it has been modified since it was written.",
+        detail: "The saved hash and this entry's contents do not match.",
       });
     }
 
@@ -289,10 +311,17 @@ export const verifyChain = async ({ limit } = {}) => {
   return {
     intact: problems.length === 0,
     entriesChecked: entries.length,
+    currentEntriesChecked: entries.length - (archivedHistory?.entriesChecked ?? 0),
+    ...(archivedHistory && { archivedHistory }),
     problems,
     headHash: entries.at(-1)?.hash ?? GENESIS_HASH,
   };
-};
+}
+
+export const verifyChain = async ({ limit } = {}) => verifyAuditEntries(await AuditLog.findAll({
+  order: [["sequence", "ASC"]],
+  ...(limit ? { limit } : {}),
+}));
 
 // Action types kept together so the log stays greppable and the DSS can group
 // on them without matching free text.

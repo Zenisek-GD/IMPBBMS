@@ -18,6 +18,6 @@ export const synchronizeSchedule = async (rfq, { transaction } = {}) => {
   // These are compatibility projections for existing public readers. Mutation
   // and projections commit together; withdrawn notices retain their old dates.
   await Announcement.update(announcementSchedule(rfq), { where: { rfqId: rfq.id, status: { [Op.ne]: 'archived' } }, transaction });
-  await LiveConferenceSession.update(rfq.prebidRequired ? { scheduledAt: rfq.prebidAt } : { status: 'cancelled' }, { where: { rfqId: rfq.id, purpose: 'prebid', status: 'scheduled' }, transaction });
-  await LiveConferenceSession.update({ scheduledAt: rfq.openingDate }, { where: { rfqId: rfq.id, purpose: 'opening', status: 'scheduled' }, transaction });
+  await LiveConferenceSession.update(rfq.prebidRequired && rfq.prebidAt ? { scheduledAt: rfq.prebidAt } : { status: 'cancelled' }, { where: { rfqId: rfq.id, purpose: 'prebid', status: 'scheduled' }, transaction });
+  await LiveConferenceSession.update(rfq.openingDate ? { scheduledAt: rfq.openingDate } : { status: 'cancelled' }, { where: { rfqId: rfq.id, purpose: 'opening', status: 'scheduled' }, transaction });
 };

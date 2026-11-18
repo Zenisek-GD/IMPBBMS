@@ -108,8 +108,8 @@ test("scoped recovery preserves provenance, relationships, boundaries and idempo
     await assert.rejects(call(appApi.transitionAppEntry, { id: app.id }, { action: "submit" }), /held at Item Description/);
     await assert.rejects(call(prApi.transitionPr, { id: pr.id }, { action: "submit" }), /held at Item Description/);
     await assert.rejects(call(prApi.createPr, {}, { appEntryId: app.id, dateRequired: "2026-12-31", lineItems: [{ description: "New item", quantity: 1, unitCost: 1 }] }), /held at Item Description/);
-    await assert.rejects(m.PrHeader.create({ prNumber: "PR-QA-INVALID", dateRequired: "2026-12-31", totalAmount: null }), /only on a held/);
-    await assert.rejects(m.PrLineItem.create({ description: "Incomplete ordinary item", quantity: null, unitCost: null, lineTotal: null }), /only on a held/);
+    await assert.rejects(m.PrHeader.create({ prNumber: "PR-QA-INVALID", dateRequired: "2026-12-31", totalAmount: null }), /linked to a procurement plan/);
+    await assert.rejects(m.PrLineItem.create({ description: "Incomplete ordinary item", quantity: null, unitCost: null, lineTotal: null }), /linked to a procurement plan/);
     assert.equal((await verifyChain()).intact, true);
   });
 });

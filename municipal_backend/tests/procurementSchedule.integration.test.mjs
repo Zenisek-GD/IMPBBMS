@@ -94,7 +94,7 @@ test('schedule approval, immutable publication, amendment review, propagation an
 
   await t.test('approval revalidates sequence and applies every projection atomically while retaining old dates', async () => {
     const conference = await m.LiveConferenceSession.create({ rfqId: rfq.id, title: 'Pre-bid', purpose: 'prebid', scheduledAt: rfq.prebidAt, status: 'scheduled' });
-    await assert.rejects(call(schedule.requestScheduleAmendment, secretary, { id: rfq.id }, { schedule: { openingDate: rfq.closingDate }, reason: 'Move opening', supportingDocumentId: doc.id }), /not after the bid submission/);
+    await assert.rejects(call(schedule.requestScheduleAmendment, secretary, { id: rfq.id }, { schedule: { openingDate: new Date(new Date(rfq.closingDate).getTime() - 60000) }, reason: 'Move opening', supportingDocumentId: doc.id }), /before the bid submission/);
     await assert.rejects(call(schedule.requestScheduleAmendment, secretary, { id: rfq.id }, { schedule: { openingDate: '2031-06-21T03:00:00Z' }, reason: 'Move opening' }), /supporting document/);
     const request = await call(schedule.requestScheduleAmendment, secretary, { id: rfq.id }, { schedule: { closingDate: '2031-06-22T01:00:00Z', openingDate: '2031-06-22T03:00:00Z', prebidAt: '2031-06-11T01:00:00Z' }, reason: 'Official schedule amendment', supportingDocumentId: doc.id });
     const amendmentId = request.body.id;

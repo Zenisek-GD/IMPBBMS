@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useActionQueue } from '../../context/useActionQueue'
 import FiscalYearFilter from '../../components/ui/FiscalYearFilter'
 import { useEffect, useRef, useState } from 'react'
@@ -24,6 +25,7 @@ import DashboardPage from '../../components/ui/DashboardPage'
 import PageHeader from '../../components/ui/PageHeader'
 import Card from '../../components/ui/Card'
 import RecoveryProvenance from '../../components/ui/RecoveryProvenance'
+import ProcurementEvidence from './ProcurementEvidence'
 import Badge from '../../components/ui/Badge'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
@@ -58,20 +60,18 @@ const entrySchema = z
     projectTitle: z.string().trim().min(1, 'Project title is required'),
     description: z.string().optional(),
     categoryDetails: z.string().max(255, 'Category details must be at most 255 characters.').optional(),
-    category: z.enum(['goods', 'infrastructure', 'consulting'], { message: 'Select a procurement category.' }),
-    aipEntryId: z.coerce.number({ message: 'An investment program project is required' }).positive(
-      'Select the investment program project this APP line will procure.'
-    ),
+    category: z.enum(['goods', 'infrastructure', 'consulting', '']),
+    aipEntryId: z.union([z.coerce.number().positive(), z.literal('')]),
     appropriationId: z.union([
       z.coerce.number().positive('Select the appropriation line this plan is charged against.'),
       z.literal(''),
     ]),
-    abc: z.coerce.number({ message: 'ABC is required' }).positive('ABC must be greater than 0.'),
+    abc: z.union([z.coerce.number().positive('ABC must be greater than 0.'), z.literal('')]),
     unit: z.string().optional(),
     quantity: z.union([z.coerce.number().int().positive(), z.literal('')]).optional(),
     procurementMode: z.string(),
-    targetStartQuarter: z.enum(QUARTERS),
-    targetCompletionQuarter: z.enum(QUARTERS),
+    targetStartQuarter: z.enum([...QUARTERS, '']),
+    targetCompletionQuarter: z.enum([...QUARTERS, '']),
     fundSource: z.string().optional(),
     accountCode: z.string().optional(),
     mfoId: z.string().optional(),
@@ -81,29 +81,14 @@ const entrySchema = z
     justificationStatus: z.enum(['provided', 'notApplicable', '']).nullable().optional(),
   })
   .superRefine((values, ctx) => {
-    if (values.planCycle === 'final' && !values.appropriationId) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['appropriationId'],
-        message: 'Select an enacted appropriation line for a final APP entry.',
-      })
-    }
-    if (QUARTERS.indexOf(values.targetStartQuarter) > QUARTERS.indexOf(values.targetCompletionQuarter)) {
+    if (values.targetStartQuarter && values.targetCompletionQuarter && QUARTERS.indexOf(values.targetStartQuarter) > QUARTERS.indexOf(values.targetCompletionQuarter)) {
       ctx.addIssue({
         code: 'custom',
         path: ['targetCompletionQuarter'],
         message: 'Start quarter must not be after the completion quarter.',
       })
     }
-    if (values.procurementMode !== 'competitiveBidding' && !values.justification?.trim()) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['justification'],
-        message: 'A justification is required for alternative procurement modes.',
-      })
-    }
-    if (values.justificationStatus === 'notApplicable' && values.procurementMode !== 'competitiveBidding') ctx.addIssue({ code: 'custom', path: ['justificationStatus'], message: 'Alternative procurement modes require a justification.' })
-    if (values.justificationStatus === 'provided' && !values.justification?.trim()) ctx.addIssue({ code: 'custom', path: ['justification'], message: 'Enter the explanation or select Not Applicable when public bidding applies.' })
+    if (values.justificationStatus === 'notApplicable' && values.procurementMode !== 'competitiveBidding') ctx.addIssue({ code: 'custom', path: ['justificationStatus'], message: 'Select Competitive Bidding to record this response.' })
   })
 
 const peso = (value) =>
@@ -276,7 +261,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" disabled={isSubmitting || linkedRecordsLoading || linkedRecordsError} onClick={handleSubmit(submit)}>
+          <Button type="submit" disabled={isSubmitting || linkedRecordsLoading} onClick={handleSubmit(submit)}>
             {isSubmitting ? 'Saving…' : 'Save draft'}
           </Button>
         </>
@@ -437,7 +422,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
 
           <div>
             <label className="mb-1 block text-xs font-medium tracking-[0.02em] text-text-secondary">Description</label>
-            <textarea
+            <OptionalWorkflowInput as="textarea"
               rows={2}
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
               {...register('description')}
@@ -453,7 +438,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
               className="w-full rounded border border-border-muted bg-surface px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
               {...register('category')}
             >
-              <option value="">Select a category</option>
+              <option value="">None / N/A (draft)</option>
               {PROCUREMENT_CATEGORIES.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
@@ -461,18 +446,18 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
             {errors.category && <p className="mt-1 text-xs text-danger">{errors.category.message}</p>}
             <p className="mt-1.5 text-xs text-text-faint">Used to calculate the suggested procurement mode.</p>
           </div>
-          <FormField label="Category details (optional)" maxLength={255} error={errors.categoryDetails?.message} registration={register('categoryDetails')} hint="Describe the type of goods, infrastructure or consulting service." />
+          <FormField allowUnavailable label="Category details (optional)" maxLength={255} error={errors.categoryDetails?.message} registration={register('categoryDetails')} hint="Describe the type of goods, infrastructure or consulting service." />
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField
-              label="ABC (₱)"
+              allowUnavailable label="ABC (₱)"
               type="number"
               step="0.01"
               error={errors.abc?.message}
               registration={register('abc')}
             />
-            <FormField label="Unit" registration={register('unit')} placeholder="e.g. units" />
-            <FormField label="Quantity" type="number" registration={register('quantity')} />
+            <FormField allowUnavailable label="Unit" registration={register('unit')} placeholder="e.g. units" />
+            <FormField allowUnavailable label="Quantity" type="number" registration={register('quantity')} />
           </div>
 
           {suggestion && (
@@ -506,6 +491,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
               className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:border-navy focus:outline-none"
               {...register('procurementMode', { onChange: (event) => { if (event.target.value !== 'competitiveBidding') setValue('justificationStatus', 'provided') } })}
             >
+              <option value="">None / N/A (draft)</option>
               {PROCUREMENT_MODES.map((mode) => (
                 <option key={mode.key} value={mode.key}>
                   {mode.label}
@@ -549,6 +535,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
                 className="w-full rounded border border-border-muted px-4 py-2 text-sm text-navy focus:outline-none"
                 {...register('targetStartQuarter')}
               >
+                <option value="">None / N/A (draft)</option>
                 {QUARTERS.map((q) => (
                   <option key={q} value={q}>
                     {q}
@@ -566,6 +553,7 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
                 }`}
                 {...register('targetCompletionQuarter')}
               >
+                <option value="">None / N/A (draft)</option>
                 {QUARTERS.map((q) => (
                   <option key={q} value={q}>
                     {q}
@@ -579,13 +567,13 @@ function EntryFormModal({ title, defaultValues, onSubmit, onClose }) {
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <FormField label="Fund source" registration={register('fundSource')} />
-            <FormField label="Account code" registration={register('accountCode')} />
+            <FormField allowUnavailable label="Fund source" registration={register('fundSource')} />
+            <FormField allowUnavailable label="Account code" registration={register('accountCode')} />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <FormField label="MFO ID" registration={register('mfoId')} />
-            <FormField label="PAP code" registration={register('papCode')} />
-            <FormField label="UACS code" registration={register('uacsCode')} />
+            <FormField allowUnavailable label="MFO ID" registration={register('mfoId')} />
+            <FormField allowUnavailable label="PAP code" registration={register('papCode')} />
+            <FormField allowUnavailable label="UACS code" registration={register('uacsCode')} />
           </div>
         </div>
       </LargeFormPage.Section>
@@ -698,7 +686,8 @@ export default function AppEntries() {
     return (
       <DashboardPage>
         <PageHeader title={recoveryDetail.projectTitle} subtitle="Procurement plan details" actions={<Button variant="secondary" onClick={() => setRecoveryDetail(null)}>Back to procurement plans</Button>} />
-        <Card bodyClassName="p-5"><RecoveryProvenance recovery={recoveryDetail.recoveryImport} /></Card>
+        {permissions.has('app.view') && <ProcurementEvidence entryId={recoveryDetail.id} canEdit={canCreate} sourceFields={recoveryDetail.recoveryImport?.reviewedForm?.fields ?? recoveryDetail.recoveryImport?.sourceFields} />}
+        {recoveryDetail.recoveryImport && <Card bodyClassName="p-5"><RecoveryProvenance recovery={recoveryDetail.recoveryImport} /></Card>}
       </DashboardPage>
     )
   }
@@ -716,15 +705,15 @@ export default function AppEntries() {
             projectTitle: '',
             description: '',
             categoryDetails: '',
-            category: 'goods',
+            category: '',
             aipEntryId: '',
             appropriationId: '',
             abc: '',
             unit: '',
             quantity: '',
-            procurementMode: 'competitiveBidding',
-            targetStartQuarter: 'Q1',
-            targetCompletionQuarter: 'Q4',
+            procurementMode: '',
+            targetStartQuarter: '',
+            targetCompletionQuarter: '',
             fundSource: '',
             accountCode: '',
             mfoId: '',
@@ -754,6 +743,9 @@ export default function AppEntries() {
             appropriationId: editing.appropriationId ?? '',
             description: editing.description ?? '',
             category: normalizeCategory(editing.category),
+            abc: editing.abc ?? '',
+            targetStartQuarter: editing.targetStartQuarter ?? '',
+            targetCompletionQuarter: editing.targetCompletionQuarter ?? '',
             unit: editing.unit ?? '',
             quantity: editing.quantity ?? '',
             fundSource: editing.fundSource ?? '',
@@ -851,18 +843,21 @@ export default function AppEntries() {
                         <p className="mt-1">{PLAN_STAGE_LABELS[entry.planStage] ?? entry.planStage ?? 'PPMP'}</p>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-navy">{entry.implementingUnitCode ?? '—'}</td>
-                      <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">{peso(entry.abc)}</td>
-                      <td className="px-4 py-3 text-[13px] text-text-secondary">{modeLabel(entry.procurementMode)}</td>
+                      <td className="px-4 py-3 text-[13px] whitespace-nowrap text-navy">{entry.abc == null ? 'Pending' : peso(entry.abc)}</td>
+                      <td className="px-4 py-3 text-[13px] text-text-secondary">{modeLabel(entry.procurementMode) ?? 'Pending'}</td>
                       <td className="px-4 py-3 text-[13px] whitespace-nowrap text-text-secondary">
-                        {entry.targetStartQuarter} → {entry.targetCompletionQuarter}
+                        {entry.targetStartQuarter ?? 'Pending'} → {entry.targetCompletionQuarter ?? 'Pending'}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge tone={APP_STATUS_TONES[entry.status]}>{APP_STATUS_LABELS[entry.status]}</Badge>
-                        <NextInline next={appNext(entry)} />
+                        {entry.fiscalYear === 2025 && entry.recoveryImport?.historicalAward
+                          ? <><Badge tone="info">Awarded</Badge><p className="mt-1 text-xs text-text-secondary">Client reported</p></>
+                          : <><Badge tone={APP_STATUS_TONES[entry.status]}>{APP_STATUS_LABELS[entry.status]}</Badge>
+                            {entry.recoveryImport?.sourceStatus && <p className="mt-1 text-xs text-text-secondary">Client reported: {entry.recoveryImport.sourceStatus}</p>}
+                            <NextInline next={appNext(entry)} /></>}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex w-max items-center gap-2">
-                          {entry.recoveryImport && <Button size="table" variant="secondary" onClick={() => setRecoveryDetail(entry)}>View details</Button>}
+                          {(permissions.has('app.view') || entry.recoveryImport) && <Button size="table" variant="secondary" onClick={() => setRecoveryDetail(entry)}>View details</Button>}
                           {entry.editable && canCreate && (
                             <Button
                               size="table"

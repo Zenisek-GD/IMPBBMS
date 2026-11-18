@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import mysql from "mysql2/promise";
+import { DataTypes } from "sequelize";
+import { prepareWorkflowInformation } from "../services/workflowInformation.js";
 
 // All fixtures are synthetic. No client form values or municipal records are
 // imported. The uniquely named schema is the only schema this test mutates.
@@ -21,6 +23,8 @@ test("procurement information persists through planning, requisition, bidding an
   const evaluation = await import("../controllers/evaluationController.js");
   const twgApi = await import("../controllers/twgController.js");
   const schedules = await import("../controllers/procurementScheduleController.js");
+  const contracts = await import("../controllers/contractController.js");
+  const payments = await import("../controllers/paymentController.js");
   const vendorApi = await import("../controllers/vendorController.js");
   const documentApi = await import("../controllers/documentController.js");
   const { OtpChallenge } = await import("../models/otpChallengeModel.js");
@@ -40,7 +44,16 @@ test("procurement information persists through planning, requisition, bidding an
   const attendance = { attendingMemberIds: [chair.id, vice.id, member.id], presidingMemberId: chair.id };
   const call = async (handler, actor, params = {}, body = {}, extra = {}) => {
     let output, status = 200;
-    await handler({ currentUser: actor, permissions: new Set(permissions), params, body, query: {}, ip: "127.0.0.1", ...extra }, { status(code) { status = code; return this; }, json(value) { output = value; return this; } });
+    const routes = new Map([
+      [appApi.createAppEntry, ['/app-entries', 'POST']], [appApi.updateAppEntry, [`/app-entries/${params.id}`, 'PATCH']],
+      [prApi.createPr, ['/purchase-requisitions', 'POST']], [prApi.updatePr, [`/purchase-requisitions/${params.id}`, 'PATCH']],
+      [contracts.createContract, ['/contracts', 'POST']], [contracts.updateContractDraft, [`/contracts/${params.id}`, 'PATCH']],
+      [contracts.reportDelivery, [`/contracts/${params.id}/deliveries`, 'POST']],
+      [payments.submitInvoice, ['/finance/invoices', 'POST']], [payments.releasePayment, [`/finance/payments/${params.paymentId}/release`, 'POST']],
+    ]);
+    const route = routes.get(handler);
+    const information = route ? prepareWorkflowInformation(...route, body) : null;
+    await handler({ currentUser: actor, permissions: new Set(permissions), params, body: information?.body ?? body, incompleteInformation: information?.missing, query: {}, ip: "127.0.0.1", ...extra }, { status(code) { status = code; return this; }, json(value) { output = value; return this; } });
     if (status >= 400) throw Object.assign(new Error(output?.message ?? "Request rejected"), { status });
     return output;
   };
@@ -57,24 +70,73 @@ test("procurement information persists through planning, requisition, bidding an
     const item = await m.PrLineItem.create({ prHeaderId: legacy.id, description: "Legacy test item", quantity: 1, unitCost: 10, lineTotal: 10, hasUsefulLifeOverOneYear: false });
     const qi = m.sequelize.getQueryInterface();
     await qi.removeColumn(m.AppEntry.getTableName(), "categoryDetails");
+    await m.sequelize.models.AppEvidenceWorksheet.drop();
+    await qi.changeColumn(m.PrHeader.getTableName(), "dateRequired", { ...m.PrHeader.getAttributes().dateRequired, allowNull: false });
+    await qi.changeColumn(m.Obligation.getTableName(), "particulars", { type: DataTypes.STRING, allowNull: true });
     await qi.changeColumn(m.PrHeader.getTableName(), "isEmergency", { ...m.PrHeader.getAttributes().isEmergency, allowNull: false });
     await qi.changeColumn(m.PrLineItem.getTableName(), "hasUsefulLifeOverOneYear", { ...m.PrLineItem.getAttributes().hasUsefulLifeOverOneYear, allowNull: false });
     const result = await migrateProcurementInformation();
-    assert.ok(result.added.includes("appentries.categoryDetails")); assert.equal(result.changed.length, 2);
+    assert.ok(result.added.includes("appentries.categoryDetails"));
+    assert.ok(result.added.includes(m.sequelize.models.AppEvidenceWorksheet.getTableName()));
+    assert.ok(result.changed.includes("prheaders.dateRequired"));
+    assert.ok(result.changed.includes(`${m.Obligation.getTableName()}.particulars`));
+    assert.equal(result.changed.length, 4);
     assert.equal((await legacy.reload()).isEmergency, false); assert.equal((await item.reload()).hasUsefulLifeOverOneYear, false);
     assert.deepEqual(await migrateProcurementInformation(), { added: [], changed: [] });
   });
   await t.test("public-bidding Not Applicable saves without sample defaults and alternative modes require real justification", async () => {
     const payload = { projectTitle: "Test procurement project", category: "goods", categoryDetails: "Test equipment category", abc: 1000, fiscalYear: year, targetStartQuarter: "Q1", targetCompletionQuarter: "Q4", implementingUnitId: office.id, aipEntryId: aip.id, appropriationId: funding.id, procurementMode: mode.key, justificationStatus: "notApplicable", fundSource: "Test earmarked funding", papCode: "QA-PAP", accountCode: "QA-ACCOUNT", mfoId: "QA-MFO" };
     await assert.rejects(call(appApi.createAppEntry, requester, {}, { ...payload, procurementMode: "directAcquisition" }), /cannot be marked/);
-    app = await call(appApi.createAppEntry, requester, {}, payload);
+    app = await call(appApi.createAppEntry, requester, {}, { projectTitle: payload.projectTitle, fiscalYear: year, abc: "Pending", targetStartQuarter: "Not Available" });
+    assert.equal(app.status, "draft"); assert.equal(app.abc, null); assert.equal(app.aipEntryId, null);
+    await assert.rejects(call(appApi.transitionAppEntry, requester, { id: app.id }, { action: "submit" }), /category/);
+    app = await call(appApi.updateAppEntry, requester, { id: app.id }, payload);
     assert.equal(app.justificationStatus, "notApplicable"); assert.equal(app.expectedOutput, "Configured test output");
     for (const [action, actor] of [["submit", requester], ["consolidate", chair], ["certify", budget], ["approve", hope]]) await call(appApi.transitionAppEntry, actor, { id: app.id }, { action, ...attendance });
     assert.equal((await m.AppEntry.findByPk(app.id)).status, "locked");
     await m.ProjectAllocation.create({ appEntryId: app.id, appropriationId: funding.id, fiscalYear: year, amount: 1000, status: "active" });
   });
+  await t.test("historical evidence saves across stages without changing a held record or its workflow", async () => {
+    const recorded = await m.AppEntry.create({ projectTitle: "Reported historical project", implementingUnitId: office.id, fiscalYear: 2025,
+      recoveryKey: "form-2025:GSO-2025-001",
+      recoveryImport: { hold: true, sourceStatus: "Completed / Awarded", supplierMismatch: true, historicalAward: { id: 1 } } });
+    const originalUpdatedAt = (await recorded.reload()).updatedAt.getTime();
+    const scoped = { permissions: new Set(["app.create", "app.view"]) };
+    const initial = await call(appApi.getAppEvidence, requester, { id: recorded.id }, {}, scoped);
+    assert.equal(initial.sourceStatus, "Completed / Awarded"); assert.equal(initial.supplierMismatch, true);
+    assert.equal(initial.acceptsClientConfirmation, true);
+    const foreignRequester = { ...requester.get(), departmentId: office.id + 1 };
+    await assert.rejects(call(appApi.getAppEvidence, foreignRequester, { id: recorded.id }, {}, scoped), { status: 403 });
+    const setEvidence = (stage, body, actor = requester) => call(appApi.updateAppEvidence, actor, { id: recorded.id, stage }, body, scoped);
+    await assert.rejects(setEvidence("award", { status: "N/A" }), /Pending or Not Available/);
+    await assert.rejects(setEvidence("award", { status: "Pending" }, foreignRequester), { status: 403 });
+    await setEvidence("reported-status", { value: "Awarded / For implementation", source: "Client form, status field" });
+    for (const { key } of initial.stages) await setEvidence(key, { status: key === "contacts" ? "N/A" : "Not Available", note: "Confirm against original records", statusOverride: "locked" });
+    const persisted = await call(appApi.getAppEvidence, requester, { id: recorded.id }, {}, scoped);
+    assert.equal(persisted.entries.contacts.status, "Not Applicable");
+    assert.equal(persisted.entries["reported-status"].value, "Awarded / For implementation");
+    assert.equal(persisted.entries.completion.status, "Not Available");
+    assert.equal(persisted.officialStatus, "draft");
+    await assert.rejects(setEvidence("planning", { status: "Client-confirmed", note: "Appropriation reference: QA-ORD" }), /cite the client's confirmation/);
+    const beforeConfirmation = Date.now();
+    const confirmed = await setEvidence("planning", { status: "Client-confirmed", note: "Appropriation reference: QA-ORD", source: "Synthetic client confirmation", recordedById: 0 });
+    assert.equal(confirmed.entries.planning.recordedById, requester.id);
+    assert.ok(new Date(confirmed.entries.planning.recordedAt).getTime() >= beforeConfirmation);
+    assert.equal(confirmed.entries.planning.source, "Synthetic client confirmation");
+    assert.deepEqual((await setEvidence("planning", { status: "Client-confirmed", note: "Appropriation reference: QA-ORD", source: "Synthetic client confirmation" })).entries.planning, confirmed.entries.planning);
+    assert.equal((await recorded.reload()).updatedAt.getTime(), originalUpdatedAt);
+    assert.deepEqual(recorded.recoveryImport, { hold: true, sourceStatus: "Completed / Awarded", supplierMismatch: true, historicalAward: { id: 1 } });
+    assert.equal(await m.AuditLog.count({ where: { entityId: recorded.id, actionType: "app.evidenceUpdated" } }), initial.stages.length + 2);
+    await assert.rejects(call(appApi.transitionAppEntry, requester, { id: recorded.id }, { action: "submit" }), /documented through award/);
+  });
   await t.test("blank answers remain unanswered drafts; explicit No and Not Applicable persist through approvals", async () => {
-    pr = await call(prApi.createPr, requester, {}, { appEntryId: app.id, purpose: "Test office operations", dateRequired: requiredDate, lineItems: [{ description: "Test equipment", unit: "piece", quantity: 1, unitCost: 1000, technicalSpecifications: "Test specification with <text> & symbols" }] });
+    const purpose = "Test office operations and the required replacement of aging inventory. ".repeat(5).trim();
+    pr = await call(prApi.createPr, requester, {}, { appEntryId: app.id, purpose, dateRequired: "Pending", lineItems: [{ description: "Test equipment", unitCost: "Not Available" }] });
+    assert.equal(pr.dateRequired, null); assert.equal(pr.totalAmount, null); assert.equal(pr.lineItems[0].lineTotal, null);
+    await assert.rejects(call(prApi.transitionPr, requester, { id: pr.id }, { action: "submit" }), /valid date required/);
+    pr = await call(prApi.updatePr, requester, { id: pr.id }, { dateRequired: requiredDate, isEmergency: false });
+    await assert.rejects(call(prApi.transitionPr, requester, { id: pr.id }, { action: "submit" }), /positive quantity and unit cost/);
+    pr = await call(prApi.updatePr, requester, { id: pr.id }, { isEmergency: null, lineItems: [{ description: "Test equipment", unit: "piece", quantity: 1, unitCost: 1000, technicalSpecifications: "Test specification with <text> & symbols" }] });
     assert.equal(pr.isEmergency, null); assert.equal(pr.lineItems[0].hasUsefulLifeOverOneYear, null);
     await assert.rejects(call(prApi.transitionPr, requester, { id: pr.id }, { action: "submit" }), /Emergency purchase/);
     await assert.rejects(call(prApi.updatePr, requester, { id: pr.id }, { isEmergency: true, justificationStatus: "notApplicable" }), /cannot be marked/);
@@ -91,9 +153,17 @@ test("procurement information persists through planning, requisition, bidding an
     assert.match(document.context.pr_line_items_table, /&lt;text&gt; &amp; symbols/); assert.doesNotMatch(document.context.pr_line_items_table, /<text>/);
   });
   await t.test("solicitation details and optional pre-bid No survive saving, reading and publication", async () => {
-    rfq = await call(bidding.createRfq, secretariat, {}, { prHeaderId: pr.id, title: "Test solicitation", category: "goods", closingDate: new Date(Date.now() + 30 * 864e5).toISOString(), openingDate: new Date(Date.now() + 30 * 864e5 + 1800000).toISOString(), prebidRequired: false, openingVenue: "Test meeting room", procurementContactPerson: "Test contact", procurementContactEmail: "contact@example.test", requiredSupplierDocuments: "Applicable test bidding documents" });
+    await assert.rejects(call(bidding.createRfq, secretariat, {}, { prHeaderId: pr.id, category: "consulting" }), /match the approved procurement plan/);
+    rfq = await call(bidding.createRfq, secretariat, {}, { prHeaderId: pr.id, title: "Test solicitation", closingDate: "Pending", openingVenue: "Test meeting room", procurementContactPerson: "Test contact", procurementContactEmail: "contact@example.test", requiredSupplierDocuments: "Applicable test bidding documents" });
+    assert.equal(rfq.category, "goods"); assert.equal(rfq.status, "draft"); assert.equal(rfq.closingDate, null); assert.equal(rfq.openingDate, null);
+    await assert.rejects(call(schedules.approveSchedule, chair, { id: rfq.id }), /deadline and bid opening/);
+    await assert.rejects(call(bidding.publishRfq, secretariat, { id: rfq.id }), /deadline and bid opening/);
+    const scheduledDeadline = new Date(Date.now() + 30 * 864e5).toISOString();
+    await call(bidding.updateRfqSchedule, secretariat, { id: rfq.id }, { closingDate: scheduledDeadline, openingDate: scheduledDeadline, prebidRequired: false });
     assert.equal(rfq.prebidRequired, false); assert.equal(rfq.prebidAt, null); assert.match(rfq.technicalSpecifications[0].specifications, /<text>/);
-    await assert.rejects(call(bidding.updateRfqInformation, secretariat, { id: rfq.id }, { procurementContactEmail: "N/A" }), /valid procurement contact email/);
+    await assert.rejects(call(bidding.updateRfqInformation, secretariat, { id: rfq.id }, { procurementContactEmail: "invalid-email" }), /valid procurement contact email/);
+    const blankContact = await call(bidding.updateRfqInformation, secretariat, { id: rfq.id }, { procurementContactEmail: "N/A" });
+    assert.equal(blankContact.procurementContactEmail, null);
     await call(bidding.updateRfqInformation, secretariat, { id: rfq.id }, { openingVenue: "Revised test room" });
     await call(schedules.approveSchedule, chair, { id: rfq.id }, { ...attendance });
     await call(bidding.publishRfq, secretariat, { id: rfq.id });
@@ -101,7 +171,22 @@ test("procurement information persists through planning, requisition, bidding an
     const records = await call(bidding.listRfqs, secretariat, {}, {}, { query: { page: 1, pageSize: 1 } });
     assert.equal(records.rows[0].openingVenue, "Revised test room"); assert.equal(records.total, 1);
     const document = await resolvePlaceholders({ documentType: "invitationToBid", entityId: rfq.id, currentUser: secretariat });
-    assert.equal(document.context.bid_opening_venue, "Revised test room"); assert.notEqual(document.context.bid_opening_datetime, document.context.submission_deadline_datetime);
+    assert.equal(document.context.bid_opening_venue, "Revised test room"); assert.equal(document.context.bid_opening_datetime, document.context.submission_deadline_datetime);
+  });
+  await t.test("paper intake accepts missing contacts and retains the same registration on resubmission", async () => {
+    const paper = { businessName: "Paper intake supplier", contactPerson: "Test representative", contactEmail: "N/A", contactPhone: "Not Available", documents: [{ docType: "philgeps", label: "Test registration document" }] };
+    const recorded = await call(vendorApi.recordCounterSubmission, secretariat, {}, paper);
+    assert.equal(recorded.contactEmail, null);
+    assert.equal(recorded.contactPhone, null);
+    await assert.rejects(call(vendorApi.recordCounterSubmission, secretariat, {}, paper), /already has/);
+    await assert.rejects(call(vendorApi.reviewVendor, chair, { id: recorded.id }, { decision: "verify", ...attendance }), /no email address/);
+    await call(vendorApi.reviewVendor, chair, { id: recorded.id }, { decision: "return", remarks: "Confirm the account email.", ...attendance });
+    const completed = { ...paper, contactEmail: "paper@example.test" };
+    await assert.rejects(call(vendorApi.recordCounterSubmission, secretariat, {}, completed), /returned registration reference/);
+    const resubmitted = await call(vendorApi.recordCounterSubmission, secretariat, {}, { ...completed, returnedReferenceCode: recorded.referenceCode });
+    assert.equal(resubmitted.id, recorded.id);
+    assert.equal(resubmitted.contactEmail, completed.contactEmail);
+    assert.equal(resubmitted.registrationStatus, "submitted");
   });
   await t.test("supplier category persists and signed bid evidence remains sealed before evaluation closes", async () => {
     const recorded = await call(vendorApi.recordCounterSubmission, secretariat, {}, { businessName: "Synthetic supplier", supplierCategory: "Test supplier category", organizationType: "corporation", contactPerson: "Test representative", contactEmail: "vendor@example.test", contactPhone: "", address: "Test address", documents: [{ docType: "philgeps", label: "Test registration document" }], receivedAt: new Date().toISOString().slice(0, 10), receiptConfirmed: true });
@@ -122,7 +207,8 @@ test("procurement information persists through planning, requisition, bidding an
   await t.test("complete compliant evaluation records None and all three post-qualification checks govern award eligibility", async () => {
     // Simulate time passing in this disposable fixture. No application schedule
     // or live deadline is altered, and the actual close/open guards still run.
-    await m.Rfq.update({ closingDate: new Date(Date.now() - 3600000), openingDate: new Date(Date.now() - 1800000) }, { where: { id: rfq.id } });
+    const elapsedDeadline = new Date(Date.now() - 1800000);
+    await m.Rfq.update({ closingDate: elapsedDeadline, openingDate: elapsedDeadline }, { where: { id: rfq.id } });
     await call(bidding.closeRfq, secretariat, { id: rfq.id });
     await call(bidding.openBids, secretariat, { id: rfq.id }, { witnesses: "Test witness" });
     await call(twgApi.declareTwgConflict, twg, { id: rfq.id }, { declared: true });
@@ -156,6 +242,46 @@ test("procurement information persists through planning, requisition, bidding an
     const document = await resolvePlaceholders({ documentType: "noticeOfAward", entityId: award.id, currentUser: secretariat });
     assert.equal(document.context.existing_noa_number, "QA-EXTERNAL-NOA"); assert.ok(document.context.supplier_receipt_date); assert.equal(document.context.supplier_category, "Test supplier category");
     assert.deepEqual(await migrateProcurementInformation(), { added: [], changed: [] });
+    assert.equal((await verifyChain()).intact, true);
+  });
+  await t.test("a saved partial contract completes through security, signatures, delivery and payment", async () => {
+    const drafting = { permissions: new Set(["contract.draft"]) };
+    const signing = { permissions: new Set(["contract.sign"]) };
+    const supplierScope = { permissions: new Set(["delivery.submitInvoice"]) };
+    const inspection = { permissions: new Set(["delivery.report"]) };
+    const draft = await call(contracts.createContract, secretariat, {}, { awardId: award.id, contractDays: "Pending", deliveryDeadline: "Not Available" }, drafting);
+    const params = { id: draft.id };
+    assert.equal(draft.contractDays, null); assert.equal(draft.deliveryDeadline, null); assert.equal(draft.status, "draft");
+    await assert.rejects(call(contracts.issueForSignature, secretariat, params, {}, drafting), /contract period/);
+    await assert.rejects(call(contracts.createContract, secretariat, {}, { awardId: award.id }, drafting), /already has a contract/);
+    const updated = await call(contracts.updateContractDraft, secretariat, params, { contractDays: 30, amount: 1 }, drafting);
+    assert.equal(updated.contractDays, 30); assert.equal(updated.amount, 900);
+    await call(contracts.issueForSignature, secretariat, params, {}, drafting);
+    await assert.rejects(call(contracts.updateContractDraft, secretariat, params, { contractDays: 1 }, drafting), /Only a draft/);
+    await assert.rejects(call(contracts.signContract, hope, params, {}, signing), /performance security/);
+    await assert.rejects(call(contracts.postPerformanceSecurity, secretariat, params, { form: "cash", amount: "Pending" }, drafting), /actually posted/);
+    await assert.rejects(call(contracts.postPerformanceSecurity, requester, params, { form: "cash", amount: 45 }, supplierScope), { status: 403 });
+    await call(contracts.postPerformanceSecurity, supplier, params, { form: "cash", amount: 45 }, supplierScope);
+    await call(contracts.signContract, hope, params, {}, signing);
+    const active = await call(contracts.signContract, supplier, params, {}, supplierScope);
+    assert.equal(active.status, "active");
+    await assert.rejects(call(contracts.reportDelivery, supplier, params, {}, supplierScope), /No Notice to Proceed/);
+    await call(contracts.issueNoticeToProceed, hope, params, {}, signing);
+    const delivery = await call(contracts.reportDelivery, supplier, params, { description: "None", deliveredAt: "N/A" }, supplierScope);
+    const storedDelivery = await m.Delivery.findByPk(delivery.id);
+    assert.equal(storedDelivery.description, null);
+    assert.equal(storedDelivery.deliveredAt, null);
+    const claim = { contractId: draft.id, deliveryId: delivery.id, amount: 900 };
+    await assert.rejects(call(payments.submitInvoice, supplier, {}, claim, supplierScope), /accepted delivery/);
+    await call(contracts.inspectDelivery, head, { deliveryId: delivery.id }, { result: "accepted", acceptedValue: "Not Available" }, inspection);
+    const invoice = await call(payments.submitInvoice, supplier, {}, claim, supplierScope);
+    await call(payments.certifyInvoice, accountant, { id: invoice.id }, { decision: "certify" });
+    const voucher = await m.Payment.findOne({ where: { invoiceId: invoice.id } });
+    await assert.rejects(call(payments.releasePayment, accountant, { paymentId: voucher.id }, { method: "bankTransfer" }), { status: 403 });
+    await call(payments.releasePayment, treasurer, { paymentId: voucher.id }, { method: "bankTransfer", reference: "N/A" });
+    assert.equal((await m.Payment.findByPk(voucher.id)).reference, null);
+    assert.equal((await m.Contract.findByPk(draft.id)).status, "completed");
+    assert.equal((await m.Invoice.findByPk(invoice.id)).status, "paid");
     assert.equal((await verifyChain()).intact, true);
   });
 });

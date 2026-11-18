@@ -231,8 +231,8 @@ const readBody = (payload, { partial = false } = {}) => {
   // held after the deadline helps nobody. Caught here so the officer gets a
   // sentence rather than publishing a schedule that cannot happen.
   const deadlineAt = patch.submissionDeadline ?? null;
-  if (deadlineAt && patch.bidOpeningAt && patch.bidOpeningAt <= deadlineAt) {
-    errors.bidOpeningAt = "Bid opening must be scheduled after the bid submission deadline.";
+  if (deadlineAt && patch.bidOpeningAt && patch.bidOpeningAt < deadlineAt) {
+    errors.bidOpeningAt = "Bid opening cannot be scheduled before the bid submission deadline.";
   }
   if (deadlineAt && patch.prebidAt && patch.prebidAt > deadlineAt) {
     errors.prebidAt = "The pre-bid conference must fall before the submission deadline.";

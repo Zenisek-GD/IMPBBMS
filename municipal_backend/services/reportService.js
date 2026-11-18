@@ -14,6 +14,7 @@ import { BacResolution } from "../models/bacResolutionModel.js";
 import { TwgAssessment } from "../models/twgModel.js";
 import { ProcurementAttempt, NegotiatedReview } from "../models/procurementAttemptModel.js";
 import { bidDisclosure, planScope, anyPermission } from "./reportPolicy.js";
+import { archivedHistoricalIds, FY2025_AWARD_KEYS, historicalSourceValues, isFy2025HistoricalAward } from "./historicalAwards.js";
 
 const iso = (value) => value ? new Date(value).toISOString() : null;
 const yearOf = (value) => value ? Number(new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 4)) : null;
@@ -54,6 +55,7 @@ const rfqIncludes = [
   { model: PrHeader, as: "purchaseRequisition", include: [{ model: Department, as: "department" }, { model: AppEntry, as: "appEntry", include: [{ model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }] }] },
 ];
 const rfqInclude = { model: Rfq, as: "rfq", include: rfqIncludes, required: true };
+const recoveryOf = (rfq) => (rfq.purchaseRequisition?.appEntry ?? rfq.appEntry)?.recoveryImport;
 const outcomeOf = (status) => ["awarded", "active", "completed", "issued", "accepted"].includes(status) ? "successful" : ["failed", "technicalFailed", "postDisqualified"].includes(status) ? "failed" : ["cancelled", "rescinded"].includes(status) ? "cancelled" : "ongoing";
 const TIMELINE_ACTIONS = {
   "rfq.scheduleApproved": "Procurement schedule approved",
@@ -82,8 +84,8 @@ function procurementRow(rfq, attemptMap) {
   return {
     id: `rfq-${rfq.id}`, reference: rfq.referenceNo, project: rfq.title, category: rfq.category,
     method: rfq.mode?.name || rfq.mode?.key || app?.procurementMode || "", department: rfq.purchaseRequisition?.department?.name || rfq.appEntry?.implementingUnit?.name || "",
-    year: app?.appropriation?.fiscalYear ?? app?.fiscalYear ?? null, status: rfq.status, date: iso(rfq.createdAt), abc: number(rfq.abc),
-    attempt: attempt?.attemptNumber ?? 1, outcome: outcomeOf(rfq.status), deadline: iso(rfq.closingDate), opening: iso(rfq.openingDate),
+    year: app?.appropriation?.fiscalYear ?? app?.fiscalYear ?? null, status: rfq.status, date: isFy2025HistoricalAward(app) ? null : iso(rfq.createdAt), abc: number(rfq.abc),
+    attempt: attempt?.attemptNumber ?? (isFy2025HistoricalAward(app) ? null : 1), outcome: outcomeOf(rfq.status), deadline: iso(rfq.closingDate), opening: iso(rfq.openingDate),
   };
 }
 
@@ -99,7 +101,7 @@ export async function loadReportRows(report, user, permissions) {
     if (scope.publishedOnly) where.status = { [Op.in]: ["approved", "locked"] };
     if (scope.departmentId != null) where.implementingUnitId = scope.departmentId;
     const entries = await AppEntry.findAll({ where, include: [{ model: Department, as: "implementingUnit" }, { model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }] });
-    return entries.map((entry) => ({ id: `plan-${entry.id}`, reference: entry.papCode || `APP-${entry.id}`, project: entry.projectTitle, department: entry.implementingUnit?.name || "", year: entry.appropriation?.fiscalYear ?? entry.fiscalYear, category: entry.category, method: entry.procurementMode, status: entry.status, abc: number(entry.abc), date: iso(entry.createdAt) }));
+    return entries.map((entry) => ({ id: `plan-${entry.id}`, reference: entry.papCode || `APP-${entry.id}`, project: entry.projectTitle, department: entry.implementingUnit?.name || "", year: entry.appropriation?.fiscalYear ?? entry.fiscalYear, category: entry.category, method: entry.procurementMode, status: isFy2025HistoricalAward(entry) ? `${entry.recoveryImport.sourceStatus} (client reported)` : entry.status, abc: number(entry.abc), date: isFy2025HistoricalAward(entry) ? null : iso(entry.createdAt) }));
   }
   if (source === "audit") {
     const logs = await AuditLog.findAll({ attributes: ["id", "sequence", "recordedAt", "actorName", "actorRole", "actionType", "entityRef", "entityId", "outcome", "summary", "hash"], order: [["sequence", "DESC"]] });
@@ -111,7 +113,7 @@ export async function loadReportRows(report, user, permissions) {
   const base = (rfq) => procurementRow(rfq, attemptMap);
 
   if (source === "contracts") {
-    const where = {};
+    const where = { id: { [Op.notIn]: await archivedHistoricalIds("contractId") } };
     if (!permissions.has("contract.view") && permissions.has("delivery.submitInvoice")) {
       const vendor = await Vendor.findOne({ where: { userId: user.id }, attributes: ["id"] });
       if (!vendor) return [];
@@ -119,22 +121,49 @@ export async function loadReportRows(report, user, permissions) {
     }
     if (!permissions.has("contract.view") && permissions.has("contract.viewPublished")) where.status = { [Op.in]: ["active", "completed"] };
     const contracts = await Contract.findAll({ where, include: [{ model: Vendor, as: "vendor", attributes: ["businessName"] }, { model: Award, as: "award", include: [rfqInclude], required: true }] });
-    return contracts.map((entry) => ({ ...base(entry.award.rfq), id: `contract-${entry.id}`, contract: entry.contractNo, status: entry.status, date: iso(entry.createdAt), bidder: entry.vendor?.businessName, amount: number(entry.amount), completion: iso(entry.actualCompletionAt), outcome: outcomeOf(entry.status) }));
+    return contracts.map((entry) => {
+      const recovery = recoveryOf(entry.award.rfq);
+      const demonstration = recovery?.demonstrationCompletion;
+      const instrument = demonstration?.milestones.find(({ entityRef, entityId }) => entityRef === "contract" && entityId === entry.id);
+      const sourceAward = recovery?.historicalAward;
+      return { ...base(entry.award.rfq), id: `contract-${entry.id}`, contract: entry.contractNo, status: entry.status,
+        date: iso(instrument?.occurredAt ?? entry.createdAt), amount: number(entry.amount), completion: iso(entry.actualCompletionAt),
+        bidder: entry.vendor?.businessName ?? (sourceAward?.supplierMismatch ? "Supplier discrepancy" : sourceAward?.recommendedSupplier),
+        outcome: instrument ? "Historical demonstration" : outcomeOf(entry.status) };
+    });
   }
 
   if (["bids", "evaluations", "twg"].includes(source)) {
     const bidInclude = { model: Bid, as: "bid", required: true, include: [rfqInclude, { model: Vendor, as: "vendor", attributes: ["businessName"] }] };
     if (source === "bids") {
       const bids = await Bid.findAll({ include: [rfqInclude, { model: Vendor, as: "vendor", attributes: ["businessName"] }] });
-      return bids.map((bid) => ({ ...base(bid.rfq), id: `bid-${bid.id}`, ...bidDisclosure(bid, bid.rfq), status: bid.status, date: iso(bid.submittedAt), outcome: outcomeOf(bid.status) }));
+      return bids.map((bid) => {
+        const sourceFields = historicalSourceValues(bid.rfq.purchaseRequisition?.appEntry ?? bid.rfq.appEntry);
+        const disclosure = bidDisclosure(bid, bid.rfq);
+        return { ...base(bid.rfq), id: `bid-${bid.id}`, ...disclosure,
+          ...(sourceFields && !disclosure.blind && { bidder: sourceFields["Registered Business Name"] }),
+          status: bid.status, date: sourceFields?.["Submission Date"] ?? iso(bid.submittedAt), outcome: outcomeOf(bid.status) };
+      });
     }
     if (source === "evaluations") {
       const entries = await Evaluation.findAll({ include: [bidInclude, { model: User, as: "evaluator", attributes: ["name"] }] });
-      return entries.map((entry) => {
+      const recorded = entries.map((entry) => {
         const disclosure = bidDisclosure(entry.bid, entry.bid.rfq);
         const consulting = entry.bid.rfq.category === "consulting";
         return { ...base(entry.bid.rfq), id: `evaluation-${entry.id}`, status: entry.status, declaration: entry.noConflictDeclared ? "Yes" : "No", declaredAt: iso(entry.declaredAt), failureReason: disclosure.blind ? (entry.failureReason ? "Recorded; available in evaluation workspace" : null) : entry.failureReason === "none" ? "None" : entry.failureReason, bidder: disclosure.bidder, evaluator: entry.evaluator?.name, date: iso(entry.submittedAt), score: number(entry.score), qualityScore: consulting ? number(entry.bid.qualityScore) : null, financialScore: consulting && !disclosure.blind && !entry.bid.financialSealed ? number(entry.bid.financialScore) : null, combinedScore: consulting && !disclosure.blind && !entry.bid.financialSealed ? number(entry.bid.combinedScore) : null, remarks: disclosure.blind ? "Withheld during blind evaluation" : entry.remarks };
       });
+      const historicalBids = await Bid.findAll({ include: [rfqInclude], where: { "$rfq.appEntry.recoveryKey$": { [Op.in]: FY2025_AWARD_KEYS } } });
+      for (const bid of historicalBids) {
+        const fields = historicalSourceValues(bid.rfq.purchaseRequisition?.appEntry ?? bid.rfq.appEntry);
+        if (!fields || !fields["Overall Result"] || bidDisclosure(bid, bid.rfq).blind) continue;
+        recorded.push({
+          ...base(bid.rfq), id: `source-evaluation-${bid.id}`, status: `${fields["Overall Result"]} (client reported)`,
+          bidder: fields["Registered Business Name"], date: null, score: null, evaluator: null,
+          failureReason: fields["Failure Reason"],
+          remarks: [fields.Findings, fields.Recommendation, fields["Post-Qualification Overall Result"] && `Post-qualification result: ${fields["Post-Qualification Overall Result"]} (client reported)`].filter(Boolean).join(" "),
+        });
+      }
+      return recorded;
     }
     // Submitted assessments are visible to BAC; a member's draft is private.
     const where = { [Op.or]: [{ status: "submitted" }, { memberId: user.id }] };
@@ -149,10 +178,26 @@ export async function loadReportRows(report, user, permissions) {
   const rfqMap = new Map(rfqs.map((rfq) => [Number(rfq.id), rfq]));
   if (source === "procurement") return rfqs.map(base);
   if (source === "timeline") {
-    const rows = rfqs.flatMap((rfq) => [
-      ["Planning", (rfq.appEntry || rfq.purchaseRequisition?.appEntry)?.createdAt], ["BAC plan recommendation", (rfq.appEntry || rfq.purchaseRequisition?.appEntry)?.modeRecommendedAt],
-      ["Procurement preparation", rfq.createdAt], ["Publication", rfq.publishDate], ["Pre-bid conference schedule", rfq.prebidAt], ["Submission deadline", rfq.closingDate], ["Bid opening schedule", rfq.openingDate], ["Attempt completed", attemptMap.get(Number(rfq.id))?.completedAt],
-    ].filter(([, date]) => date).map(([stage, date]) => ({ ...base(rfq), id: `timeline-${rfq.id}-${stage}`, stage, date: iso(date), outcome: new Date(date) > new Date() ? "scheduled" : "recorded" })));
+    const rows = rfqs.flatMap((rfq) => {
+      const recovery = recoveryOf(rfq);
+      const app = rfq.purchaseRequisition?.appEntry ?? rfq.appEntry;
+      const milestones = [
+        ["Planning", recovery?.historicalAward ? null : app?.createdAt],
+        ["BAC plan recommendation", app?.modeRecommendedAt],
+        ["Procurement preparation", recovery?.historicalAward ? null : rfq.createdAt],
+        ["Publication", rfq.publishDate],
+        ["Pre-bid conference schedule", rfq.prebidAt],
+        ["Submission deadline", rfq.closingDate],
+        ["Bid opening schedule", rfq.openingDate],
+        ["Attempt completed", attemptMap.get(Number(rfq.id))?.completedAt],
+        ...(isFy2025HistoricalAward(app) ? [] : recovery?.demonstrationCompletion?.milestones ?? []).map(({ action, occurredAt }) =>
+          [action, occurredAt, "Historical demonstration"]),
+      ];
+      return milestones.filter(([, date]) => date).map(([stage, date, outcome]) => ({
+        ...base(rfq), id: `timeline-${rfq.id}-${stage}`, stage, date: iso(date),
+        outcome: outcome ?? (new Date(date) > new Date() ? "scheduled" : "recorded"),
+      }));
+    });
     const [openings, technical, evaluations, qualifications, awards, decisions] = await Promise.all([
       BidOpeningRecord.findAll(), TwgAssessment.findAll({ where: { status: "submitted" }, include: [{ model: Bid, as: "bid", attributes: ["rfqId"] }] }),
       Evaluation.findAll({ include: [{ model: Bid, as: "bid", attributes: ["rfqId"] }] }), PostQualification.findAll({ include: [{ model: Bid, as: "bid", attributes: ["rfqId"] }] }),
@@ -170,9 +215,25 @@ export async function loadReportRows(report, user, permissions) {
       if (entry.entityRef === "award" && entry.outcome !== "denied") append(entry, awards.find((award) => award.id === entry.entityId)?.rfqId, "Award approved", entry.recordedAt, "successful");
     });
     qualifications.forEach((entry) => append(entry, entry.bid?.rfqId, "Post-qualification", entry.verifiedAt, entry.result));
-    awards.forEach((entry) => { append(entry, entry.rfqId, "Award recommendation", entry.createdAt); append(entry, entry.rfqId, "Award disapproved", entry.disapprovedAt, "returned"); });
+    awards.forEach((entry) => {
+      const rfq = rfqMap.get(Number(entry.rfqId));
+      if (rfq && recoveryOf(rfq)?.historicalAward?.id === entry.id) {
+        append(entry, entry.rfqId, "Notice of Award", entry.noaDate, "Client reported");
+        append(entry, entry.rfqId, "Notice received", entry.supplierReceivedAt, "Client reported");
+      } else {
+        append(entry, entry.rfqId, "Award recommendation", entry.createdAt);
+        append(entry, entry.rfqId, "Award disapproved", entry.disapprovedAt, "returned");
+      }
+    });
     const workflowEvents = await AuditLog.findAll({ where: { entityRef: "rfq", actionType: { [Op.in]: Object.keys(TIMELINE_ACTIONS) } }, attributes: ["id", "entityId", "actionType", "recordedAt", "outcome"] });
     workflowEvents.forEach((entry) => append(entry, entry.entityId, TIMELINE_ACTIONS[entry.actionType], entry.recordedAt, entry.outcome));
+    const recovered = await AppEntry.findOne({ where: { fiscalYear: 2026, recoveryKey: "2026:MDRRMO-2026-001" }, include: [{ model: Department, as: "implementingUnit", attributes: ["name"] }] });
+    for (const [index, event] of (recovered?.recoveryImport?.reviewedForm?.milestones ?? []).entries()) {
+      rows.push({ id: `timeline-reviewed-${recovered.id}-${index}`, reference: recovered.papCode, project: recovered.projectTitle,
+        category: recovered.category, method: recovered.procurementMode, department: recovered.implementingUnit?.name,
+        year: recovered.fiscalYear, stage: event.action, date: event.date,
+        status: recovered.recoveryImport.sourceStatus, outcome: "Client reported" });
+    }
     return rows;
   }
   if (source === "attempts") {

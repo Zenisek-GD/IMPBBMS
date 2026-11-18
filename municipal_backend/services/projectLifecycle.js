@@ -1,4 +1,4 @@
-import { Op } from "sequelize";
+import { Op, json, where as sqlWhere } from "sequelize";
 import { applyProjectDemonstration } from './projectDemonstration.js';
 import { Appropriation } from "../models/appropriationModel.js";
 import { AppEntry } from "../models/appEntryModel.js";
@@ -10,7 +10,9 @@ import { Vendor } from "../models/vendorModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
 import { Invoice, Payment } from "../models/paymentModel.js";
 import { projectFinancialPositions } from "./projectFinancials.js";
+import { FY2025_AWARD_KEYS, historicalSourceValues, isFy2025HistoricalAward } from "./historicalAwards.js";
 import { calculateFinancialPosition, fiscalYearFilter, sumMoney } from "./financialCalculations.js";
+import { ACADEMIC_PROJECT_KEY } from "./academicCase.js";
 
 // ── WHAT A "PROJECT" IS ──────────────────────────────────────────────────────
 // The public sees a project, not a table. In this schema a project is an APP
@@ -31,6 +33,11 @@ import { calculateFinancialPosition, fiscalYearFilter, sumMoney } from "./financ
 // internal deliberation as a decision. Filtering happens in the query below,
 // never in the UI.
 const PUBLISHED_APP_STATES = ["approved", "locked"];
+export const visibleProject = { [Op.or]: [
+  { status: { [Op.in]: PUBLISHED_APP_STATES } },
+  { fiscalYear: 2025, recoveryKey: { [Op.in]: FY2025_AWARD_KEYS }, [Op.and]: sqlWhere(json("recoveryImport.historicalAward.id"), { [Op.gt]: 0 }) },
+  { fiscalYear: 2026, recoveryKey: "2026:MDRRMO-2026-001", [Op.and]: sqlWhere(json("recoveryImport.sourceStatus"), "Awarded / For implementation") },
+] };
 
 // An RFQ is public from the moment it is advertised. "draft" and "cancelled"
 // are not — a draft is not yet a solicitation, and a cancelled one never became
@@ -53,8 +60,42 @@ export const LIFECYCLE_PHASES = [
 
 const PHASE_ORDER = LIFECYCLE_PHASES.map((phase) => phase.key);
 
+// Publish only the fields needed to explain a stage. Source forms also contain
+// supplier contacts, tax identifiers and internal evaluation text.
+const TIMELINE_SOURCE_FIELDS = {
+  planning: ["Linked AIP Project", "Fund Source", "Expense Class", "Approved Budget for the Contract", "Appropriation Reference for Final APP", "Procurement Start Quarter", "Procurement Completion Quarter", "Expense classification", "Funding classification breakdown"],
+  requisition: ["Linked Purchase Requisition", "Purchase Requisition Purpose", "Item Description", "Date Required"],
+  solicitation: ["Solicitation Title", "Recommended Procurement Mode", "PhilGEPS Reference Number", "Bid Opening / Conference Venue"],
+  evaluation: ["Overall Result", "Post-Qualification Overall Result"],
+  award: ["Award Recommended Supplier", "Recommended Award Amount", "Award Basis", "BAC Resolution Number", "Existing Notice of Award Number", "Supplier identity"],
+};
+
+const TIMELINE_SUPPORTING_RECORDS = {
+  planning: [["Original planning, funding and requisition approvals", "Original planning and funding approvals"]],
+  requisition: [["Original planning, funding and requisition approvals", "Original requisition approvals"]],
+  bidding: [["Signed bid opening, evaluation and post-qualification records", "Signed bid opening record"]],
+  evaluation: [["Signed bid opening, evaluation and post-qualification records", "Signed evaluation and post-qualification records"]],
+  award: [["Signed BAC resolution, Notice of Award and proof of receipt", "Signed BAC resolution, Notice of Award and proof of receipt"]],
+  contract: [["Signed contract or purchase order and Notice to Proceed", "Signed contract or purchase order and Notice to Proceed"]],
+  completion: [
+    ["Delivery, inspection and acceptance records", "Delivery, inspection and acceptance records"],
+    ["Invoice, payment and financial closeout records", "Invoice, payment and financial closeout records"],
+  ],
+};
+
+function reviewedTimelineEvidence(fields) {
+  return Object.fromEntries(PHASE_ORDER.map((key) => [key, {
+    reportedDetails: (TIMELINE_SOURCE_FIELDS[key] ?? [])
+      .filter((label) => fields[label]?.trim() && !/^(?:not available|not applicable|none|n\/a)$/i.test(fields[label].trim()))
+      .map((label) => ({ label: label === "Date Required" ? "Date Required (target)" : label, value: fields[label] })),
+    missingRecords: (TIMELINE_SUPPORTING_RECORDS[key] ?? [])
+      .filter(([field]) => /^not available\b/i.test(fields[field] ?? ""))
+      .map(([, label]) => label),
+  }]));
+}
+
 // ── CATEGORIES ───────────────────────────────────────────────────────────────
-// The three buckets the public page filters on.
+// The public categories distinguish a historical award from contract closeout.
 //
 //   upcoming  — planned and approved, but not yet advertised
 //   ongoing   — advertised, being bid, awarded, or under implementation
@@ -63,6 +104,7 @@ export const PROJECT_CATEGORIES = [
   { key: "all", label: "All Projects" },
   { key: "completed", label: "Completed" },
   { key: "ongoing", label: "Ongoing" },
+  { key: "awarded", label: "Awarded" },
   { key: "upcoming", label: "Upcoming" },
 ];
 
@@ -140,26 +182,22 @@ const groupBy = (rows, key) => {
 // Furthest stage this project has actually reached. Deliberately based on
 // records that exist rather than on a status column, so the phase cannot
 // disagree with the evidence shown underneath it.
-const derivePhase = ({ prs, rfqs, bids, awards, contracts, deliveries, payments }) => {
-  const released = payments.some((payment) => payment.status === "released");
-  const accepted = deliveries.some((delivery) => delivery.status === "accepted");
-  const contractClosed = contracts.some((contract) => contract.status === "completed");
-
-  if (contractClosed || (accepted && released)) return "completion";
-  if (contracts.some((contract) => ["active", "completed"].includes(contract.status))) return "contract";
+// Contract closeout is the workflow's authoritative completion decision.
+const derivePhase = ({ prs, rfqs, awards, contracts }) => {
+  const effectiveContracts = contracts.filter((contract) => contract.status !== "rescinded");
+  if (awards.length && awards.every((award) => effectiveContracts.some((contract) => contract.awardId === award.id && contract.status === "completed"))
+    && effectiveContracts.every((contract) => contract.status === "completed")) return "completion";
+  if (effectiveContracts.some((contract) => ["active", "completed"].includes(contract.status))) return "contract";
   if (awards.length) return "award";
   if (rfqs.some((rfq) => ["evaluated", "awarded"].includes(rfq.status))) return "evaluation";
-  if (bids.length || rfqs.some((rfq) => ["opened", "closed"].includes(rfq.status))) return "bidding";
+  if (rfqs.some((rfq) => rfq.status === "opened")) return "bidding";
   if (rfqs.length) return "solicitation";
   if (prs.length) return "requisition";
   return "planning";
 };
 
-const deriveCategory = (phase, { contracts, deliveries, payments }) => {
-  const contractClosed = contracts.some((contract) => contract.status === "completed");
-  const settled = deliveries.some((d) => d.status === "accepted") && payments.some((p) => p.status === "released");
-
-  if (contractClosed || settled) return "completed";
+const deriveCategory = (phase) => {
+  if (phase === "completion") return "completed";
   // Anything advertised or later is in motion; before that it is still a plan.
   return PHASE_ORDER.indexOf(phase) >= PHASE_ORDER.indexOf("solicitation") ? "ongoing" : "upcoming";
 };
@@ -167,7 +205,7 @@ const deriveCategory = (phase, { contracts, deliveries, payments }) => {
 // The order categories are listed in publicly. An unrecognised category sorts
 // last rather than first, so adding a category without updating this map cannot
 // silently push it above the completed projects.
-const CATEGORY_RANK = { completed: 0, ongoing: 1, upcoming: 2 };
+const CATEGORY_RANK = { completed: 0, ongoing: 1, awarded: 2, upcoming: 3 };
 
 // Money, in the three figures that matter publicly: what was budgeted, what it
 // was actually awarded for, and what has actually left the treasury.
@@ -190,23 +228,46 @@ const deriveFinancials = (entry, { awards, contracts, invoices, payments }, posi
 // Assembles one public project view. `detailed` adds the per-record breakdown
 // the detail page needs; the list view omits it to keep responses small.
 const buildProject = (entry, chain, { detailed = false, modeNames = null, financialPosition = null } = {}) => {
+  const historical = isFy2025HistoricalAward(entry);
+  const reportedOngoing = entry.fiscalYear === 2026 && entry.recoveryKey === "2026:MDRRMO-2026-001"
+    && entry.recoveryImport?.sourceStatus === "Awarded / For implementation";
+  const source = historicalSourceValues(entry);
+  if (historical) {
+    const archived = entry.recoveryImport.demonstrationCompletion;
+    chain = {
+      ...chain,
+      contracts: chain.contracts.filter((row) => row.id !== archived?.contractId),
+      deliveries: chain.deliveries.filter((row) => row.contractId !== archived?.contractId && row.id !== archived?.deliveryId),
+      invoices: chain.invoices.filter((row) => row.contractId !== archived?.contractId && row.id !== archived?.invoiceId),
+      payments: chain.payments.filter((row) => row.invoiceId !== archived?.invoiceId && row.id !== archived?.paymentId),
+    };
+  }
   const phase = derivePhase(chain);
-  const category = deriveCategory(phase, chain);
+  const confirmedOngoing = entry.recoveryImport?.displayStatusConfirmation?.category === "ongoing";
+  const category = phase === "completion" ? "completed"
+    : reportedOngoing || confirmedOngoing ? "ongoing"
+    : historical && phase === "award" ? "awarded" : deriveCategory(phase);
   const phaseIndex = PHASE_ORDER.indexOf(phase);
 
-  const award = chain.awards[0] ?? null;
+  const award = chain.awards.find((row) => row.id === entry.recoveryImport?.historicalAward?.id) ?? chain.awards[0] ?? null;
+  const historicalAward = award && award.id === entry.recoveryImport?.historicalAward?.id
+    ? entry.recoveryImport.historicalAward : null;
   const contract = chain.contracts[0] ?? null;
   const rfq = chain.rfqs[0] ?? null;
+  const reviewed = Object.fromEntries((entry.recoveryImport?.reviewedForm?.fields ?? []).map(({ label, value }) => [label, value]));
+  const reportedAward = reportedOngoing ? entry.recoveryImport.reviewedForm?.award ?? null : null;
 
   const base = {
     id: entry.id,
+    papCode: entry.papCode,
     projectTitle: entry.projectTitle,
     description: entry.description,
+    ...(entry.recoveryKey === ACADEMIC_PROJECT_KEY && { recordSource: "academic" }),
     // The public list already identifies the implementing office by name. Its
     // stable id is included as well so the Worker demo snapshot can apply the
     // same office filter without issuing a second database request.
     implementingUnitId: entry.implementingUnitId ?? null,
-    implementingUnit: entry.implementingUnit?.name ?? null,
+    implementingUnit: source?.["Implementing Office"] ?? entry.implementingUnit?.name ?? null,
     implementingUnitCode: entry.implementingUnit?.code ?? null,
     category,
     phase,
@@ -221,7 +282,15 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null, financ
     projectCategory: entry.category,
     fundSource: entry.fundSource,
     financials: deriveFinancials(entry, chain, financialPosition),
-    awardedTo: award?.vendor?.businessName ?? null,
+    awardedTo: historicalAward?.supplierMismatch ? null : historicalAward?.recommendedSupplier ?? award?.vendor?.businessName ?? null,
+    ...(historicalAward && { historicalAward }),
+    ...(historical && { clientReportedStatus: entry.recoveryImport.sourceStatus }),
+    ...(reportedOngoing && { clientReportedStatus: entry.recoveryImport.sourceStatus }),
+    ...((historicalAward || reportedOngoing) && { documentedThrough: historicalAward || reportedAward ? "Notice of Award receipt" : "Recovered requisition draft" }),
+    ...(reportedAward && { reportedAward }),
+    ...((historical || reportedOngoing) && { reportedExpenseClass: reviewed["Expense Class"] ?? source?.["Expense Class"] ?? null }),
+    ...(!historical && entry.recoveryImport?.demonstrationCompletion && { historicalDemonstration: true }),
+    ...(entry.recoveryImport?.ongoingScenario && { ongoingDemonstration: true }),
     noaNumber: award?.noaNumber ?? null,
     noaDate: award?.noaDate ?? null,
     contractNo: contract?.contractNo ?? null,
@@ -237,8 +306,25 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null, financ
     ...base,
     phases: LIFECYCLE_PHASES.map((definition, index) => ({
       ...definition,
+      ...(historicalAward && {
+        detail: [
+          "Project and budget identified in the source form",
+          "Purchase requisition identified in the source form",
+          "Solicitation reference and dates recorded",
+          "Bid submission and opening dates recorded",
+          "Evaluation and post-qualification results recorded",
+          "Notice of Award and supplier receipt recorded",
+          chain.contracts.length ? definition.detail : "Contract details unavailable",
+          phase === "completion" ? definition.detail : "Delivery, acceptance and payment details unavailable",
+        ][index],
+      }),
       reached: index <= phaseIndex,
       current: index === phaseIndex,
+      ...(historicalAward && index <= PHASE_ORDER.indexOf("award") && { evidence: "clientReported" }),
+      ...(reportedOngoing && entry.status === "draft" && definition.key === "planning" && { detail: "Recovered planning entry on file" }),
+      ...(reportedOngoing && chain.prs.length && chain.prs.every((pr) => pr.status === "draft") && definition.key === "requisition" && { detail: "Recovered requisition draft on file" }),
+      ...(reportedAward && index > phaseIndex && index <= PHASE_ORDER.indexOf("award") && { evidence: "clientReported", detail: "Reported in the reviewed client form" }),
+      ...((historical || reportedOngoing) && index > phaseIndex && (!reportedAward || index > PHASE_ORDER.indexOf("award")) && { detail: "Supporting records unavailable" }),
     })),
     // Reference numbers only. Internal remarks, evaluator scores, bidder
     // identities before award and justification text are all withheld — the
@@ -246,7 +332,7 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null, financ
     records: {
       requisitions: chain.prs.map((pr) => ({
         prNumber: pr.prNumber,
-        status: pr.status,
+        status: historical ? "on file" : pr.status,
         totalAmount: num(pr.totalAmount),
         dateRequired: pr.dateRequired,
       })),
@@ -258,6 +344,8 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null, financ
         abc: num(item.abc),
         publishDate: item.publishDate,
         closingDate: item.closingDate,
+        openingDate: item.openingDate,
+        prebidAt: item.prebidAt,
         status: item.status,
         bidsReceived: chain.bids.filter((bid) => bid.rfqId === item.id).length,
       })),
@@ -265,7 +353,7 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null, financ
         noaNumber: item.noaNumber,
         noaDate: item.noaDate,
         amount: num(item.amount),
-        awardedTo: item.vendor?.businessName ?? null,
+        awardedTo: item.id === historicalAward?.id ? base.awardedTo : item.vendor?.businessName ?? null,
         status: item.status,
       })),
       contracts: chain.contracts.map((item) => ({
@@ -292,6 +380,15 @@ const buildProject = (entry, chain, { detailed = false, modeNames = null, financ
     },
     // Entity references the timeline and document endpoints resolve against.
     // Kept server-side rather than trusted from the client.
+    historicalDates: historicalAward ? Object.fromEntries(
+      entry.recoveryImport.sourceFields
+        .filter(({ label, value }) => ["Pre-Bid Conference", "Submission Date"].includes(label) && /^[A-Za-z]+ \d{1,2}, \d{4}$/.test(value))
+        .map(({ label, value }) => [label, new Date(`${value} 12:00:00 GMT+0800`).toISOString().slice(0, 10)])
+    ) : {},
+    demonstrationMilestones: historical ? [] : entry.recoveryImport?.demonstrationCompletion?.milestones ?? [],
+    ongoingDemonstrationEvents: entry.recoveryImport?.ongoingScenario?.events ?? [],
+    reportedMilestones: reportedAward ? entry.recoveryImport.reviewedForm.milestones : [],
+    timelineEvidence: (historicalAward || reportedOngoing) && Object.keys(reviewed).length ? reviewedTimelineEvidence(reviewed) : null,
     entityRefs: {
       appEntry: [entry.id],
       pr: chain.prs.map((pr) => pr.id),
@@ -330,14 +427,14 @@ const chainFor = (entryId, grouped) => {
 
 // ── PUBLIC ENTRY POINTS ──────────────────────────────────────────────────────
 
-export const listPublicProjects = async ({ search, category, fiscalYear, department, detailed = false } = {}) => {
-  const where = { status: { [Op.in]: PUBLISHED_APP_STATES } };
+export const listPublicProjects = async ({ search, category, fiscalYear = "all", department, detailed = false } = {}) => {
+  const where = { [Op.and]: [visibleProject] };
 
   // Number() on a non-numeric string yields NaN, which Sequelize renders as the
   // literal `NaN` and MySQL rejects. Every numeric filter here is checked before
   // it reaches a query — these endpoints take anonymous input.
   const year = fiscalYearFilter(fiscalYear);
-  if (year !== null) where[Op.and] = [{ [Op.or]: [{ "$appropriation.fiscalYear$": year }, { appropriationId: null, fiscalYear: year }] }];
+  if (year !== null) where[Op.and].push({ [Op.or]: [{ "$appropriation.fiscalYear$": year }, { appropriationId: null, fiscalYear: year }] });
 
   const departmentId = Number(department);
   if (department && Number.isFinite(departmentId)) where.implementingUnitId = departmentId;
@@ -360,7 +457,7 @@ export const listPublicProjects = async ({ search, category, fiscalYear, departm
 
   const [chain, modeNames, positions] = await Promise.all([
     loadChain(entries.map((entry) => entry.id)),
-    loadModeNames(), projectFinancialPositions(entries.map((entry) => entry.id)),
+    loadModeNames(), projectFinancialPositions(entries.map((entry) => entry.id), { includeDemonstrations: true }),
   ]);
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
@@ -392,19 +489,18 @@ export const getPublicProject = async (id) => {
   if (!Number.isFinite(entryId)) return null;
 
   const entry = await AppEntry.findOne({
-    where: { id: entryId, status: { [Op.in]: PUBLISHED_APP_STATES } },
+    where: { id: entryId, ...visibleProject },
     include: [{ model: Department, as: "implementingUnit" }, { model: Appropriation, as: "appropriation", attributes: ["fiscalYear"] }],
   });
   if (!entry) return null;
 
-  const [chain, modeNames, positions] = await Promise.all([loadChain([entry.id]), loadModeNames(), projectFinancialPositions([entry.id])]);
+  const [chain, modeNames, positions] = await Promise.all([loadChain([entry.id]), loadModeNames(), projectFinancialPositions([entry.id], { includeDemonstrations: true })]);
   const grouped = { ...chain, prsByApp: groupBy(chain.prs, "appEntryId") };
 
   return applyProjectDemonstration(buildProject(entry, chainFor(entry.id, grouped), { detailed: true, modeNames, financialPosition: positions.get(Number(entry.id)) }));
 };
 
-// Aggregate figures for the portal header, computed over the same published set
-// the list returns so the totals always agree with the rows beneath them.
+// Counts describe the visible register. Financial totals describe municipal records.
 export const getPublicSummary = async (filters = {}) => {
   const projects = await listPublicProjects(filters);
   const lastUpdatedAt = projects.reduce((latest, project) => {
@@ -415,29 +511,35 @@ export const getPublicSummary = async (filters = {}) => {
   }, null);
 
   // Contract totals describe awards; only approved closeouts recognize savings.
-  const contractedProjects = projects.filter((project) => project.financials.contractAmount);
+  const municipalProjects = projects.filter((project) => project.recordSource !== "academic");
+  const financialProjects = municipalProjects.filter((project) => !project.historicalDemonstration);
+  const contractedProjects = financialProjects.filter((project) => project.financials.contractAmount);
   const budgetOfContracted = sumMoney(contractedProjects, (project) => project.financials.plannedAmount);
   const totalContracted = sumMoney(contractedProjects, (project) => project.financials.contractAmount);
 
   return {
-    fiscalYear: fiscalYearFilter(filters.fiscalYear) ?? "all",
-    totalAllocated: sumMoney(projects, (project) => project.financials.allocated),
-    totalGrossExpenses: sumMoney(projects, (project) => project.financials.grossExpenses),
-    recognizedSavings: sumMoney(projects, (project) => project.financials.recognizedSavings),
+    fiscalYear: fiscalYearFilter(filters.fiscalYear ?? "all") ?? "all",
+    totalAllocated: sumMoney(financialProjects, (project) => project.financials.allocated),
+    totalGrossExpenses: sumMoney(financialProjects, (project) => project.financials.grossExpenses),
+    recognizedSavings: sumMoney(financialProjects, (project) => project.financials.recognizedSavings),
     totalProjects: projects.length,
+    academicProjects: projects.length - municipalProjects.length,
+    historicalDemonstrations: projects.filter((project) => project.historicalDemonstration).length,
+    clientReportedAwards: projects.filter((project) => project.clientReportedStatus === "Completed / Awarded").length,
     completed: projects.filter((project) => project.category === "completed").length,
+    awarded: projects.filter((project) => project.category === "awarded").length,
     ongoing: projects.filter((project) => project.category === "ongoing").length,
     upcoming: projects.filter((project) => project.category === "upcoming").length,
-    totalBudget: sumMoney(projects, (project) => project.financials.plannedAmount),
-    totalSupplierPaid: sumMoney(projects, (project) => project.financials.supplierPaid),
-    totalTaxesWithheld: sumMoney(projects, (project) => project.financials.taxesWithheld),
-    totalRetention: sumMoney(projects, (project) => project.financials.retention),
-    totalUnpaid: sumMoney(projects, (project) => project.financials.unpaid),
+    totalBudget: sumMoney(municipalProjects, (project) => project.financials.plannedAmount),
+    totalSupplierPaid: sumMoney(financialProjects, (project) => project.financials.supplierPaid),
+    totalTaxesWithheld: sumMoney(financialProjects, (project) => project.financials.taxesWithheld),
+    totalRetention: sumMoney(financialProjects, (project) => project.financials.retention),
+    totalUnpaid: sumMoney(financialProjects, (project) => project.financials.unpaid),
     totalContracted,
     // Kept for comparison with procurement plans; this is not recognized savings.
     budgetOfContracted,
     contractedProjects: contractedProjects.length,
-    totalDisbursed: sumMoney(projects, (project) => project.financials.supplierPaid),
+    totalDisbursed: sumMoney(financialProjects, (project) => project.financials.supplierPaid),
     lastUpdatedAt,
   };
 };

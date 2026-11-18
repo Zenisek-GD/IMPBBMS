@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { createMutationAdapter } from './mutationAdapter'
+import { createInformationAdapter } from './incompleteInformation'
 
 export const apiClient = axios.create({
   // In development Vite proxies this path to Express, keeping the httpOnly
@@ -13,7 +14,7 @@ export const apiClient = axios.create({
 })
 
 let authEpoch = 0
-apiClient.defaults.adapter = createMutationAdapter(axios.getAdapter(apiClient.defaults.adapter))
+apiClient.defaults.adapter = createMutationAdapter(createInformationAdapter(axios.getAdapter(apiClient.defaults.adapter), undefined, config => config.authEpoch === authEpoch))
 export const advanceAuthEpoch = () => { authEpoch += 1 }
 
 apiClient.interceptors.request.use((config) => {

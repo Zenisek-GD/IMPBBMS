@@ -142,9 +142,15 @@ export default function AuditLog() {
           <div className="min-w-0">
             <p className={`text-[13px] font-semibold ${verification.intact ? 'text-success' : 'text-danger'}`}>
               {verification.intact
-                ? `Chain intact — ${verification.entriesChecked} entries verified`
-                : `Chain integrity FAILED — ${verification.problems.length} problem(s) found`}
+                ? 'Audit check passed'
+                : `Audit check found ${verification.problems.length} issue(s)`}
             </p>
+            {verification.intact && (
+              <p className="mt-1 text-xs text-text-secondary">
+                {verification.currentEntriesChecked ?? verification.entriesChecked} recent entries verified.
+                {verification.archivedHistory && ` ${verification.archivedHistory.entriesChecked} older entries match the saved archive.`}
+              </p>
+            )}
             {!verification.intact && (
               <ul className="mt-1 flex flex-col gap-0.5">
                 {verification.problems.slice(0, 5).map((problem, index) => (
@@ -154,9 +160,15 @@ export default function AuditLog() {
                 ))}
               </ul>
             )}
-            <p className="mt-1 truncate font-mono text-[11px] text-text-faint">
-              head: {verification.headHash}
-            </p>
+            <details className="mt-2 text-xs text-text-secondary">
+              <summary className="cursor-pointer">Verification details</summary>
+              {verification.archivedHistory && (
+                <p className="mt-1">
+                  The original hashes for {verification.archivedHistory.originalHashMismatches} older entries could not be verified. The saved archive is used to check those entries for changes.
+                </p>
+              )}
+              <p className="mt-1 break-all font-mono text-[11px] text-text-faint">Latest hash {verification.headHash}</p>
+            </details>
           </div>
         </div>
       )}

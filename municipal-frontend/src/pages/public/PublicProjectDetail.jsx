@@ -1,3 +1,4 @@
+import { publicProjectStatus } from '../../utils/publicProjectStatus'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -28,10 +29,11 @@ const peso = (value) =>
     : `₱${Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`
 
 const shortDate = (value) =>
-  value ? new Date(value).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
+  value ? new Date(value).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'short', day: 'numeric' }) : '—'
 
 const CATEGORY_STYLES = {
   completed: { label: 'Completed', className: 'border-success/25 bg-success/10 text-success', icon: CheckCircle2 },
+  awarded: { label: 'Awarded', className: 'border-border-muted bg-chip text-navy', icon: CheckCircle2 },
   ongoing: { label: 'Ongoing', className: 'border-warning/25 bg-warning/10 text-warning', icon: Loader2 },
   upcoming: { label: 'Upcoming', className: 'border-navy/15 bg-chip text-navy', icon: CalendarClock },
 }
@@ -287,6 +289,40 @@ export default function PublicProjectDetail() {
         </Link>
 
         <header className="mt-4">
+          {project.ongoingDemonstration && (
+            <p className="mb-4 text-sm text-navy">
+              Local demonstration for October 15–November 6, 2026. Bid opening is complete and technical review is in progress.
+            </p>
+          )}
+          {project.historicalDemonstration && (
+            <p className="mb-4 text-sm text-navy">Implementation, acceptance and payment figures are historical demonstration records.</p>
+          )}
+          {project.clientReportedStatus && (
+            <div className="mb-4 text-sm text-navy">
+              <p><strong>Client-reported status</strong> · {project.clientReportedStatus}</p>
+              {project.clientReportedStatus === 'Awarded / For implementation' && project.documentedThrough && (
+                <p className="mt-1">The local workflow remains at the recovered requisition draft. The client reports later procurement milestones.</p>
+              )}
+            </div>
+          )}
+          {project.historicalAward && (
+            <section className="mb-4 rounded-lg border border-border-strong bg-surface p-4" aria-label="Award record">
+              <p className="text-sm text-navy">The client form documents this procurement through receipt of the Notice of Award.</p>
+              {project.clientReportedStatus && !project.contractNo && <p className="mt-2 text-sm text-navy">Contract, delivery, acceptance and payment records are unavailable.</p>}
+              <p className="mt-2 text-sm text-navy">{project.historicalAward.resolutionNumber} · Supplier receipt {project.historicalAward.supplierReceivedAt}</p>
+              {project.historicalAward.supplierMismatch && (
+                <p className="mt-2 text-sm text-navy">Supplier names differ in the source. Registered supplier: {project.historicalAward.registeredSupplier}. Recommended supplier: {project.historicalAward.recommendedSupplier}.</p>
+              )}
+            </section>
+          )}
+          {project.reportedAward && (
+            <section className="mb-4 rounded-lg border border-border-strong bg-surface p-4 text-sm text-navy" aria-label="Client-reported award">
+              <p className="font-semibold">Client-reported Notice of Award</p>
+              <p className="mt-1">{project.reportedAward.noaNumber} · {shortDate(project.reportedAward.noaDate)} · {peso(project.reportedAward.amount)}</p>
+              <p className="mt-1">{project.reportedAward.recommendedSupplier} · {project.reportedAward.resolutionNumber}</p>
+              <p className="mt-1">Receipt reported on {shortDate(project.reportedAward.supplierReceivedAt)}. Signed supporting records are unavailable for verification.</p>
+            </section>
+          )}
           {project.demonstration && (
             <section className="mb-4 rounded-lg border border-border-strong bg-surface p-4" aria-label="Completed demonstration scenario">
               <h2 className="font-bold text-navy">Completed demonstration</h2>
@@ -302,7 +338,7 @@ export default function PublicProjectDetail() {
               <span
                 className={`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] uppercase ${style.className}`}
               >
-                <style.icon size={12} /> {style.label}
+                <style.icon size={12} /> {publicProjectStatus(project, style.label)}
               </span>
               <span className="rounded-sm border border-border-muted bg-surface px-2 py-0.5 text-[11px] font-medium tracking-[0.03em] text-navy">
                 FY {project.fiscalYear}
@@ -334,7 +370,7 @@ export default function PublicProjectDetail() {
           <div className="flex items-center justify-between border-b border-border-muted px-4 py-3">
             <h2 className="text-[13px] font-semibold text-navy">Project Lifecycle</h2>
             <span className="text-[11px] tracking-[0.03em] text-navy uppercase">
-              {project.phaseLabel} · {project.progressPercent}%
+              {project.reportedAward ? `Local record · ${project.phaseLabel}` : project.documentedThrough ? `Client reports through ${project.documentedThrough.toLowerCase()}` : `${project.phaseLabel} · ${project.progressPercent}%`}
             </span>
           </div>
           <ol className="grid gap-x-4 gap-y-5 px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -361,6 +397,7 @@ export default function PublicProjectDetail() {
                     {phase.label}
                   </p>
                   <p className="mt-0.5 text-[12px] leading-snug text-navy">{phase.detail}</p>
+                  {phase.evidence === 'clientReported' && <p className="mt-0.5 text-[11px] text-text-secondary">Client-reported</p>}
                 </div>
               </li>
             ))}
@@ -396,10 +433,10 @@ export default function PublicProjectDetail() {
                 <Field label="Planned procurement (ABC)" value={peso(financials.budget)} />
                 <Field label="Awarded Amount" value={peso(financials.awardedAmount)} />
                 <Field label="Contract Amount" value={peso(financials.contractAmount)} />
-                <Field label="Gross expenses" value={peso(financials.grossExpenses)} />
+                <Field label="Gross expenses" value={project.clientReportedStatus && !records.payments.length ? 'Not available' : peso(financials.grossExpenses)} />
               </div>
 
-              <div className="grid gap-5 border-t border-border-muted px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
+              {(!project.clientReportedStatus || financials.allocated > 0 || records.payments.length > 0) && <div className="grid gap-5 border-t border-border-muted px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Field label="Approved allocation" value={peso(financials.allocated)} />
                 <Field label="Obligations" value={peso(financials.obligated)} />
                 <Field label="Supplier net paid" value={peso(financials.supplierPaid)} />
@@ -408,8 +445,10 @@ export default function PublicProjectDetail() {
                 <Field label="Unpaid obligations" value={peso(financials.unpaid)} />
                 <Field label="Remaining project funds" value={peso(financials.remainingFunds)} />
                 <Field label="Available within allocation" value={peso(financials.available)} />
-              </div>
-              <p className="px-4 pb-4 text-xs text-text-secondary">Remaining funds are allocation less gross expenses. Withheld taxes and retention remain liabilities; unused balances require approved financial closeout before reuse.</p>
+              </div>}
+              {project.clientReportedStatus && <p className="px-4 pb-4 text-xs text-text-secondary">Fund source as reported by the client · {project.fundSource ?? 'Not available'}</p>}
+              {project.reportedExpenseClass && <p className="px-4 pb-4 text-xs text-text-secondary">Expense class as reported by the client · {project.reportedExpenseClass}</p>}
+              {!project.clientReportedStatus && <p className="px-4 pb-4 text-xs text-text-secondary">Remaining funds are allocation less gross expenses. Withheld taxes and retention remain liabilities; unused balances require approved financial closeout before reuse.</p>}
               {financials.savings !== null && (
                 <div className="grid gap-5 border-t border-border-muted px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
                   <Field

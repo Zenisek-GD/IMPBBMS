@@ -9,6 +9,7 @@ import RoleHome from './routes/RoleHome'
 import MfaEnrollment from './pages/account/MfaEnrollment'
 import PublicTransparency from './pages/public/PublicTransparency'
 import PublicProjectDetail from './pages/public/PublicProjectDetail'
+import IncompleteInformationConfirmation from './components/ui/IncompleteInformationConfirmation'
 
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
 const ActivateAccount = lazy(() => import('./pages/ActivateAccount'))
@@ -56,6 +57,7 @@ const GeneratedDocuments = lazy(() => import('./pages/documents/GeneratedDocumen
 function App() {
   return (
     <Suspense fallback={<p role="status" className="p-6 text-sm text-text-secondary">Loading page?</p>}>
+    <IncompleteInformationConfirmation />
     <Routes>
       <Route path="/login" element={<Login />} />
 

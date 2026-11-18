@@ -1,7 +1,8 @@
 const workflowConflict = () => Object.assign(new Error("This financial record changed. Reload it before trying again."), { code: "WORKFLOW_CONFLICT" });
 import { Op } from "sequelize";
+import { archivedHistoricalIds, assertOperationalContract } from "../services/historicalAwards.js";
 import { Award, Rfq } from "../models/biddingModel.js";
-import { fundingIncludes, fundingYearCondition, fundingYearOf } from "../services/fundingYear.js";
+import { fundingIncludes, fundingYearCondition, fundingYearOf, procurementProvenanceOf } from "../services/fundingYear.js";
 import { money, paymentGross, difference } from "../services/financialCalculations.js";
 import { Invoice, Payment } from "../models/paymentModel.js";
 import { Contract, Delivery } from "../models/contractModel.js";
@@ -21,7 +22,7 @@ const recordSnapshot = (record) => JSON.parse(JSON.stringify(record.get({ plain:
 
 const invoiceIncludes = {
   include: [
-    { model: Contract, as: "contract", include: [{ model: Award, as: "award", include: [{ model: Rfq, as: "rfq", include: fundingIncludes() }] }] },
+    { model: Contract, as: "contract", include: [{ model: Award, as: "award", include: [{ model: Rfq, as: "rfq", include: fundingIncludes({ includeProvenance: true }) }] }] },
     { model: Delivery, as: "delivery" },
     { model: Vendor, as: "vendor" },
     {
@@ -35,47 +36,53 @@ const invoiceIncludes = {
   ],
 };
 
-const serialize = (invoice) => ({
-  id: invoice.id,
-  invoiceNo: invoice.invoiceNo,
-  fiscalYear: fundingYearOf(invoice.contract?.award?.rfq),
-  supplierInvoiceRef: invoice.supplierInvoiceRef,
-  amount: Number(invoice.amount),
-  submittedAt: invoice.submittedAt,
-  status: invoice.status,
-  remarks: invoice.remarks,
-  contractNo: invoice.contract?.contractNo ?? null,
-  contractId: invoice.contractId,
-  deliveryId: invoice.deliveryId,
-  contractAmount: invoice.contract ? Number(invoice.contract.amount) : null,
-  vendorName: invoice.vendor?.businessName ?? null,
-  payment: invoice.payment
-    ? {
-        id: invoice.payment.id,
-        disbursementNo: invoice.payment.disbursementNo,
-        // The voucher in full: what was claimed, what was withheld, what is
-        // actually paid. Showing only the net would hide the withholding.
-        grossAmount: paymentGross(invoice.payment),
-        ewtAmount: Number(invoice.payment.ewtAmount),
-        vatWithheldAmount: Number(invoice.payment.vatWithheldAmount),
-        retentionAmount: Number(invoice.payment.retentionAmount),
-        liquidatedDamages: Number(invoice.payment.liquidatedDamages),
-        otherDeductions: Number(invoice.payment.otherDeductions),
-        totalDeductions: difference(paymentGross(invoice.payment), invoice.payment.amount),
-        deductionBreakdown: invoice.payment.deductionBreakdown,
-        amount: Number(invoice.payment.amount),
-        status: invoice.payment.status,
-        preparedAt: invoice.payment.preparedAt,
-        releasedAt: invoice.payment.releasedAt,
-        preparedByName: invoice.payment.preparedBy?.name ?? null,
-        releasedByName: invoice.payment.releasedBy?.name ?? null,
-      }
-    : null,
-});
+const serialize = (invoice) => {
+  const provenance = procurementProvenanceOf(invoice.contract?.award?.rfq);
+  const sourceAward = provenance?.historicalAward;
+  return {
+    id: invoice.id,
+    invoiceNo: invoice.invoiceNo,
+    fiscalYear: fundingYearOf(invoice.contract?.award?.rfq),
+    supplierInvoiceRef: invoice.supplierInvoiceRef,
+    amount: Number(invoice.amount),
+    submittedAt: invoice.submittedAt,
+    status: invoice.status,
+    remarks: invoice.remarks,
+    contractNo: invoice.contract?.contractNo ?? null,
+    contractId: invoice.contractId,
+    deliveryId: invoice.deliveryId,
+    contractAmount: invoice.contract ? Number(invoice.contract.amount) : null,
+    vendorName: invoice.vendor?.businessName ?? (sourceAward?.supplierMismatch ? null : sourceAward?.recommendedSupplier) ?? null,
+    supplierMismatch: sourceAward?.supplierMismatch ?? false,
+    historicalDemonstration: Boolean(provenance?.demonstrationCompletion),
+    payment: invoice.payment
+      ? {
+          id: invoice.payment.id,
+          disbursementNo: invoice.payment.disbursementNo,
+          // The voucher in full: what was claimed, what was withheld, what is
+          // actually paid. Showing only the net would hide the withholding.
+          grossAmount: paymentGross(invoice.payment),
+          ewtAmount: Number(invoice.payment.ewtAmount),
+          vatWithheldAmount: Number(invoice.payment.vatWithheldAmount),
+          retentionAmount: Number(invoice.payment.retentionAmount),
+          liquidatedDamages: Number(invoice.payment.liquidatedDamages),
+          otherDeductions: Number(invoice.payment.otherDeductions),
+          totalDeductions: difference(paymentGross(invoice.payment), invoice.payment.amount),
+          deductionBreakdown: invoice.payment.deductionBreakdown,
+          amount: Number(invoice.payment.amount),
+          status: invoice.payment.status,
+          preparedAt: invoice.payment.preparedAt,
+          releasedAt: invoice.payment.releasedAt,
+          preparedByName: invoice.payment.preparedBy?.name ?? null,
+          releasedByName: invoice.payment.releasedBy?.name ?? null,
+        }
+      : null,
+  };
+};
 
 export const listInvoices = async (req, res) => {
   const { status, search } = req.query;
-  const where = {};
+  const where = { contractId: { [Op.notIn]: await archivedHistoricalIds("contractId") } };
   const fundingScope = fundingYearCondition(req.query.fiscalYear, "contract.award.rfq");
   if (fundingScope) where[Op.and] = [fundingScope];
   if (status) where.status = status;
@@ -137,6 +144,7 @@ export const submitInvoice = async (req, res) => {
 
   const contract = await Contract.findByPk(contractId, { include: [{ model: Vendor, as: "vendor" }] });
   if (!contract) return res.status(400).json({ message: "That contract does not exist." });
+  await assertOperationalContract(contract.id);
 
   const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
   if (!vendor || vendor.id !== contract.vendorId) {
@@ -253,6 +261,7 @@ export const submitInvoice = async (req, res) => {
 export const resubmitInvoice = async (req, res) => {
   const observed = await Invoice.findByPk(req.params.id);
   if (!observed) throw workflowError("Invoice not found.", 404);
+  await assertOperationalContract(observed.contractId);
   const vendor = await Vendor.findOne({ where: { userId: req.currentUser.id } });
   if (!vendor || vendor.id !== observed.vendorId) throw workflowError("You may only correct your own invoice.", 403);
   const value = round2(req.body.amount);
@@ -268,7 +277,7 @@ export const resubmitInvoice = async (req, res) => {
     if (value > Number(contract.amount) - billed + 0.005) throw workflowError("The corrected invoice exceeds the remaining contract amount.", 400);
     if (await Payment.findOne({ where: { invoiceId: invoice.id, status: { [Op.ne]: "cancelled" } }, transaction })) throw workflowConflict();
     const beforeState = recordSnapshot(invoice);
-    await invoice.update({ amount: value, supplierInvoiceRef: String(req.body.supplierInvoiceRef ?? invoice.supplierInvoiceRef ?? "").trim() || null,
+    await invoice.update({ amount: value, supplierInvoiceRef: String(Object.hasOwn(req.body, 'supplierInvoiceRef') ? req.body.supplierInvoiceRef ?? '' : invoice.supplierInvoiceRef ?? '').trim() || null,
       status: "submitted", submittedAt: new Date(), remarks: null }, { transaction });
     await audit(actorAudit(req, { actionType: "invoice.resubmitted", entityRef: "invoice", entityId: invoice.id,
       summary: `${invoice.invoiceNo} corrected and resubmitted.`, beforeState, afterState: invoice.get({ plain: true }) }));
@@ -285,6 +294,7 @@ export const certifyInvoice = async (req, res) => {
   const { decision, remarks } = req.body;
   const invoice = await Invoice.findByPk(req.params.id, invoiceIncludes);
   if (!invoice) return res.status(404).json({ message: "Invoice not found." });
+  await assertOperationalContract(invoice.contractId);
   if (invoice.status !== "submitted") {
     return res.status(409).json({ message: `Cannot certify an invoice in "${invoice.status}".` });
   }
@@ -390,6 +400,7 @@ export const releasePayment = async (req, res) => {
     ],
   });
   if (!payment) return res.status(404).json({ message: "Disbursement not found." });
+  await assertOperationalContract(payment.invoice?.contractId);
   if (payment.status !== "prepared") {
     return res.status(409).json({ message: `Cannot release a disbursement in "${payment.status}".` });
   }

@@ -6,7 +6,9 @@ const project = () => ({ id: 1, projectTitle: 'Procurement of Disaster Response 
 test('completed scenario preserves official state, money and records without mutation', () => {
   const original = project(); const before = structuredClone(original);
   const result = applyProjectDemonstration(original);
-  assert.equal(result.category, 'completed');
+  assert.equal(result.category, original.category);
+  assert.equal(result.phase, original.phase);
+  assert.equal(result.progressPercent, original.progressPercent);
   assert.equal(result.demonstration.actualClientStatus, 'Awarded / For implementation');
   assert.equal(result.demonstration.officialCategory, 'upcoming');
   assert.equal(result.demonstration.milestones.length, 8);

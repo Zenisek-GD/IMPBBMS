@@ -204,6 +204,11 @@ export const exportAuditLog = async (req, res) => {
     `# generated: ${new Date().toISOString()}`,
     `# entries: ${verification.entriesChecked}`,
     `# chain intact: ${verification.intact}`,
+    ...(verification.archivedHistory ? [
+      `# current entries checked against their original hashes: ${verification.currentEntriesChecked}`,
+      `# older entries checked against the saved archive: ${verification.archivedHistory.entriesChecked}`,
+      `# original hashes unverifiable within the archive: ${verification.archivedHistory.originalHashMismatches}`,
+    ] : []),
     `# head hash: ${verification.headHash}`,
   ].join("\n");
 

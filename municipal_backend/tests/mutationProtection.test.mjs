@@ -7,7 +7,7 @@ import { createMutationAdapter } from '../../municipal-frontend/src/api/mutation
 after(() => sequelize.close());
 const request = (body = { amount: 100 }, overrides = {}) => ({ method: 'POST', originalUrl: '/api/finance/payments/1/release',
   currentUser: { id: 1, departmentId: 2, Role: { id: 3, key: 'treasurer' } }, permissions: new Set(['payment.release']),
-  get: () => 'approved_action_reference_123', is: () => true, body, ...overrides });
+  get: name => name === 'X-Confirm-Incomplete-Information' ? 'true' : 'approved_action_reference_123', is: () => true, body, ...overrides });
 const response = () => ({ statusCode: 200, headers: {}, status(code) { this.statusCode = code; return this; },
   set(key, value) { this.headers[key] = value; return this; }, json(value) { this.body = value; return this; } });
 const receipts = () => {

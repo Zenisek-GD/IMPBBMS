@@ -1,3 +1,4 @@
+import OptionalWorkflowInput from '../../components/ui/OptionalWorkflowInput'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Plus, FileText, Eye, Save, History, Archive, ArrowLeft, AlertTriangle, Braces, Check, Upload,
@@ -233,7 +234,7 @@ function TemplateEditor({ template, options, onBack, onSaved }) {
               </label>
               <label className="text-xs text-text-secondary">
                 Description
-                <input value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${inputClass}`} />
+                <OptionalWorkflowInput value={description} onChange={(e) => setDescription(e.target.value)} className={`mt-1 ${inputClass}`} />
               </label>
               <label className="text-xs text-text-secondary">
                 Page size
@@ -429,7 +430,7 @@ function ImportTemplateModal({ options, onClose, onImported }) {
         </label>
         <label className="text-xs text-text-secondary">
           Description <span className="text-text-faint">(optional)</span>
-          <input value={description} onChange={(event) => setDescription(event.target.value)} className={`mt-1 ${inputClass}`} />
+          <OptionalWorkflowInput value={description} onChange={(event) => setDescription(event.target.value)} className={`mt-1 ${inputClass}`} />
         </label>
         <label className="text-xs text-text-secondary">
           HTML template file

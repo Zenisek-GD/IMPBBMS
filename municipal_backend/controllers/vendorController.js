@@ -15,6 +15,7 @@ import { issueActivationToken } from "../services/activation.js";
 import { sendActivationInvitation } from "../services/mailer.js";
 import { activationTtlHours } from "../config/mail.js";
 import { parseListParams, pageEnvelope, searchCondition } from "../services/listQuery.js";
+import { missingOptionalValue } from "../services/procurementInformation.js";
 
 const withIncludes = {
   include: [
@@ -233,6 +234,7 @@ export const recordCounterSubmission = async (req, res) => {
     documents,
     announcementId,
     receivedAt,
+    returnedReferenceCode,
   } = req.body ?? {};
 
   const errors = {};
@@ -245,14 +247,13 @@ export const recordCounterSubmission = async (req, res) => {
   const cleanContactPerson = String(contactPerson ?? "").trim();
   if (!cleanContactPerson) errors.contactPerson = "An authorized contact person is required.";
 
-  // The address every later step is bound to: the account Admin/IT creates
-  // carries it, the activation link goes to it, and the one-time code that proves
-  // ownership goes to it. Wrong here means an approved bidder who can never be
-  // given access, so it is required even though the submission is on paper.
-  const email = String(contactEmail ?? "").trim().toLowerCase();
-  if (!email) errors.contactEmail = "An active email address is required.";
-  else if (!EMAIL_PATTERN.test(email)) errors.contactEmail = "Enter a valid email address.";
-  else if (email.length > 190) errors.contactEmail = "That email address is too long.";
+  // The counter can record papers before an email is supplied. Accreditation
+  // and account creation still require the address the bidder can verify.
+  const email = missingOptionalValue(contactEmail) ? null : String(contactEmail).trim().toLowerCase();
+  if (email && !EMAIL_PATTERN.test(email)) errors.contactEmail = "Enter a valid email address.";
+  else if (email && email.length > 190) errors.contactEmail = "That email address is too long.";
+  const returnedRef = String(returnedReferenceCode ?? "").trim();
+  if (returnedRef.length > 24) errors.returnedReferenceCode = "Enter the reference on the returned intake record.";
 
   if (organizationType && !ORGANIZATION_TYPES.includes(organizationType)) {
     errors.organizationType = "Choose a valid organization type.";
@@ -284,12 +285,23 @@ export const recordCounterSubmission = async (req, res) => {
   // Unlike the old public form, this refusal is reported plainly: the caller is
   // an officer who is entitled to know the bidder is already on file, and who
   // needs to be sent to the existing record rather than creating a duplicate.
-  const [existing, existingAccount] = await Promise.all([
+  const [existing, existingAccount, referencedReturn] = await Promise.all([
     Vendor.findOne({
-      where: { contactEmail: email, registrationStatus: { [Op.in]: ["submitted", "verified"] } },
+      where: {
+        [Op.or]: [
+          ...(email ? [{ contactEmail: email }] : []),
+          { businessName: cleanBusinessName, ...(email && { contactEmail: null }) },
+        ],
+        registrationStatus: { [Op.in]: ["submitted", "verified"] },
+      },
     }),
-    User.findOne({ where: { email } }),
+    email ? User.findOne({ where: { email } }) : null,
+    returnedRef ? Vendor.findOne({ where: { referenceCode: returnedRef, registrationStatus: "returned", businessName: cleanBusinessName } }) : null,
   ]);
+  if (returnedRef && !referencedReturn) return res.status(400).json({
+    message: "The reference must match a returned registration for this registered business name.",
+    errors: { returnedReferenceCode: "Check the returned reference and business name." },
+  });
 
   if (existing) {
     return res.status(409).json({
@@ -308,9 +320,17 @@ export const recordCounterSubmission = async (req, res) => {
 
   // A previously returned application is amended in place, so the review history
   // of that business stays on one record.
-  const returned = await Vendor.findOne({
+  const returnedByEmail = email ? await Vendor.findOne({
     where: { contactEmail: email, registrationStatus: "returned" },
-  });
+  }) : null;
+  if ((referencedReturn?.contactEmail && referencedReturn.contactEmail !== email)
+    || (referencedReturn && returnedByEmail && referencedReturn.id !== returnedByEmail.id)) {
+    return res.status(409).json({ message: "The email and reference identify different registration records." });
+  }
+  const returned = referencedReturn ?? returnedByEmail;
+  if (!returned && await Vendor.findOne({ where: { businessName: cleanBusinessName, contactEmail: null, registrationStatus: "returned" } })) {
+    return res.status(409).json({ message: "Enter the existing returned registration reference to update that intake record." });
+  }
 
   let call = null;
   if (announcementId) {
@@ -351,9 +371,12 @@ export const recordCounterSubmission = async (req, res) => {
     reviewedByUserId: null,
   };
 
-  const vendor = await sequelize.transaction(async (transaction) => {
+  const late = call?.registrationDeadline ? received > new Date(call.registrationDeadline) : false;
+  const vendor = await withAuditTransaction(async (transaction, audit) => {
     let record;
     if (returned) {
+      await returned.reload({ transaction, lock: transaction.LOCK.UPDATE });
+      if (returned.registrationStatus !== "returned") throw workflowError("The returned registration has already changed. Reload the intake record.");
       await returned.update(profile, { transaction });
       record = returned;
     } else {
@@ -382,33 +405,27 @@ export const recordCounterSubmission = async (req, res) => {
       { transaction }
     );
 
+    await audit(actorAudit(req, {
+      actionType: AUDIT_ACTIONS.BIDDER_REQUIREMENTS_SUBMITTED,
+      entityRef: "vendor",
+      entityId: record.id,
+      summary: `Counter submission recorded for ${cleanBusinessName} (${referenceCode})`,
+      afterState: {
+        referenceCode,
+        businessName: cleanBusinessName,
+        contactEmail: email,
+        organizationType: profile.organizationType,
+        philgepsRegistrationNo: profile.philgepsRegistrationNo,
+        documentsReceived: declared.length,
+        receivedAt: received,
+        resubmission: Boolean(returned),
+        announcementId: call?.id ?? null,
+        announcementTitle: call?.title ?? null,
+        registrationDeadline: call?.registrationDeadline ?? null,
+        receivedAfterDeadline: late,
+      },
+    }));
     return record;
-  });
-
-  const late = call?.registrationDeadline
-    ? received > new Date(call.registrationDeadline)
-    : false;
-
-  await auditFromRequest(req, {
-    actionType: AUDIT_ACTIONS.BIDDER_REQUIREMENTS_SUBMITTED,
-    entityRef: "vendor",
-    entityId: vendor.id,
-    summary: `Counter submission recorded for ${cleanBusinessName} (${referenceCode})`,
-    afterState: {
-      referenceCode,
-      businessName: cleanBusinessName,
-      contactEmail: email,
-      organizationType: profile.organizationType,
-      philgepsRegistrationNo: profile.philgepsRegistrationNo,
-      documentsReceived: declared.length,
-      receivedAt: received,
-      resubmission: Boolean(returned),
-      announcementId: call?.id ?? null,
-      announcementTitle: call?.title ?? null,
-      registrationDeadline: call?.registrationDeadline ?? null,
-      // On the record because it is the fact a protest would turn on.
-      receivedAfterDeadline: late,
-    },
   });
 
   res.status(201).json({
