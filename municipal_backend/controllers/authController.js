@@ -12,6 +12,7 @@ import { sendPasswordChangedEmail } from "../services/mailer.js";
 import { PENDING_MFA_TTL_MS, credentialVersion, sessionDetails, roleRequiresTwoFactor } from "../services/authPolicy.js";
 import { startLoginSession, destroyLoginSession, regenerateSession, saveSession } from "../services/loginSession.js";
 import { findTrustedDevice, securityAudit } from "../services/trustedDevices.js";
+import { protectedPasswordMessage } from "../services/surveySandbox.js";
 
 // Permissions travel with the session user so the UI can hide actions the
 // caller cannot perform. The server still enforces them independently — this
@@ -209,6 +210,9 @@ export const requestPasswordChange = async (req, res) => {
   const user = await activeSessionUser(req);
   if (!user) return res.status(401).json({ message: "Not authenticated." });
 
+  const lockedMessage = protectedPasswordMessage(user.email);
+  if (lockedMessage) return res.status(403).json({ message: lockedMessage });
+
   const { currentPassword } = req.body ?? {};
   if (!currentPassword) {
     return res.status(400).json({ message: "Your current password is required." });
@@ -306,6 +310,9 @@ export const verifyPasswordChangeCode = async (req, res) => {
 export const changeOwnPassword = async (req, res) => {
   const user = await activeSessionUser(req);
   if (!user) return res.status(401).json({ message: "Not authenticated." });
+
+  const lockedMessage = protectedPasswordMessage(user.email);
+  if (lockedMessage) return res.status(403).json({ message: lockedMessage });
 
   const { currentPassword, newPassword, reference, ticket } = req.body ?? {};
   if (!currentPassword || !newPassword) {

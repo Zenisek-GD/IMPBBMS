@@ -15,6 +15,7 @@
     "seed": "node seed.js",
     "seed:demo": "node seedDemo.js",
     "seed:completed": "node seedDemo.js --completed-project",
+    "seed:survey": "node scripts/seedSurveyDemo.mjs",
     "reset:workflow": "node resetDemoData.js",
     "reset:v2": "node resetV2.js",
     "backup:system": "node scripts/backupSystem.mjs",

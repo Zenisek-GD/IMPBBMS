@@ -8,6 +8,7 @@ import {
 } from "../services/authPolicy.js";
 import { withAuditTransaction, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { SystemSetting, SETTING_KEYS, getSessionDurationMinutes } from "../models/systemSettingModel.js";
+import { protectedRoleMfaMessage } from "../services/surveySandbox.js";
 
 const describePolicy = async () => {
   const roles = await Role.findAll({
@@ -86,6 +87,8 @@ export const updateAuthenticationSecurity = async (req, res) => {
   if (applyMode != null && !["nextLogin", "forceReauthentication"].includes(applyMode)) {
     return res.status(400).json({ message: "Choose Apply on Next Login or Force Re-Authentication Now." });
   }
+  const lockedMessage = protectedRoleMfaMessage(updates);
+  if (lockedMessage) return res.status(403).json({ message: lockedMessage });
   let reauthenticationRequired = false;
   try {
     await withAuditTransaction(async (transaction, audit) => {

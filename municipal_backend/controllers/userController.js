@@ -8,6 +8,7 @@ import { auditFromRequest, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { issueActivationToken } from "../services/activation.js";
 import { sendActivationInvitation } from "../services/mailer.js";
 import { parseListParams, pageEnvelope } from "../services/listQuery.js";
+import { protectedPasswordMessage, protectedUserMutationMessage } from "../services/surveySandbox.js";
 
 const serialize = (user) => ({
   id: user.id,
@@ -202,6 +203,8 @@ export const updateUser = async (req, res) => {
   const { name, email, roleId, status, departmentId } = req.body;
   const user = await User.findByPk(req.params.id, { include: [Role, Department] });
   if (!user) return res.status(404).json({ message: "User not found." });
+  const lockedMessage = protectedUserMutationMessage(user, req.body);
+  if (lockedMessage) return res.status(403).json({ message: lockedMessage });
 
   // Guard against an administrator locking themselves out of the console.
   const isSelf = user.id === req.currentUser.id;
@@ -298,6 +301,8 @@ export const updateUser = async (req, res) => {
 export const resetUserPassword = async (req, res) => {
   const user = await User.findByPk(req.params.id, { include: [Role] });
   if (!user) return res.status(404).json({ message: "User not found." });
+  const lockedMessage = protectedPasswordMessage(user.email);
+  if (lockedMessage) return res.status(403).json({ message: lockedMessage });
 
   if (user.id === req.currentUser.id) {
     return res.status(400).json({

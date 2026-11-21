@@ -4,6 +4,7 @@ import { otpTtlMinutes } from "../config/mail.js";
 import { issueOtp, verifyOtp, consumeTicket, serializeChallenge, maskEmail } from "../services/otp.js";
 import { recordAudit, AUDIT_ACTIONS } from "../services/auditLog.js";
 import { sendPasswordChangedEmail } from "../services/mailer.js";
+import { protectedPasswordMessage } from "../services/surveySandbox.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Workflow requirement 9: forgotten-password recovery, gated on a one-time code
@@ -63,6 +64,8 @@ export const forgotPassword = async (req, res) => {
   if (!email) {
     return res.status(400).json({ message: "Email is required." });
   }
+  const lockedMessage = protectedPasswordMessage(email);
+  if (lockedMessage) return res.status(403).json({ message: lockedMessage });
 
   const user = await User.findOne({ where: { email } });
 
@@ -175,6 +178,8 @@ export const verifyResetCode = async (req, res) => {
 export const resetPassword = async (req, res) => {
   const { reference, ticket, password } = req.body ?? {};
   const email = normaliseEmail(req.body?.email);
+  const lockedMessage = protectedPasswordMessage(email);
+  if (lockedMessage) return res.status(403).json({ message: lockedMessage });
 
   const passwordError = validatePassword(password);
   if (passwordError) return res.status(400).json({ message: passwordError });
